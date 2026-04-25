@@ -1,0 +1,12 @@
+-r requirements.txt
+
+# Development and notebooks
+jupyter
+ipykernel
+ipywidgets
+
+# Testing and quality
+pytest
+httpx
+ruff
+

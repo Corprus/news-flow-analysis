@@ -1,0 +1,21 @@
+# Service
+fastapi
+uvicorn[standard]
+pydantic-settings
+
+# Database
+SQLAlchemy
+alembic
+psycopg[binary]
+
+# Data processing and ML
+numpy
+pandas
+pyarrow
+scikit-learn
+datasets
+sentence-transformers
+faiss-cpu
+tqdm
+jsonlines
+
