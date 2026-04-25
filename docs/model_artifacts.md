@@ -12,7 +12,13 @@
 models/ru-news-mpnet-paraphrase-mnrl/final
 ```
 
-Модель создаётся в ноутбуке:
+Модель создаётся скриптом:
+
+```text
+scripts/train_embeddings.py
+```
+
+Экспериментальный прототип обучения находится в ноутбуке:
 
 ```text
 notebooks/01_train_embeddings.ipynb
