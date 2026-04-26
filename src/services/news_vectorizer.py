@@ -23,7 +23,8 @@ class NewsVectorizer:
             if not model_path.exists():
                 raise FileNotFoundError(
                     "Fine-tuned sentence-transformers model was not found at "
-                    f"{model_path}. Run scripts/train_embeddings.py first or set MODEL_NAME_OR_PATH."
+                    f"{model_path}. Run scripts/train_embeddings.py first "
+                    "or set MODEL_NAME_OR_PATH."
                 )
             model_name_or_path = str(model_path)
         else:

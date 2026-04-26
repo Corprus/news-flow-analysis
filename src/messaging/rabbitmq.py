@@ -5,7 +5,6 @@ from typing import Any
 import aio_pika
 from aio_pika.abc import AbstractIncomingMessage, AbstractRobustConnection
 
-
 MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 

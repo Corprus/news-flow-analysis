@@ -6,7 +6,10 @@ import argparse
 import json
 import random
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from datasets import DatasetDict
 
 
 DEFAULT_DATASET_NAME = "merionum/ru_paraphraser"
