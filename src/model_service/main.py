@@ -27,7 +27,7 @@ async def handle_news_vectorization_job(app: FastAPI, message: dict[str, Any]) -
 async def lifespan(app: FastAPI):
     settings = get_settings()
     repository = NewsVectorizationJobRepository(settings.database_url)
-    model = NewsVectorizer(settings.model_name_or_path)
+    model = NewsVectorizer(settings.model_source)
 
     await repository.initialize()
     await model.load()
@@ -56,5 +56,6 @@ async def health(request: Request) -> dict[str, str]:
         "status": "ok",
         "service": "model-service",
         "model_loaded": str(model.is_loaded).lower(),
-        "model_name_or_path": model.model_name_or_path,
+        "model_source": model.model_source,
+        "resolved_model_source": model.resolved_model_source,
     }

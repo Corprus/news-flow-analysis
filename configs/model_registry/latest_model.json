@@ -1,0 +1,14 @@
+{
+  "repo_id": "Korprus/news-flow-ru-vectorization-mpnet",
+  "repo_type": "model",
+  "model_revision": "789ab95331d9abc4f5f23d1e3d5d24bb8af28086",
+  "commit_hash": "789ab95331d9abc4f5f23d1e3d5d24bb8af28086",
+  "commit_url": "https://huggingface.co/Korprus/news-flow-ru-vectorization-mpnet/commit/789ab95331d9abc4f5f23d1e3d5d24bb8af28086",
+  "revision": null,
+  "tag": null,
+  "version": null,
+  "local_model_path": "models/news-flow-ru-vectorization-mpnet/final",
+  "docker_model_dir": "/app/models/news-flow-ru-vectorization-mpnet/final",
+  "model_dir": "models/news-flow-ru-vectorization-mpnet/final",
+  "published_at": "2026-04-26T15:25:16Z"
+}

@@ -61,6 +61,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--logging-steps", type=int, default=50)
     parser.add_argument("--negative-sample-size", type=int, default=2000)
     parser.add_argument("--skip-evaluation", action="store_true")
+    parser.add_argument("--push-to-hub", action="store_true")
+    parser.add_argument("--hub-model-id", default=None)
+    parser.add_argument("--hub-private", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--hub-revision", default=None)
+    parser.add_argument("--hub-tag", default=None)
+    parser.add_argument(
+        "--hub-auto-tag",
+        choices=["none", "patch", "minor", "major"],
+        default="patch",
+    )
+    parser.add_argument("--hub-tag-message", default=None)
+    parser.add_argument(
+        "--hub-metadata-path",
+        type=Path,
+        default=project_root / "configs" / "model_registry" / "latest_model.json",
+    )
+    parser.add_argument(
+        "--hub-docker-model-dir",
+        default="/app/models/news-flow-ru-vectorization-mpnet/final",
+    )
+    parser.add_argument("--skip-hub-metadata", action="store_true")
+    parser.add_argument(
+        "--hub-commit-message",
+        default="Upload fine-tuned sentence-transformers model",
+    )
     return parser.parse_args()
 
 
@@ -283,6 +308,32 @@ def write_metrics(metrics_path: Path, metrics: dict[str, Any]) -> None:
     print(f"Saved metrics to: {metrics_path}")
 
 
+def push_model_to_hub(final_model_path: Path, args: argparse.Namespace) -> None:
+    if not args.hub_model_id:
+        raise ValueError("--hub-model-id is required when --push-to-hub is set")
+
+    from publish_model import publish_model, resolve_tag, write_metadata
+
+    tag = resolve_tag(args.hub_tag, args.hub_auto_tag, args.hub_metadata_path)
+    published_model = publish_model(
+        model_dir=final_model_path,
+        repo_id=args.hub_model_id,
+        revision=args.hub_revision,
+        tag=tag,
+        tag_message=args.hub_tag_message,
+        private=args.hub_private,
+        commit_message=args.hub_commit_message,
+        docker_model_dir=args.hub_docker_model_dir,
+    )
+    if not args.skip_hub_metadata:
+        write_metadata(args.hub_metadata_path, published_model)
+
+    print(f"Uploaded model to Hugging Face Hub: {published_model.commit_url}")
+    print(f"Model commit hash: {published_model.commit_hash}")
+    if published_model.tag:
+        print(f"Model tag: {published_model.tag}")
+
+
 def main() -> None:
     from sentence_transformers import SentenceTransformer
     from sklearn.model_selection import train_test_split
@@ -314,31 +365,33 @@ def main() -> None:
 
     final_model_path = fine_tune_model(train_dataset, args)
 
-    if args.skip_evaluation:
-        return
+    if not args.skip_evaluation:
+        queries, candidates, target_indices = build_retrieval_eval_data(
+            train_df=train_df,
+            eval_pairs_df=eval_pairs_df,
+            text1_col=text1_col,
+            text2_col=text2_col,
+            label_col=label_col,
+            negative_sample_size=args.negative_sample_size,
+            seed=args.seed,
+        )
+        base_model = SentenceTransformer(args.base_model)
+        fine_tuned_model = SentenceTransformer(str(final_model_path))
+        metrics = {
+            "base": evaluate_retrieval(base_model, queries, candidates, target_indices),
+            "fine_tuned": evaluate_retrieval(
+                fine_tuned_model,
+                queries,
+                candidates,
+                target_indices,
+            ),
+        }
+        print(metrics)
+        write_metrics(args.output_dir / "metrics.json", metrics)
 
-    queries, candidates, target_indices = build_retrieval_eval_data(
-        train_df=train_df,
-        eval_pairs_df=eval_pairs_df,
-        text1_col=text1_col,
-        text2_col=text2_col,
-        label_col=label_col,
-        negative_sample_size=args.negative_sample_size,
-        seed=args.seed,
-    )
-    base_model = SentenceTransformer(args.base_model)
-    fine_tuned_model = SentenceTransformer(str(final_model_path))
-    metrics = {
-        "base": evaluate_retrieval(base_model, queries, candidates, target_indices),
-        "fine_tuned": evaluate_retrieval(
-            fine_tuned_model,
-            queries,
-            candidates,
-            target_indices,
-        ),
-    }
-    print(metrics)
-    write_metrics(args.output_dir / "metrics.json", metrics)
+    if args.push_to_hub:
+        push_model_to_hub(final_model_path, args)
+        return
 
 
 if __name__ == "__main__":
