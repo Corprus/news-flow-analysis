@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=project_root / "models" / "ru-news-mpnet-paraphrase-mnrl",
+        default=project_root / "models" / "news-flow-ru-vectorization-mpnet",
     )
     parser.add_argument("--epochs", type=float, default=1)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -292,7 +292,7 @@ def main() -> None:
     text1_col, text2_col, label_col = detect_columns(train_df)
     train_df[label_col] = train_df[label_col].astype(int)
 
-    # Скрипт повторяет notebooks/01_train_embeddings.ipynb, но без
+    # Скрипт повторяет experiments/01_train_embeddings.ipynb, но без
     # исследовательских ячеек: здесь оставлен только воспроизводимый pipeline.
     positive_df = prepare_positive_pairs(
         train_df=train_df,

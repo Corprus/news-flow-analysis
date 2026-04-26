@@ -11,7 +11,7 @@ scripts/train_embeddings.py
 Скрипт вынесен из экспериментального ноутбука:
 
 ```text
-notebooks/01_train_embeddings.ipynb
+experiments/01_train_embeddings.ipynb
 ```
 
 Ноутбук можно использовать для пошагового анализа и проверки идей. Скрипт предназначен для воспроизводимого запуска обучения.
@@ -42,7 +42,7 @@ python scripts/train_embeddings.py --skip-evaluation
 По умолчанию финальная модель сохраняется в:
 
 ```text
-models/ru-news-mpnet-paraphrase-mnrl/final
+models/news-flow-ru-vectorization-mpnet/final
 ```
 
 Директория `models/` не хранится в Git.
