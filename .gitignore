@@ -211,6 +211,11 @@ data/raw/
 data/prepared/
 models/
 artifacts/
+.hf-cache/
+.hf-download-test/
+.pip-tmp/
+.tmp/
+token.local
 *.npy
 *.npz
 *.faiss

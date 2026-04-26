@@ -21,12 +21,23 @@ class Settings(BaseSettings):
         default="news_vectorization.jobs",
         alias="NEWS_VECTORIZATION_QUEUE",
     )
-    model_name_or_path: str = Field(
-        default="/app/models/news-flow-ru-vectorization-mpnet/final",
-        alias="MODEL_NAME_OR_PATH",
+    use_local_model: bool = Field(default=False, alias="USE_LOCAL_MODEL")
+    local_model_source: str = Field(
+        default="models/news-flow-ru-vectorization-mpnet/final",
+        alias="LOCAL_MODEL_SOURCE",
+    )
+    remote_model_source: str = Field(
+        default="configs/model_registry/latest_model.json",
+        alias="REMOTE_MODEL_SOURCE",
     )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @property
+    def model_source(self) -> str:
+        if self.use_local_model:
+            return self.local_model_source
+        return self.remote_model_source
 
     @property
     def database_url(self) -> str:

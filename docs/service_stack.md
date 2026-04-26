@@ -9,13 +9,15 @@ Docker Compose starts:
 - `postgres`: PostgreSQL with the `pgvector` extension.
 
 The model service loads the fine-tuned `sentence-transformers` model on startup.
-By default it expects the model produced by `scripts/train_embeddings.py` at:
+By default it uses the remote model registry source:
 
 ```text
-models/news-flow-ru-vectorization-mpnet/final
+REMOTE_MODEL_SOURCE=/app/configs/model_registry/latest_model.json
 ```
 
-Set `MODEL_NAME_OR_PATH` to a HuggingFace repo id later when the model is published.
+Set `USE_LOCAL_MODEL=true` to use `LOCAL_MODEL_SOURCE` instead. The remote source can be
+a model registry JSON or a Hugging Face model reference; the local source should be a
+container-visible model directory.
 
 Main commands:
 
