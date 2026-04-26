@@ -9,19 +9,25 @@
 Текущая дообученная модель `sentence-transformers` ожидается по пути:
 
 ```text
-models/ru-news-mpnet-paraphrase-mnrl/final
+models/news-flow-ru-vectorization-mpnet/final
 ```
 
-Модель создаётся в ноутбуке:
+Модель создаётся скриптом:
 
 ```text
-notebooks/01_train_embeddings.ipynb
+scripts/train_embeddings.py
+```
+
+Экспериментальный прототип обучения находится в ноутбуке:
+
+```text
+experiments/01_train_embeddings.ipynb
 ```
 
 Модель используется в ноутбуке:
 
 ```text
-notebooks/02_lenta_event_grouping.ipynb
+experiments/02_lenta_event_grouping.ipynb
 ```
 
 ## Описание модели

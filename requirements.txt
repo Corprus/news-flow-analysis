@@ -2,6 +2,7 @@
 fastapi
 uvicorn[standard]
 pydantic-settings
+aio-pika
 
 # Database
 SQLAlchemy
@@ -15,7 +16,7 @@ pyarrow
 scikit-learn
 datasets
 sentence-transformers
+accelerate
 faiss-cpu
 tqdm
 jsonlines
-

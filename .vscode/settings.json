@@ -1,0 +1,5 @@
+{
+  "python.defaultInterpreterPath": "E:\\Mamba\\envs\\ml-gpu\\python.exe",
+  "python.envFile": "${workspaceFolder}/.env",
+  "python.terminal.useEnvFile": true
+}

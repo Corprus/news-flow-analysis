@@ -12,7 +12,7 @@
 - base: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`
 - fine-tuning: metric learning на парафразах.
 - фактически использован `MultipleNegativesRankingLoss`; Triplet Loss рассматривается как возможное расширение.
-- сохранена в `models/ru-news-mpnet-paraphrase-mnrl/final`.
+- сохранена в `models/news-flow-ru-vectorization-mpnet/final`.
 - веса модели не хранятся в Git; политика хранения описана в `docs/model_artifacts.md`.
 
 Оценка:

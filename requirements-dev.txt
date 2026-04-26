@@ -1,6 +1,6 @@
 -r requirements.txt
 
-# Development and notebooks
+# Development and experiments
 jupyter
 ipykernel
 ipywidgets
@@ -9,4 +9,3 @@ ipywidgets
 pytest
 httpx
 ruff
-

@@ -4,13 +4,13 @@
 
 ## Основные директории
 
-- `notebooks/` — экспериментальные ноутбуки.
-- `src/news_event_detection/` — код Python-сервиса и основная бизнес-логика.
+- `experiments/` — экспериментальные ноутбуки.
+- `src/` — код Python-сервисов и основная бизнес-логика.
 - `tests/` — автоматические тесты.
 - `tests/fixtures/` — небольшие тестовые примеры данных.
 - `docs/` — дополнительная проектная документация.
 - `configs/` — конфигурационные файлы.
-- `scripts/` — вспомогательные скрипты.
+- `scripts/` — вспомогательные скрипты, включая запуск дообучения embedding-модели.
 - `docker/` — файлы для контейнеризации и будущего `docker-compose`.
 - `.github/workflows/` — будущие CI/CD workflows.
 
@@ -27,18 +27,20 @@
 
 Подробное описание ожидаемых данных находится в `data/README.md`.
 
-## Ноутбуки
+## Эксперименты
 
-- `notebooks/01_train_embeddings.ipynb` — дообучение embedding-модели на парафразах.
-- `notebooks/02_lenta_event_grouping.ipynb` — эксперименты с Lenta.ru, FAISS и группировкой новостей в события.
+- `experiments/01_train_embeddings.ipynb` — дообучение embedding-модели на парафразах.
+- `experiments/02_lenta_event_grouping.ipynb` — эксперименты с Lenta.ru, FAISS и группировкой новостей в события.
 
 ## Python-сервис
 
 Предполагаемая структура пакета:
 
-- `src/news_event_detection/api/` — HTTP API.
-- `src/news_event_detection/core/` — доменная логика: события, роли новостей, правила группировки.
-- `src/news_event_detection/db/` — работа с базой данных.
-- `src/news_event_detection/services/` — сервисный слой приложения.
+- `src/api/` — внешний HTTP API.
+- `src/model_service/` — внутренний сервис с загруженной моделью и RabbitMQ consumer.
+- `src/core/` — доменная логика: события, роли новостей, правила группировки.
+- `src/db/` — работа с базой данных.
+- `src/messaging/` — интеграции с очередями.
+- `src/services/` — сервисный слой приложения.
 
 На следующих этапах проект будет дополнен FastAPI-сервисом, PostgreSQL и запуском через `docker-compose`.
