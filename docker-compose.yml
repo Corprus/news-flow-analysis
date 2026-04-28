@@ -115,11 +115,28 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    environment:
+      API_BASE_URL: http://nginx/api
+    depends_on:
+      api:
+        condition: service_healthy
+    expose:
+      - "8501"
+    volumes:
+      - ./ui:/app
+    restart: unless-stopped
+
   nginx:
     image: nginx:1.27-alpine
     depends_on:
       api:
         condition: service_healthy
+      ui:
+        condition: service_started
     ports:
       - "${NGINX_PORT:-80}:80"
     volumes:

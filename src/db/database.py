@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.sql import text
 
 from settings import Settings
 
@@ -41,8 +42,12 @@ def get_engine() -> Engine:
 
 
 def create_tables() -> None:
+    import accounting.models  # noqa: F401
+    import news.models  # noqa: F401
     import users.models  # noqa: F401
 
+    with get_engine().begin() as connection:
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(bind=get_engine())
 
 

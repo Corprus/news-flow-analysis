@@ -1,3 +1,4 @@
+from decimal import Decimal
 from functools import lru_cache
 from urllib.parse import quote
 
@@ -34,6 +35,8 @@ class Settings(BaseSettings):
         default=60 * 24,
         alias="ACCESS_TOKEN_TTL_MINUTES",
     )
+    news_add_cost: Decimal = Field(default=Decimal("1.00"), alias="NEWS_ADD_COST")
+    news_search_cost: Decimal = Field(default=Decimal("1.00"), alias="NEWS_SEARCH_COST")
     use_local_model: bool = Field(default=False, alias="USE_LOCAL_MODEL")
     local_model_source: str = Field(
         default="models/news-flow-ru-vectorization-mpnet/final",
