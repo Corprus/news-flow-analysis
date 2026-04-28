@@ -1,5 +1,10 @@
 line-length = 100
 target-version = "py311"
+src = [
+  "src",
+  "tests",
+  "ui",
+]
 extend-exclude = [
   "experiments",
 ]
@@ -11,4 +16,19 @@ select = [
   "I",
   "UP",
   "B",
+]
+
+[lint.isort]
+known-first-party = [
+  "accounting",
+  "api",
+  "core",
+  "db",
+  "messaging",
+  "model_registry",
+  "model_service",
+  "news",
+  "services",
+  "settings",
+  "users",
 ]

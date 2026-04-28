@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 
 import pandas as pd
 import streamlit as st
+
 from api_client import ApiClient, ApiError
 
 API_INTERNAL = os.getenv("API_BASE_URL", "http://nginx/api")

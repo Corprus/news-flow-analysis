@@ -209,7 +209,7 @@ __marimo__/
 
 data/raw/
 data/prepared/
-models/
+/models/
 artifacts/
 .hf-cache/
 .hf-download-test/
