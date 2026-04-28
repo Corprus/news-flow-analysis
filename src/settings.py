@@ -1,3 +1,4 @@
+from decimal import Decimal
 from functools import lru_cache
 from urllib.parse import quote
 
@@ -21,6 +22,21 @@ class Settings(BaseSettings):
         default="news_vectorization.jobs",
         alias="NEWS_VECTORIZATION_QUEUE",
     )
+    sqlalchemy_echo: bool = Field(default=False, alias="SQLALCHEMY_ECHO")
+    password_hash_secret: str = Field(
+        default="change-me-local-password-secret",
+        alias="PASSWORD_HASH_SECRET",
+    )
+    access_token_secret: str = Field(
+        default="change-me-local-access-token-secret",
+        alias="ACCESS_TOKEN_SECRET",
+    )
+    access_token_ttl_minutes: int = Field(
+        default=60 * 24,
+        alias="ACCESS_TOKEN_TTL_MINUTES",
+    )
+    news_add_cost: Decimal = Field(default=Decimal("1.00"), alias="NEWS_ADD_COST")
+    news_search_cost: Decimal = Field(default=Decimal("1.00"), alias="NEWS_SEARCH_COST")
     use_local_model: bool = Field(default=False, alias="USE_LOCAL_MODEL")
     local_model_source: str = Field(
         default="models/news-flow-ru-vectorization-mpnet/final",
@@ -47,6 +63,10 @@ class Settings(BaseSettings):
             f"postgresql://{user}:{password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
+
+    @property
+    def sqlalchemy_database_url(self) -> str:
+        return self.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
     @property
     def rabbitmq_url(self) -> str:
