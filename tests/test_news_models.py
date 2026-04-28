@@ -8,6 +8,7 @@ def test_news_storage_tables_are_registered() -> None:
         "news_sources",
         "news_articles",
         "article_embeddings",
+        "news_article_submissions",
         "news_events",
         "event_articles",
         "news_search_queries",

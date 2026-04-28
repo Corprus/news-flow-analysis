@@ -65,6 +65,19 @@ class NewsVectorizationJobRepository:
                 (json.dumps(result), job_id),
             )
 
+    async def mark_failed(self, job_id: str, error: str) -> None:
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            await connection.execute(
+                """
+                UPDATE news_vectorization_jobs
+                SET status = 'failed',
+                    result = %s::jsonb,
+                    updated_at = now()
+                WHERE id = %s
+                """,
+                (json.dumps({"error": error}), job_id),
+            )
+
     async def get(self, job_id: str) -> dict[str, Any] | None:
         async with await AsyncConnection.connect(self._database_url) as connection:
             async with connection.cursor() as cursor:

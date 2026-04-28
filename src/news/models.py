@@ -26,6 +26,7 @@ class Vector(UserDefinedType):
 class ArticleStatus(StrEnum):
     RAW = "raw"
     QUEUED = "queued"
+    PROCESSING = "processing"
     PARSED = "parsed"
     VECTORIZED = "vectorized"
     FAILED = "failed"
@@ -139,6 +140,10 @@ class NewsArticle(Base):
     )
 
     source: Mapped[NewsSource | None] = relationship(back_populates="articles")
+    submissions: Mapped[list[NewsArticleSubmission]] = relationship(
+        back_populates="article",
+        cascade="all, delete-orphan",
+    )
     embeddings: Mapped[list[ArticleEmbedding]] = relationship(
         back_populates="article",
         cascade="all, delete-orphan",
@@ -189,6 +194,40 @@ class ArticleEmbedding(Base):
             "model_revision",
             name="uq_article_embedding_model_revision",
         ),
+    )
+
+
+class NewsArticleSubmission(Base):
+    __tablename__ = "news_article_submissions"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        default=lambda: str(uuid4()),
+    )
+    article_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("news_articles.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    article: Mapped[NewsArticle] = relationship(back_populates="submissions")
+
+    __table_args__ = (
+        UniqueConstraint("article_id", "user_id", name="uq_news_article_submission_user"),
+        Index("ix_news_article_submissions_created_at", "created_at"),
     )
 
 

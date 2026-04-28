@@ -12,6 +12,7 @@ from news.models import (
     ArticleOrigin,
     ArticleStatus,
     NewsArticle,
+    NewsArticleSubmission,
     NewsSearchQuery,
     SearchQueryStatus,
 )
@@ -62,6 +63,7 @@ class NewsService:
         content_hash = hashlib.sha256(content.encode()).hexdigest()
         existing_article = self._find_existing_article(canonical_url, content_hash)
         if existing_article is not None:
+            self._add_submission(existing_article.id, user_id)
             return existing_article
 
         article = NewsArticle(
@@ -79,6 +81,7 @@ class NewsService:
         )
         self._session.add(article)
         self._session.flush()
+        self._add_submission(article.id, user_id)
         return article
 
     def create_search_query(
@@ -108,8 +111,9 @@ class NewsService:
     ) -> list[NewsArticle]:
         statement = (
             select(NewsArticle)
-            .where(NewsArticle.submitted_by_user_id == str(user_id))
-            .order_by(NewsArticle.fetched_at.desc())
+            .join(NewsArticleSubmission, NewsArticleSubmission.article_id == NewsArticle.id)
+            .where(NewsArticleSubmission.user_id == str(user_id))
+            .order_by(NewsArticleSubmission.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
@@ -148,3 +152,21 @@ class NewsService:
         return self._session.execute(
             select(NewsArticle).where(NewsArticle.content_hash == content_hash)
         ).scalars().first()
+
+    def _add_submission(self, article_id: str, user_id: UUID) -> None:
+        existing_submission = self._session.execute(
+            select(NewsArticleSubmission).where(
+                NewsArticleSubmission.article_id == article_id,
+                NewsArticleSubmission.user_id == str(user_id),
+            )
+        ).scalars().first()
+        if existing_submission is not None:
+            return
+
+        self._session.add(
+            NewsArticleSubmission(
+                article_id=article_id,
+                user_id=str(user_id),
+            )
+        )
+        self._session.flush()

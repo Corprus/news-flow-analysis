@@ -50,6 +50,9 @@ class NewsVectorizer:
     def _load_sentence_transformer(self, model_source: str) -> Any:
         from sentence_transformers import SentenceTransformer
 
+        if "@" in model_source and not self._looks_like_local_path(model_source):
+            repo_id, revision = model_source.rsplit("@", 1)
+            return SentenceTransformer(repo_id, revision=revision)
         return SentenceTransformer(model_source)
 
     async def vectorize_text(self, text: str) -> dict[str, Any]:
@@ -67,4 +70,5 @@ class NewsVectorizer:
             "model_source": self._model_source,
             "resolved_model_source": self._resolved_model_source,
             "embedding_dimensions": int(embedding.shape[0]),
+            "embedding": embedding.astype(float).tolist(),
         }
