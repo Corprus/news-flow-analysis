@@ -427,3 +427,5 @@
 - [Прототип системы структурирования новостей](docs/prototype.md)
 - [Артефакты модели](docs/model_artifacts.md)
 - [Структура репозитория](docs/repository_structure.md)
+- Таблица анализа конкурентов https://docs.google.com/spreadsheets/d/1STIw5aq3vndILmYzRmrNDFHVNLG3U70rHn-ArHCU7Vc/edit?usp=sharing
+- Презентация Benchmarking https://docs.google.com/presentation/d/1P8QJGBouNUP8FzOU4U8g0IyR6AQEfaQhhPPhtNAJksw/edit?usp=sharing
