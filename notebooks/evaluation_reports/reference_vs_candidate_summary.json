@@ -1,0 +1,53 @@
+{
+  "reference_name": "reference",
+  "candidate_name": "candidate",
+  "reference_path": "E:\\ML\\Projects\\Git\\news-flow-analysis\\data\\prepared\\lenta_golden_set_human.csv",
+  "candidate_path": "E:\\ML\\Projects\\Git\\news-flow-analysis\\data\\baseline\\lenta_baseline_predictions.csv",
+  "coverage": 1.0,
+  "multiclass_metrics": {
+    "novelty_accuracy": 0.3333333333333333,
+    "novelty_macro_f1": 0.17249857061177815,
+    "novelty_weighted_f1": 0.35959509330006756,
+    "cohen_kappa": 0.10176306835756255,
+    "novelty_comparable_rows": 66
+  },
+  "important_metrics": {
+    "important_update_precision": 1.0,
+    "important_update_recall": 0.25,
+    "important_update_f1": 0.4,
+    "important_update_support": 65,
+    "important_update_positive_support": 52
+  },
+  "cluster_metrics": {
+    "n_items": 121,
+    "total_pairs": 7260,
+    "tp_same_pairs": 133,
+    "fp_false_merge_pairs": 99,
+    "fn_false_split_pairs": 54,
+    "tn_different_pairs": 6974,
+    "reference_same_pairs": 187,
+    "candidate_same_pairs": 232,
+    "pairwise_precision": 0.5732758620689655,
+    "pairwise_recall": 0.7112299465240641,
+    "pairwise_f1": 0.6348448687350835,
+    "false_merge_rate": 0.4267241379310345,
+    "false_split_rate": 0.2887700534759358,
+    "adjusted_rand_index": 0.6241234012774891,
+    "normalized_mutual_info": 0.9211020687958718
+  },
+  "summary_values": {
+    "coverage": 1.0,
+    "pairwise_f1": 0.6348448687350835,
+    "false_merge_rate": 0.4267241379310345,
+    "false_split_rate": 0.2887700534759358,
+    "important_update_precision": 1.0,
+    "important_update_recall": 0.25,
+    "important_update_f1": 0.4,
+    "novelty_accuracy": 0.3333333333333333,
+    "novelty_macro_f1": 0.17249857061177815,
+    "novelty_weighted_f1": 0.35959509330006756,
+    "cohen_kappa": 0.10176306835756255,
+    "reference_needs_review_rate": 0.10743801652892562,
+    "candidate_needs_review_rate": 0.23140495867768596
+  }
+}

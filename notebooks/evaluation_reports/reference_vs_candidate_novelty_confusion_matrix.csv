@@ -1,0 +1,6 @@
+,cand:significant,cand:minor,cand:duplicate,cand:wrong_cluster,cand:unclear
+ref:significant,13,33,6,0,0
+ref:minor,0,8,0,0,0
+ref:duplicate,0,4,1,0,0
+ref:wrong_cluster,1,0,0,0,0
+ref:unclear,0,0,0,0,0
