@@ -1,0 +1,25 @@
+{
+  "embedding_model_name": "BAAI/bge-m3",
+  "embedding_batch_size": 16,
+  "normalize_embeddings": true,
+  "show_progress_bar": true,
+  "text_column": "model_text",
+  "id_column": "news_id",
+  "base_clustering": {
+    "story_threshold": 0.82,
+    "story_window_days": 14,
+    "use_topic_blocking": true,
+    "normalize_embeddings": true,
+    "cluster_prefix": "exp00b"
+  },
+  "attach_clustering": {
+    "min_similarity": 0.75,
+    "max_days": 7,
+    "min_margin": 0.03,
+    "source_max_cluster_size": 2,
+    "require_evidence": true,
+    "title_jaccard_threshold": 0.15,
+    "min_shared_numbers": 1,
+    "cluster_prefix": "exp10_src2_sim0.75_days7_m0.03_tj0.15_num1"
+  }
+}
