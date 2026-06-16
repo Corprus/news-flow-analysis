@@ -6,6 +6,7 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 
 from .embeddings import l2_normalize
 
@@ -173,6 +174,7 @@ def build_legacy_significance_features(
     text_column: str = "text",
     title_length_column: str = "title_length",
     text_length_column: str = "text_length",
+    show_progress: bool = False,
 ) -> pd.DataFrame:
     """Build the 18 legacy features used by the saved CatBoost model.
 
@@ -193,8 +195,14 @@ def build_legacy_significance_features(
 
     rows: list[dict] = []
     sorted_df = df.sort_values([cluster_column, date_column, "_row_pos"], kind="mergesort")
+    cluster_groups = list(sorted_df.groupby(cluster_column, sort=False, dropna=False))
 
-    for _, group in sorted_df.groupby(cluster_column, sort=False, dropna=False):
+    for _, group in tqdm(
+        cluster_groups,
+        total=len(cluster_groups),
+        desc="Build previous-only features",
+        disable=not show_progress,
+    ):
         history_indices: list[int] = []
         history_dates: list[pd.Timestamp] = []
         history_title_tokens: list[set[str]] = []

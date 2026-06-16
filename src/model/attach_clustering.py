@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from itertools import product
 import re
+import time
 
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 
 from .data import normalize_news_id
 from .embeddings import l2_normalize
@@ -146,6 +148,7 @@ def build_candidate_pairs(
     date_column: str = "published_at",
     title_column: str = "title",
     text_column: str = "text",
+    show_progress: bool = False,
 ) -> pd.DataFrame:
     """Строит пары-кандидаты для второго прохода attach.
 
@@ -167,12 +170,23 @@ def build_candidate_pairs(
     text_tokens = [tokenize_for_jaccard(value) for value in df[text_column].fillna("")]
     number_sets = [
         extract_numbers(row.get(title_column, ""), row.get(text_column, ""))
-        for _, row in df.iterrows()
+        for _, row in tqdm(
+            df.iterrows(),
+            total=len(df),
+            desc="Extract pair evidence",
+            disable=not show_progress,
+        )
     ]
 
     rows: list[dict] = []
+    topic_groups = list(df.groupby(topic_column, sort=False, dropna=False))
 
-    for topic, part in df.groupby(topic_column, sort=False, dropna=False):
+    for topic, part in tqdm(
+        topic_groups,
+        total=len(topic_groups),
+        desc="Build candidate pairs",
+        disable=not show_progress,
+    ):
         if len(part) <= 1:
             continue
 
@@ -225,6 +239,7 @@ def build_best_candidate_attach_clusters(
     candidate_pairs: pd.DataFrame,
     base_cluster_ids: pd.Series | np.ndarray | list,
     config: AttachClusteringConfig | None = None,
+    show_progress: bool = False,
 ) -> tuple[pd.Series, dict, pd.DataFrame]:
     """Второй проход кластеризации через conservative best-candidate attach.
 
@@ -266,7 +281,13 @@ def build_best_candidate_attach_clusters(
 
     rows: list[dict] = []
 
-    for _, pair in pairs.iterrows():
+    for _, pair in tqdm(
+        pairs.iterrows(),
+        total=len(pairs),
+        desc="Score attach candidates",
+        leave=False,
+        disable=not show_progress,
+    ):
         left_idx = int(pair["left_idx"])
         right_idx = int(pair["right_idx"])
         left_cluster = str(base_ids.iloc[left_idx])
@@ -479,6 +500,7 @@ def run_silver_positive_attach_sweep(
     selection_config: SilverPositiveSelectionConfig | None = None,
     *,
     candidate_pairs: pd.DataFrame | None = None,
+    show_progress: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, pd.Series], dict[str, pd.DataFrame]]:
     """Подбирает attach-параметры только по silver-positive recall.
 
@@ -487,18 +509,39 @@ def run_silver_positive_attach_sweep(
     """
 
     cfg = selection_config or SilverPositiveSelectionConfig()
+    if show_progress:
+        candidate_pair_count = "auto" if candidate_pairs is None else len(candidate_pairs)
+        print(
+            "Starting run_silver_positive_attach_sweep: "
+            f"news_rows={len(news_df)}, silver_rows={len(silver_reference)}, "
+            f"candidate_pairs={candidate_pair_count}",
+            flush=True,
+        )
+
     base_ids = pd.Series(base_cluster_ids, dtype="string").astype(str)
 
     if candidate_pairs is None:
+        if show_progress:
+            print("Building candidate_pairs inside sweep", flush=True)
         candidate_pairs = build_candidate_pairs(
             news_df,
             embeddings,
             min_similarity=min(cfg.min_similarities),
             max_days=max(cfg.max_days_values),
+            show_progress=show_progress,
         )
 
+    if show_progress:
+        print("Evaluating baseline silver metrics", flush=True)
     baseline_metrics = evaluate_cluster_ids_on_reference(silver_reference, news_df, base_ids)
     baseline_pred_pairs = max(int(baseline_metrics["total_pred_pairs"]), 1)
+    if show_progress:
+        print(
+            "Baseline silver metrics ready: "
+            f"positive_pairs={baseline_metrics['total_ref_pairs']}, "
+            f"pred_pairs={baseline_metrics['total_pred_pairs']}",
+            flush=True,
+        )
 
     rows: list[dict] = []
     cluster_ids_by_variant: dict[str, pd.Series] = {"baseline_strict_0.82": base_ids}
@@ -527,19 +570,44 @@ def run_silver_positive_attach_sweep(
         }
     )
 
-    for min_similarity, max_days, min_margin, source_size, title_jaccard_threshold, min_shared_numbers in product(
+    sweep_variants = list(product(
         cfg.min_similarities,
         cfg.max_days_values,
         cfg.min_margins,
         cfg.source_max_cluster_sizes,
         cfg.title_jaccard_thresholds,
         cfg.min_shared_numbers_values,
-    ):
+    ))
+
+    if show_progress:
+        print(f"Running exp_10 attach sweep: {len(sweep_variants)} variants")
+
+    started_at = time.perf_counter()
+    for variant_index, (
+        min_similarity,
+        max_days,
+        min_margin,
+        source_size,
+        title_jaccard_threshold,
+        min_shared_numbers,
+    ) in enumerate(tqdm(
+        sweep_variants,
+        total=len(sweep_variants),
+        desc="exp_10 attach sweep",
+        disable=not show_progress,
+    ), start=1):
         variant_name = (
             f"exp10_src{source_size}_sim{min_similarity:.2f}"
             f"_days{max_days}_m{min_margin:.2f}"
             f"_tj{title_jaccard_threshold:.2f}_num{min_shared_numbers}"
         )
+        if show_progress and (variant_index == 1 or variant_index % 10 == 0):
+            elapsed = time.perf_counter() - started_at
+            print(
+                f"[exp_10 sweep] {variant_index}/{len(sweep_variants)} "
+                f"variants; elapsed={elapsed:.1f}s; current={variant_name}",
+                flush=True,
+            )
         attach_config = AttachClusteringConfig(
             min_similarity=min_similarity,
             max_days=max_days,
@@ -555,6 +623,7 @@ def run_silver_positive_attach_sweep(
             candidate_pairs,
             base_ids,
             attach_config,
+            show_progress=show_progress,
         )
         silver_metrics = evaluate_cluster_ids_on_reference(silver_reference, news_df, cluster_ids)
         pred_pair_growth = silver_metrics["total_pred_pairs"] / baseline_pred_pairs
