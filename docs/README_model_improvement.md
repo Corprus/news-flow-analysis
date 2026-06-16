@@ -36,7 +36,7 @@ exp_10a_current_model_on_exp10_clustering
 Финальные runtime-артефакты:
 
 ```text
-data/artifacts/models/final_exp10/exp_10a_current_model_on_exp10_clustering.joblib
+data/artifacts/models/final_exp10/final_novelty_model.joblib
 data/artifacts/models/final_exp10/final_pipeline_config.json
 ```
 
@@ -117,7 +117,7 @@ requirements_model_improvement.txt
 README_final_pipeline.md
 README_pipeline_v3.md
 docs/README_model_improvement.md
-data/artifacts/models/final_exp10/exp_10a_current_model_on_exp10_clustering.joblib
+data/artifacts/models/final_exp10/final_novelty_model.joblib
 data/artifacts/models/final_exp10/final_pipeline_config.json
 ```
 

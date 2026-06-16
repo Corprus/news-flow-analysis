@@ -50,7 +50,7 @@ python scripts/run_final_pipeline.py ^
   --project-root . ^
   --input data/prepared/lenta_clean_news.csv ^
   --output data/predictions/final_pipeline_v3_predictions.csv ^
-  --model data/artifacts/models/final_exp10/exp_10a_current_model_on_exp10_clustering.joblib ^
+  --model data/artifacts/models/final_exp10/final_novelty_model.joblib ^
   --embeddings-cache data/artifacts/embeddings/final_pipeline_v3_bge_m3.npz ^
   --config data/artifacts/models/final_exp10/final_pipeline_config.json
 ```

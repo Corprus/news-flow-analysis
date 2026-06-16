@@ -30,7 +30,7 @@ requirements_model_improvement.txt
 Готовые артефакты финального pipeline:
 
 ```text
-data/artifacts/models/final_exp10/exp_10a_current_model_on_exp10_clustering.joblib
+data/artifacts/models/final_exp10/final_novelty_model.joblib
 data/artifacts/models/final_exp10/final_pipeline_config.json
 ```
 
@@ -63,7 +63,7 @@ python scripts/run_final_pipeline.py `
 `--model` и `--config` можно не указывать. По умолчанию будут использованы:
 
 ```text
-data/artifacts/models/final_exp10/exp_10a_current_model_on_exp10_clustering.joblib
+data/artifacts/models/final_exp10/final_novelty_model.joblib
 data/artifacts/models/final_exp10/final_pipeline_config.json
 ```
 
@@ -75,7 +75,7 @@ python scripts/run_final_pipeline.py `
   --input data/prepared/lenta_clean_news.csv `
   --output data/predictions/final_pipeline_v3_predictions.csv `
   --embeddings-cache data/artifacts/embeddings/final_pipeline_v3_bge_m3.npz `
-  --model data/artifacts/models/final_exp10/exp_10a_current_model_on_exp10_clustering.joblib `
+  --model data/artifacts/models/final_exp10/final_novelty_model.joblib `
   --config data/artifacts/models/final_exp10/final_pipeline_config.json `
   --device cuda
 ```

@@ -9,7 +9,7 @@ from model.attach_clustering import AttachClusteringConfig, BaselineClusteringCo
 
 
 FINAL_MODEL_RELATIVE_PATH = Path(
-    "data/artifacts/models/final_exp10/exp_10a_current_model_on_exp10_clustering.joblib"
+    "data/artifacts/models/final_exp10/final_novelty_model.joblib"
 )
 FINAL_PIPELINE_CONFIG_RELATIVE_PATH = Path(
     "data/artifacts/models/final_exp10/final_pipeline_config.json"
