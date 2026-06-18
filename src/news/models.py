@@ -316,9 +316,7 @@ class NewsSearchQuery(Base):
         onupdate=lambda: datetime.now(UTC),
     )
 
-    __table_args__ = (
-        Index("ix_news_search_queries_created_at", "created_at"),
-    )
+    __table_args__ = (Index("ix_news_search_queries_created_at", "created_at"),)
 
 
 class EventArticle(Base):

@@ -104,8 +104,7 @@ def render_news() -> None:
             result = client.add_news(payload)
             refresh_account()
             st.success(
-                f"News queued: {result['article_id']} "
-                f"(job {result['vectorization_job_id']})"
+                f"News queued: {result['article_id']} (job {result['vectorization_job_id']})"
             )
         except ApiError as exc:
             st.error(str(exc))
@@ -153,8 +152,7 @@ def render_search() -> None:
             result = client.search_news(payload)
             refresh_account()
             st.success(
-                f"Search queued: {result['query_id']} "
-                f"(job {result['vectorization_job_id']})"
+                f"Search queued: {result['query_id']} (job {result['vectorization_job_id']})"
             )
         except ApiError as exc:
             st.error(str(exc))

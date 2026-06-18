@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Iterable
+from collections.abc import Iterable
 
 import pandas as pd
 
@@ -42,7 +42,9 @@ def prepare_news_dataframe(
 
     if id_column not in df.columns:
         df[id_column] = [
-            _stable_id_from_values((row.get(url_column), row.get(title_column), row.get(date_column)))
+            _stable_id_from_values(
+                (row.get(url_column), row.get(title_column), row.get(date_column))
+            )
             for _, row in df.iterrows()
         ]
 
@@ -73,7 +75,9 @@ def prepare_news_dataframe(
     df["title_num_words"] = df[title_column].apply(lambda x: len(_WORD_RE.findall(x))).astype(int)
     df["text_num_words"] = df[text_column].apply(lambda x: len(_WORD_RE.findall(x))).astype(int)
     df["model_length"] = df[model_text_column].str.len().astype(int)
-    df["model_num_words"] = df[model_text_column].apply(lambda x: len(_WORD_RE.findall(x))).astype(int)
+    df["model_num_words"] = (
+        df[model_text_column].apply(lambda x: len(_WORD_RE.findall(x))).astype(int)
+    )
 
     return df.sort_values([date_column, id_column], kind="mergesort").reset_index(drop=True)
 
@@ -96,14 +100,27 @@ def prepare_candidate_news(
     clean[id_column] = clean[id_column].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
 
     clean_cols = [
-        "news_id", "url", "title", "text", "topic", "tags", "published_at",
-        "text_length", "text_num_words", "title_length", "title_num_words",
-        "model_text", "model_length", "model_num_words",
+        "news_id",
+        "url",
+        "title",
+        "text",
+        "topic",
+        "tags",
+        "published_at",
+        "text_length",
+        "text_num_words",
+        "title_length",
+        "title_num_words",
+        "model_text",
+        "model_length",
+        "model_num_words",
     ]
     clean_cols = [column for column in clean_cols if column in clean.columns]
 
     merged = pool[[id_column]].merge(clean[clean_cols], on=id_column, how="left")
-    missing_mask = merged["title"].isna() if "title" in merged.columns else pd.Series(True, index=merged.index)
+    missing_mask = (
+        merged["title"].isna() if "title" in merged.columns else pd.Series(True, index=merged.index)
+    )
 
     if missing_mask.any():
         fallback = prepare_news_dataframe(pool)

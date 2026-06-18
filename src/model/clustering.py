@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -91,7 +90,9 @@ class ThresholdGraphClusterer:
                         dsu.union(i, j)
             cluster_by_idx.update(_component_ids(local_indices, dsu, _safe_slug(topic)))
 
-        return pd.Series([cluster_by_idx[i] for i in range(len(work))], index=original_index, name="cluster_id")
+        return pd.Series(
+            [cluster_by_idx[i] for i in range(len(work))], index=original_index, name="cluster_id"
+        )
 
 
 @dataclass
@@ -124,7 +125,9 @@ class MutualKnnTemporalClusterer:
                 candidates = [
                     j
                     for j in range(n)
-                    if j != i and days[i, j] <= self.window_days and sim[i, j] >= self.similarity_threshold
+                    if j != i
+                    and days[i, j] <= self.window_days
+                    and sim[i, j] >= self.similarity_threshold
                 ]
                 candidates = sorted(candidates, key=lambda j: sim[i, j], reverse=True)[: self.k]
                 directed.update((i, j) for j in candidates)
@@ -134,7 +137,9 @@ class MutualKnnTemporalClusterer:
             prefix = f"{_safe_slug(topic)}_mknn"
             cluster_by_idx.update(_component_ids(local_indices, dsu, prefix))
 
-        return pd.Series([cluster_by_idx[i] for i in range(len(work))], index=original_index, name="cluster_id")
+        return pd.Series(
+            [cluster_by_idx[i] for i in range(len(work))], index=original_index, name="cluster_id"
+        )
 
 
 @dataclass
@@ -165,12 +170,17 @@ class TemporalDecayGraphClusterer:
             dsu = _DSU(n)
             for i in range(n):
                 for j in range(i + 1, n):
-                    if days[i, j] <= self.window_days and effective_sim[i, j] >= self.similarity_threshold:
+                    if (
+                        days[i, j] <= self.window_days
+                        and effective_sim[i, j] >= self.similarity_threshold
+                    ):
                         dsu.union(i, j)
             prefix = f"{_safe_slug(topic)}_decay"
             cluster_by_idx.update(_component_ids(local_indices, dsu, prefix))
 
-        return pd.Series([cluster_by_idx[i] for i in range(len(work))], index=original_index, name="cluster_id")
+        return pd.Series(
+            [cluster_by_idx[i] for i in range(len(work))], index=original_index, name="cluster_id"
+        )
 
 
 @dataclass
@@ -197,7 +207,11 @@ class OnlineLifecycleClusterer:
         dates = pd.to_datetime(work[self.date_column], errors="coerce")
         result = pd.Series(index=work.index, dtype=object, name="cluster_id")
 
-        for topic, topic_df in work.assign(_date=dates).sort_values("_date").groupby(self.topic_column, sort=False, dropna=False):
+        for topic, topic_df in (
+            work.assign(_date=dates)
+            .sort_values("_date")
+            .groupby(self.topic_column, sort=False, dropna=False)
+        ):
             clusters: list[dict] = []
             topic_slug = _safe_slug(topic)
             next_id = 0
@@ -219,7 +233,10 @@ class OnlineLifecycleClusterer:
                     centroid_sim = float(current_emb @ centroid)
                     member_sims = cluster["members_emb"] @ current_emb
                     max_member_sim = float(member_sims.max()) if len(member_sims) else centroid_sim
-                    score = self.centroid_weight * centroid_sim + self.max_member_weight * max_member_sim
+                    score = (
+                        self.centroid_weight * centroid_sim
+                        + self.max_member_weight * max_member_sim
+                    )
                     if score > best_score:
                         best_score = score
                         best_cluster = cluster
@@ -239,8 +256,12 @@ class OnlineLifecycleClusterer:
                     result.loc[idx] = cluster_id
                 else:
                     best_cluster["members_idx"].append(idx)
-                    best_cluster["members_emb"] = np.vstack([best_cluster["members_emb"], current_emb])
-                    best_cluster["centroid"] = l2_normalize(best_cluster["members_emb"].mean(axis=0, keepdims=True))[0]
+                    best_cluster["members_emb"] = np.vstack(
+                        [best_cluster["members_emb"], current_emb]
+                    )
+                    best_cluster["centroid"] = l2_normalize(
+                        best_cluster["members_emb"].mean(axis=0, keepdims=True)
+                    )[0]
                     best_cluster["last_seen"] = current_date
                     result.loc[idx] = best_cluster["cluster_id"]
 

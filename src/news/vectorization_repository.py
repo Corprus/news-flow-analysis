@@ -134,10 +134,7 @@ class NewsVectorizationRepository:
             )
 
         scored.sort(key=lambda item: item["score"], reverse=True)
-        items = [
-            {**item, "rank": rank}
-            for rank, item in enumerate(scored[:top_k], start=1)
-        ]
+        items = [{**item, "rank": rank} for rank, item in enumerate(scored[:top_k], start=1)]
         result = {"items": items}
 
         async with await AsyncConnection.connect(self._database_url) as connection:
@@ -208,7 +205,4 @@ class NewsVectorizationRepository:
                 await cursor.execute(query, params)
                 rows = await cursor.fetchall()
 
-        return [
-            (*row[:6], json.loads(row[6]))
-            for row in rows
-        ]
+        return [(*row[:6], json.loads(row[6])) for row in rows]

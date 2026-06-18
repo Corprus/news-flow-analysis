@@ -6,9 +6,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .legacy_clustering import LegacyBaselineGraphClusterer, LegacyBaselineGraphClustererConfig
 from .data import prepare_legacy_baseline_input
 from .embeddings import get_or_create_id_aligned_embeddings
+from .legacy_clustering import LegacyBaselineGraphClusterer, LegacyBaselineGraphClustererConfig
 
 
 @dataclass

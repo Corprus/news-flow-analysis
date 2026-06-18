@@ -30,7 +30,8 @@ class SentenceTransformerEncoder:
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:
             raise ImportError(
-                "sentence-transformers is required for encoding. Install it in the course environment."
+                "sentence-transformers is required for encoding. "
+                "Install it in the course environment."
             ) from exc
 
         self.model_name = model_name
@@ -71,7 +72,9 @@ class SentenceTransformerEncoder:
         return embeddings
 
 
-def load_cached_embeddings(path: str | Path, expected_ids: Iterable[str] | None = None) -> np.ndarray:
+def load_cached_embeddings(
+    path: str | Path, expected_ids: Iterable[str] | None = None
+) -> np.ndarray:
     loaded = np.load(Path(path), allow_pickle=True)
     embeddings = loaded["embeddings"].astype(np.float32)
     if expected_ids is not None:
@@ -85,7 +88,11 @@ def load_cached_embeddings(path: str | Path, expected_ids: Iterable[str] | None 
 def save_cached_embeddings(path: str | Path, ids: Iterable[str], embeddings: np.ndarray) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(path, ids=np.asarray(list(map(str, ids))), embeddings=np.asarray(embeddings, dtype=np.float32))
+    np.savez_compressed(
+        path,
+        ids=np.asarray(list(map(str, ids))),
+        embeddings=np.asarray(embeddings, dtype=np.float32),
+    )
     return path
 
 
@@ -112,21 +119,13 @@ def load_id_aligned_embeddings(
 
     target_ids = normalize_news_id(pd.Series(target_ids)).to_numpy()
 
-    id_to_pos = {
-        news_id: pos
-        for pos, news_id in enumerate(cache_ids)
-    }
+    id_to_pos = {news_id: pos for pos, news_id in enumerate(cache_ids)}
 
-    missing_ids = [
-        news_id
-        for news_id in target_ids
-        if news_id not in id_to_pos
-    ]
+    missing_ids = [news_id for news_id in target_ids if news_id not in id_to_pos]
 
     if missing_ids:
         raise ValueError(
-            f"Missing embeddings for {len(missing_ids)} ids. "
-            f"Examples: {missing_ids[:10]}"
+            f"Missing embeddings for {len(missing_ids)} ids. Examples: {missing_ids[:10]}"
         )
 
     positions = np.array(
@@ -151,9 +150,7 @@ def save_id_aligned_embeddings(
     embeddings = np.asarray(embeddings, dtype=np.float32)
 
     if len(ids) != len(embeddings):
-        raise ValueError(
-            f"ids and embeddings length mismatch: {len(ids)} != {len(embeddings)}"
-        )
+        raise ValueError(f"ids and embeddings length mismatch: {len(ids)} != {len(embeddings)}")
 
     np.savez_compressed(
         cache_path,

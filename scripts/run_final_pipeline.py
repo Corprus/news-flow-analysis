@@ -20,7 +20,9 @@ def main() -> None:
     parser.add_argument("--input", required=True, help="CSV с clean-like/raw news")
     parser.add_argument("--output", required=True, help="CSV с предсказаниями")
     parser.add_argument("--model", default=None, help="joblib artifact финальной novelty-модели")
-    parser.add_argument("--embeddings-cache", required=True, help="id-aware npz cache для embeddings")
+    parser.add_argument(
+        "--embeddings-cache", required=True, help="id-aware npz cache для embeddings"
+    )
     parser.add_argument("--config", default=None, help="JSON config pipeline")
     parser.add_argument("--project-root", default=".", help="Корень проекта")
     parser.add_argument("--device", default=None, help="cuda/cpu для sentence-transformers")
@@ -33,12 +35,20 @@ def main() -> None:
     from final_pipeline import FinalPipelineConfig, load_pipeline
     from final_pipeline.config import FINAL_PIPELINE_CONFIG_RELATIVE_PATH
 
-    config_path = Path(args.config) if args.config else project_root / FINAL_PIPELINE_CONFIG_RELATIVE_PATH
+    config_path = (
+        Path(args.config) if args.config else project_root / FINAL_PIPELINE_CONFIG_RELATIVE_PATH
+    )
     if not config_path.is_absolute():
         config_path = project_root / config_path
-    config = FinalPipelineConfig.from_json(config_path) if config_path.exists() else FinalPipelineConfig()
+    config = (
+        FinalPipelineConfig.from_json(config_path)
+        if config_path.exists()
+        else FinalPipelineConfig()
+    )
     news = pd.read_csv(args.input)
-    pipeline = load_pipeline(model_path=args.model, config=config, device=args.device, project_root=project_root)
+    pipeline = load_pipeline(
+        model_path=args.model, config=config, device=args.device, project_root=project_root
+    )
     result = pipeline.run(
         news,
         embeddings_cache_path=args.embeddings_cache,

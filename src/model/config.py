@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
 
 
 @dataclass
@@ -32,23 +32,46 @@ class ExperimentPaths:
     fallback_similarity_threshold: float = 0.78
     fallback_max_previous_candidates: int = 10
 
-
     def __post_init__(self) -> None:
         self.project_root = Path(self.project_root).resolve()
-        self.data_dir = Path(self.data_dir) if self.data_dir is not None else self.project_root / "data"
-        self.prepared_dir = Path(self.prepared_dir) if self.prepared_dir is not None else self.data_dir / "prepared"
-        self.artifacts_dir = Path(self.artifacts_dir) if self.artifacts_dir is not None else self.data_dir / "artifacts"
+        self.data_dir = (
+            Path(self.data_dir) if self.data_dir is not None else self.project_root / "data"
+        )
+        self.prepared_dir = (
+            Path(self.prepared_dir) if self.prepared_dir is not None else self.data_dir / "prepared"
+        )
+        self.artifacts_dir = (
+            Path(self.artifacts_dir)
+            if self.artifacts_dir is not None
+            else self.data_dir / "artifacts"
+        )
         self.models_dir = self.artifacts_dir / "models"
         self.significance_model_dir = (
             Path(self.significance_model_dir)
             if self.significance_model_dir is not None
             else self.models_dir / "significance_model"
         )
-        self.predictions_dir = Path(self.predictions_dir) if self.predictions_dir is not None else self.data_dir / "predictions"
+        self.predictions_dir = (
+            Path(self.predictions_dir)
+            if self.predictions_dir is not None
+            else self.data_dir / "predictions"
+        )
 
-        self.clean_news_path = Path(self.clean_news_path) if self.clean_news_path is not None else self.prepared_dir / "lenta_clean_news.csv"
-        self.golden_path = Path(self.golden_path) if self.golden_path is not None else self.prepared_dir / "lenta_golden_set_human.csv"
-        self.silver_path = Path(self.silver_path) if self.silver_path is not None else self.prepared_dir / "lenta_silver_set_llm.csv"
+        self.clean_news_path = (
+            Path(self.clean_news_path)
+            if self.clean_news_path is not None
+            else self.prepared_dir / "lenta_clean_news.csv"
+        )
+        self.golden_path = (
+            Path(self.golden_path)
+            if self.golden_path is not None
+            else self.prepared_dir / "lenta_golden_set_human.csv"
+        )
+        self.silver_path = (
+            Path(self.silver_path)
+            if self.silver_path is not None
+            else self.prepared_dir / "lenta_silver_set_llm.csv"
+        )
 
         self.current_catboost_model_path = (
             Path(self.current_catboost_model_path)

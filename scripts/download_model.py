@@ -34,8 +34,7 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            "Disable Xet download backend. Useful on Windows if the HF cache "
-            "has permission issues."
+            "Disable Xet download backend. Useful on Windows if the HF cache has permission issues."
         ),
     )
     return parser.parse_args()

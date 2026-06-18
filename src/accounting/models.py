@@ -63,6 +63,4 @@ class Transaction(Base):
     reason: Mapped[str] = mapped_column(String(64), nullable=False)
     reference_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
 
-    __table_args__ = (
-        Index("ix_transactions_timestamp", "timestamp"),
-    )
+    __table_args__ = (Index("ix_transactions_timestamp", "timestamp"),)

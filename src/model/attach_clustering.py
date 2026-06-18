@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from itertools import product
 import re
 import time
+from dataclasses import asdict, dataclass
+from itertools import product
 
 import numpy as np
 import pandas as pd
@@ -12,7 +12,6 @@ from tqdm.auto import tqdm
 from .data import normalize_news_id
 from .embeddings import l2_normalize
 from .legacy_clustering import LegacyBaselineGraphClusterer, LegacyBaselineGraphClustererConfig
-
 
 _TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9]+", flags=re.IGNORECASE)
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
@@ -267,8 +266,7 @@ def build_best_candidate_attach_clusters(
 
     pairs = candidate_pairs.copy()
     pairs = pairs[
-        (pairs["similarity"] >= cfg.min_similarity)
-        & (pairs["days_diff"] <= cfg.max_days)
+        (pairs["similarity"] >= cfg.min_similarity) & (pairs["days_diff"] <= cfg.max_days)
     ].copy()
 
     if pairs.empty:
@@ -349,7 +347,7 @@ def build_best_candidate_attach_clusters(
     # отброшен как "неуверенный". Именно это ломало воспроизводимость старого
     # exp_10 после рефакторинга v3.
     target_rows: list[dict] = []
-    for (source_cluster, target_cluster), part in raw_candidates.groupby(
+    for (_source_cluster, _target_cluster), part in raw_candidates.groupby(
         ["source_cluster", "target_cluster"],
         sort=False,
     ):
@@ -370,10 +368,12 @@ def build_best_candidate_attach_clusters(
     )
 
     selected_rows: list[dict] = []
-    for source_cluster, part in candidates.groupby("source_cluster", sort=False):
+    for _source_cluster, part in candidates.groupby("source_cluster", sort=False):
         part = part.reset_index(drop=True)
         best = part.iloc[0].to_dict()
-        second_best_similarity = float(part.iloc[1]["best_similarity"]) if len(part) > 1 else -np.inf
+        second_best_similarity = (
+            float(part.iloc[1]["best_similarity"]) if len(part) > 1 else -np.inf
+        )
         margin = float(best["best_similarity"] - second_best_similarity)
 
         if len(part) > 1 and margin < cfg.min_margin:
@@ -390,21 +390,33 @@ def build_best_candidate_attach_clusters(
     # прикрепляется только один раз, а target остаётся baseline-кластером.
     if not selected.empty:
         selected = selected.sort_values("best_similarity", ascending=False, kind="mergesort")
-        source_to_target = dict(zip(selected["source_cluster"], selected["target_cluster"]))
-        final_ids = final_ids.map(lambda cluster_id: source_to_target.get(str(cluster_id), str(cluster_id)))
+        source_to_target = dict(
+            zip(
+                selected["source_cluster"],
+                selected["target_cluster"],
+                strict=True,
+            )
+        )
+        final_ids = final_ids.map(
+            lambda cluster_id: source_to_target.get(str(cluster_id), str(cluster_id))
+        )
 
     diagnostics = {
         "candidate_attach_edges": int(len(raw_candidates)),
         "candidate_attach_targets": int(len(candidates)),
         "attached_source_clusters": int(len(selected)),
         "attached_rows": int(
-            sum(cluster_sizes.get(str(cluster), 0) for cluster in selected.get("source_cluster", []))
+            sum(
+                cluster_sizes.get(str(cluster), 0) for cluster in selected.get("source_cluster", [])
+            )
         ),
     }
     return final_ids.astype(str).rename("cluster_id"), diagnostics, selected
 
 
-def make_clustered_news(news_df: pd.DataFrame, cluster_ids: pd.Series | np.ndarray | list) -> pd.DataFrame:
+def make_clustered_news(
+    news_df: pd.DataFrame, cluster_ids: pd.Series | np.ndarray | list
+) -> pd.DataFrame:
     """Возвращает копию news_df с заданным cluster_id."""
 
     if len(news_df) != len(cluster_ids):
@@ -432,7 +444,9 @@ def evaluate_cluster_ids_on_reference(
 
     candidate = candidate_news_df[[id_column]].copy()
     candidate[id_column] = normalize_news_id(candidate[id_column])
-    candidate["cluster_id_pred"] = pd.Series(candidate_cluster_ids, dtype="string").astype(str).to_numpy()
+    candidate["cluster_id_pred"] = (
+        pd.Series(candidate_cluster_ids, dtype="string").astype(str).to_numpy()
+    )
 
     merged = reference.merge(candidate, on=id_column, how="inner")
     ref = merged[cluster_column].astype(str)
@@ -570,14 +584,16 @@ def run_silver_positive_attach_sweep(
         }
     )
 
-    sweep_variants = list(product(
-        cfg.min_similarities,
-        cfg.max_days_values,
-        cfg.min_margins,
-        cfg.source_max_cluster_sizes,
-        cfg.title_jaccard_thresholds,
-        cfg.min_shared_numbers_values,
-    ))
+    sweep_variants = list(
+        product(
+            cfg.min_similarities,
+            cfg.max_days_values,
+            cfg.min_margins,
+            cfg.source_max_cluster_sizes,
+            cfg.title_jaccard_thresholds,
+            cfg.min_shared_numbers_values,
+        )
+    )
 
     if show_progress:
         print(f"Running exp_10 attach sweep: {len(sweep_variants)} variants")
@@ -590,12 +606,15 @@ def run_silver_positive_attach_sweep(
         source_size,
         title_jaccard_threshold,
         min_shared_numbers,
-    ) in enumerate(tqdm(
-        sweep_variants,
-        total=len(sweep_variants),
-        desc="exp_10 attach sweep",
-        disable=not show_progress,
-    ), start=1):
+    ) in enumerate(
+        tqdm(
+            sweep_variants,
+            total=len(sweep_variants),
+            desc="exp_10 attach sweep",
+            disable=not show_progress,
+        ),
+        start=1,
+    ):
         variant_name = (
             f"exp10_src{source_size}_sim{min_similarity:.2f}"
             f"_days{max_days}_m{min_margin:.2f}"

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Iterable, Sequence
 
-import numpy as np
 import pandas as pd
 
 CLEAN_REQUIRED_COLUMNS = (
@@ -54,11 +53,15 @@ def normalize_news_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         if col in result.columns:
             result[col] = result[col].fillna("").astype(str)
     if "model_text" not in result.columns and {"title", "text"}.issubset(result.columns):
-        result["model_text"] = (result["title"].fillna("") + "\n" + result["text"].fillna("")).str.strip()
+        result["model_text"] = (
+            result["title"].fillna("") + "\n" + result["text"].fillna("")
+        ).str.strip()
     return result
 
 
-def validate_columns(df: pd.DataFrame, required_columns: Sequence[str], name: str = "dataframe") -> None:
+def validate_columns(
+    df: pd.DataFrame, required_columns: Sequence[str], name: str = "dataframe"
+) -> None:
     missing = [col for col in required_columns if col not in df.columns]
     if missing:
         raise ValueError(f"{name} is missing required columns: {missing}")
@@ -136,7 +139,9 @@ def save_prediction_csv(df: pd.DataFrame, path: str | Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     out = df.copy()
     if "published_at" in out.columns:
-        out["published_at"] = pd.to_datetime(out["published_at"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
+        out["published_at"] = pd.to_datetime(out["published_at"], errors="coerce").dt.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
     out.to_csv(path, index=False)
     return path
 
@@ -152,14 +157,10 @@ def ensure_prediction_schema(df: pd.DataFrame) -> pd.DataFrame:
                 result[col] = ""
     return result[list(ANNOTATION_REQUIRED_COLUMNS)]
 
+
 def normalize_news_id(series: pd.Series) -> pd.Series:
     """Normalize news_id values to stable string representation."""
-    return (
-        series
-        .astype(str)
-        .str.strip()
-        .str.replace(r"\.0$", "", regex=True)
-    )
+    return series.astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
 
 
 def prepare_legacy_baseline_input(
@@ -212,8 +213,7 @@ def prepare_legacy_baseline_input(
     df["_news_id_sort_key"] = pd.to_numeric(df[id_column], errors="coerce")
 
     df = (
-        df
-        .sort_values([date_column, "_news_id_sort_key", id_column], kind="mergesort")
+        df.sort_values([date_column, "_news_id_sort_key", id_column], kind="mergesort")
         .drop(columns=["_news_id_sort_key"])
         .reset_index(drop=True)
     )

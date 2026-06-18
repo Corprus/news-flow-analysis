@@ -156,9 +156,7 @@ class LegacyBaselineGraphClusterer:
         # cluster_id назначаются в порядке прохода по исходным строкам.
         for root in roots:
             if root not in root_to_cluster:
-                root_to_cluster[root] = (
-                    f"{self.config.cluster_prefix}_{len(root_to_cluster):05d}"
-                )
+                root_to_cluster[root] = f"{self.config.cluster_prefix}_{len(root_to_cluster):05d}"
 
             cluster_ids.append(root_to_cluster[root])
 
@@ -169,7 +167,8 @@ class LegacyBaselineGraphClusterer:
         print("Количество кластеров:", self.last_cluster_count_)
 
         return pd.Series(cluster_ids, index=news_df.index, name="cluster_id")
-    
+
+
 def compare_saved_and_reproduced_clusters(
     saved_pred: pd.DataFrame,
     reproduced_pred: pd.DataFrame,

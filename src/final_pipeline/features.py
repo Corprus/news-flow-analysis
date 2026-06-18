@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -63,7 +63,9 @@ def _mean_top_k(values: np.ndarray, k: int, default: float = 0.0) -> float:
     return float(np.sort(values)[-k:].mean())
 
 
-def _days_between(current_date: pd.Timestamp, previous_date: pd.Timestamp | None, default: float = -1.0) -> float:
+def _days_between(
+    current_date: pd.Timestamp, previous_date: pd.Timestamp | None, default: float = -1.0
+) -> float:
     if previous_date is None or pd.isna(current_date) or pd.isna(previous_date):
         return default
     return float((current_date - previous_date).total_seconds() / (24 * 60 * 60))
@@ -104,7 +106,9 @@ class LegacyFeatureBuilder:
         emb = l2_normalize(np.asarray(embeddings, dtype=np.float32))
 
         rows: list[dict] = []
-        sorted_df = df.sort_values([self.cluster_column, self.date_column, "_row_pos"], kind="mergesort")
+        sorted_df = df.sort_values(
+            [self.cluster_column, self.date_column, "_row_pos"], kind="mergesort"
+        )
 
         for _, group in sorted_df.groupby(self.cluster_column, sort=False, dropna=False):
             history_indices: list[int] = []
@@ -149,12 +153,18 @@ class LegacyFeatureBuilder:
                         "last_prev_similarity": float(sims[-1]),
                         "previous_centroid_similarity": centroid_sim,
                         "previous_centroid_distance": float(1.0 - centroid_sim),
-                        "title_jaccard_max": _max_jaccard(current_title_tokens, history_title_tokens),
+                        "title_jaccard_max": _max_jaccard(
+                            current_title_tokens, history_title_tokens
+                        ),
                         "text_jaccard_max": _max_jaccard(current_text_tokens, history_text_tokens),
                         "shared_numbers_count": int(len(shared_numbers)),
                         "new_numbers_count": int(len(new_numbers)),
-                        "title_length": _text_len(current, self.title_column, self.title_length_column),
-                        "text_length": _text_len(current, self.text_column, self.text_length_column),
+                        "title_length": _text_len(
+                            current, self.title_column, self.title_length_column
+                        ),
+                        "text_length": _text_len(
+                            current, self.text_column, self.text_length_column
+                        ),
                     }
                 else:
                     cluster_start = current_date
@@ -175,18 +185,24 @@ class LegacyFeatureBuilder:
                         "text_jaccard_max": 0.0,
                         "shared_numbers_count": 0,
                         "new_numbers_count": int(len(current_numbers)),
-                        "title_length": _text_len(current, self.title_column, self.title_length_column),
-                        "text_length": _text_len(current, self.text_column, self.text_length_column),
+                        "title_length": _text_len(
+                            current, self.title_column, self.title_length_column
+                        ),
+                        "text_length": _text_len(
+                            current, self.text_column, self.text_length_column
+                        ),
                     }
 
-                rows.append({
-                    "_row_pos": idx,
-                    self.id_column: current[self.id_column],
-                    self.cluster_column: current[self.cluster_column],
-                    self.topic_column: current.get(self.topic_column, ""),
-                    self.date_column: current_date,
-                    **item_features,
-                })
+                rows.append(
+                    {
+                        "_row_pos": idx,
+                        self.id_column: current[self.id_column],
+                        self.cluster_column: current[self.cluster_column],
+                        self.topic_column: current.get(self.topic_column, ""),
+                        self.date_column: current_date,
+                        **item_features,
+                    }
+                )
 
                 history_indices.append(idx)
                 history_dates.append(current_date)
@@ -206,9 +222,7 @@ class LegacyFeatureBuilder:
                 result[column] = 0.0
 
         result[list(self.feature_columns)] = (
-            result[list(self.feature_columns)]
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
+            result[list(self.feature_columns)].replace([np.inf, -np.inf], np.nan).fillna(0.0)
         )
 
         return result
