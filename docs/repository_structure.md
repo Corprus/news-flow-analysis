@@ -1,46 +1,89 @@
 # Структура репозитория
 
-Этот документ описывает практическую организацию проекта. Основная постановка задачи и план проекта находятся в `README.md`.
+Основное описание проекта, результаты и команды запуска находятся в
+[`README.md`](../README.md).
 
-## Основные директории
+## Код приложения
 
-- `experiments/` — экспериментальные ноутбуки.
-- `src/` — код Python-сервисов и основная бизнес-логика.
-- `tests/` — автоматические тесты.
-- `tests/fixtures/` — небольшие тестовые примеры данных.
-- `docs/` — дополнительная проектная документация.
-- `configs/` — конфигурационные файлы.
-- `scripts/` — вспомогательные скрипты, включая запуск дообучения embedding-модели.
-- `docker/` — файлы для контейнеризации и будущего `docker-compose`.
-- `.github/workflows/` — будущие CI/CD workflows.
+```text
+src/
+  api/             внешний FastAPI API
+  model_service/   RabbitMQ consumer, векторизация и semantic search
+  news/            новости, поисковые запросы и работа с embeddings
+  users/           пользователи и bearer-аутентификация
+  accounting/      баланс и журнал операций
+  db/              PostgreSQL, pgvector и модели хранения
+  messaging/       RabbitMQ publisher/consumer
+  services/        загрузка и вызов embedding-модели
+  model/           экспериментальная clustering/novelty логика
+  final_pipeline/  финальный offline/inference pipeline
+```
 
-## Локальные данные и артефакты
-
-Следующие директории предназначены для локальных данных и сгенерированных файлов:
-
-- `data/raw/` — исходные датасеты.
-- `data/prepared/` — подготовленные датасеты.
-- `models/` — локальные модели и checkpoints.
-- `artifacts/` — embeddings, FAISS-индексы и другие результаты вычислений.
-
-Эти директории исключены из Git, потому что содержат крупные или воспроизводимые артефакты.
-
-Подробное описание ожидаемых данных находится в `data/README.md`.
+Сервисный контур и финальный novelty pipeline используют разные runtime-модели. Детали
+этого разделения описаны в основном README.
 
 ## Эксперименты
 
-- `experiments/01_train_embeddings.ipynb` — дообучение embedding-модели на парафразах.
-- `experiments/02_lenta_event_grouping.ipynb` — эксперименты с Lenta.ru, FAISS и группировкой новостей в события.
+Ноутбуки находятся в `notebooks/`:
 
-## Python-сервис
+- `01_train_embeddings.ipynb` — раннее дообучение MPNet;
+- `02_lenta_event_grouping.ipynb` — первичная событийная группировка;
+- `03_data_analysis_and_dataset_preparation.ipynb` — EDA и подготовка данных;
+- `04_evaluate_annotations_and_predictions.ipynb` — оценка разметки и предсказаний;
+- `05_semantic_baseline_model.ipynb` — baseline clustering и novelty classifier;
+- `06_model_improvement_experiments_v3.ipynb` — выбор финального pipeline;
+- `07_bronze_annotation_export.ipynb` — подготовка bronze-разметки;
+- `08_finetune_bge_m3_embeddings.ipynb` — ablation с дообучением BGE-M3.
+- `09_search_and_dedup_benchmark.ipynb` — search benchmark и дедупликация Top-10.
 
-Предполагаемая структура пакета:
+## Инфраструктура
 
-- `src/api/` — внешний HTTP API.
-- `src/model_service/` — внутренний сервис с загруженной моделью и RabbitMQ consumer.
-- `src/core/` — доменная логика: события, роли новостей, правила группировки.
-- `src/db/` — работа с базой данных.
-- `src/messaging/` — интеграции с очередями.
-- `src/services/` — сервисный слой приложения.
+```text
+docker-compose.yml       PostgreSQL, RabbitMQ, API, model-service, UI и nginx
+docker/                  Dockerfiles и конфигурация сервисов
+ui/                      Streamlit-интерфейс
+configs/model_registry/  metadata опубликованной MPNet-модели
+.github/workflows/       Ruff, pytest, Compose validation и ручная сборка images
+```
 
-На следующих этапах проект будет дополнен FastAPI-сервисом, PostgreSQL и запуском через `docker-compose`.
+## Скрипты
+
+`scripts/` содержит:
+
+- обучение, публикацию и скачивание MPNet-модели;
+- запуск и benchmark финального BGE-M3 pipeline;
+- проверку model artifacts;
+- Windows wrappers для локального и Hugging Face workflow.
+
+Локальная справка: [`scripts/README.md`](../scripts/README.md).
+
+## Данные и generated artifacts
+
+```text
+data/raw/          исходные датасеты
+data/prepared/     подготовленные выборки
+data/artifacts/    модели, embeddings, разметка и benchmark outputs
+data/predictions/  результаты inference и экспериментов
+models/            локальные сервисные модели
+```
+
+Крупные датасеты, caches, checkpoints и predictions обычно исключены из Git. Исключение —
+небольшие runtime-конфиги и явно зафиксированные финальные артефакты, необходимые для
+воспроизводимого запуска.
+
+Подробности: [`data/README.md`](../data/README.md) и
+[`model_artifacts.md`](model_artifacts.md).
+
+## Документация
+
+Проектные документы собраны в `docs/`:
+
+- [`final_pipeline.md`](final_pipeline.md);
+- [`model_improvement.md`](model_improvement.md);
+- [`service_stack.md`](service_stack.md);
+- [`ci_cd.md`](ci_cd.md);
+- [`prototype.md`](prototype.md);
+- [`project_context.md`](project_context.md).
+
+README внутри `data/`, `scripts/` и `tests/fixtures/` намеренно остаются рядом с
+соответствующими директориями.

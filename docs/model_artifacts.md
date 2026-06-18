@@ -1,56 +1,71 @@
-# Артефакты модели
+# Артефакты моделей
 
-Веса обученной модели не хранятся в Git-репозитории.
+В проекте используются два независимых набора model artifacts.
 
-В репозитории должны храниться исходный код, ноутбуки, конфигурация и документация. Крупные сгенерированные артефакты исключаются из Git: checkpoints модели, финальные веса, FAISS-индексы, embeddings и подготовленные датасеты.
+## Сервисная embedding-модель
 
-## Ожидаемые локальные пути
+FastAPI model-service использует дообученную sentence-transformers модель:
 
-Текущая дообученная модель `sentence-transformers` ожидается по пути:
+```text
+Korprus/news-flow-ru-vectorization-mpnet
+```
+
+Базовая модель — `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`,
+датасет — `merionum/ru_paraphraser`, loss — `MultipleNegativesRankingLoss`.
+
+Зафиксированная Hugging Face ревизия хранится в:
+
+```text
+configs/model_registry/latest_model.json
+```
+
+Локальный путь:
 
 ```text
 models/news-flow-ru-vectorization-mpnet/final
 ```
 
-Модель создаётся скриптом:
+Модель создаётся `scripts/train_embeddings.py`, публикуется через
+`scripts/publish_model.py` и скачивается через `scripts/download_model.py`.
+
+MPNet retrieval-метрики относятся только к качеству поиска парафразов. Они не являются
+оценкой финальной кластеризации или novelty detection.
+
+## Финальный clustering/novelty pipeline
+
+Offline/inference pipeline использует:
+
+- embedding-модель `BAAI/bge-m3`, загружаемую через `sentence-transformers`;
+- сохранённый wrapper novelty classifier;
+- JSON-конфигурацию кластеризации.
+
+Runtime-файлы:
 
 ```text
-scripts/train_embeddings.py
+data/artifacts/models/final_exp10/final_novelty_model.joblib
+data/artifacts/models/final_exp10/final_pipeline_config.json
 ```
 
-Экспериментальный прототип обучения находится в ноутбуке:
+Выбранная конфигурация — `exp_10a_current_model_on_exp10_clustering`. Подробности и
+актуальные метрики находятся в [`final_pipeline.md`](final_pipeline.md) и
+[`model_improvement.md`](model_improvement.md).
 
-```text
-experiments/01_train_embeddings.ipynb
-```
+Дообученная на русских парафразах BGE-M3 проверялась как ablation, но не вошла в
+финальный runtime, поскольку уступила базовой `BAAI/bge-m3` в downstream-оценке.
 
-Модель используется в ноутбуке:
+## Что не хранить в Git
 
-```text
-experiments/02_lenta_event_grouping.ipynb
-```
+Как правило, не коммитируются:
 
-## Описание модели
+- полные checkpoints transformer-моделей;
+- Hugging Face caches;
+- embedding caches `.npz`;
+- FAISS-индексы;
+- большие подготовленные датасеты;
+- predictions и временные training outputs.
 
-- Базовая модель: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`
-- Датасет для дообучения: `merionum/ru_paraphraser`
-- Функция потерь: `MultipleNegativesRankingLoss`
-- Возможное расширение: Triplet Loss
+Допустимо хранить небольшие runtime-артефакты и metadata, если они нужны для
+воспроизводимого запуска и явно включены в проект.
 
-Текущая оценка качества:
-
-- Базовая модель: Recall@1 = 0.9527, Recall@5 = 0.9941, MRR@10 = 0.9699
-- Дообученная модель: Recall@1 = 0.9645, Recall@5 = 1.0, MRR@10 = 0.9798
-
-## Политика хранения
-
-Бинарные файлы модели не нужно коммитить в Git.
-
-Варианты хранения для следующих этапов:
-
-- Hugging Face Hub для моделей `sentence-transformers`.
-- S3-совместимое объектное хранилище для production-артефактов.
-- GitHub Releases для простой ручной публикации артефактов в учебном проекте.
-- Git LFS только если модель небольшая и обновляется редко.
-
-Для локальной разработки файлы модели следует хранить в `models/`. Эта директория исключена из Git через `.gitignore`.
+Для production-поставки предпочтительны Hugging Face Hub или объектное хранилище с
+зафиксированной ревизией и checksum.

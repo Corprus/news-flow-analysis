@@ -11,7 +11,7 @@ scripts/train_embeddings.py
 Скрипт вынесен из экспериментального ноутбука:
 
 ```text
-experiments/01_train_embeddings.ipynb
+notebooks/01_train_embeddings.ipynb
 ```
 
 Ноутбук можно использовать для пошагового анализа и проверки идей. Скрипт предназначен для воспроизводимого запуска обучения.

@@ -12,7 +12,7 @@
 - второй проход кластеризации: `exp_10` best-candidate attach;
 - novelty model: `exp_10a_current_model_on_exp10_clustering`.
 
-`exp_10a` - это текущая сохраненная CatBoost/fallback модель, примененная к выбранной
+`exp_10a` — это текущая сохраненная CatBoost/fallback модель, примененная к выбранной
 `exp_10` кластеризации. По актуальной таблице экспериментов она дала лучший
 `significant_f1` среди `exp_10*`.
 
@@ -26,6 +26,11 @@ scripts/benchmark_final_pipeline.py
 scripts/inspect_model_artifacts.py
 requirements_model_improvement.txt
 ```
+
+`src/model/` содержит общую экспериментальную и runtime-логику: clustering, feature
+engineering, обучение классификаторов и evaluation. `src/final_pipeline/` отвечает за
+production-like orchestration и переиспользует этот код, чтобы notebook и inference не
+расходились в реализации.
 
 Готовые артефакты финального pipeline:
 
@@ -134,6 +139,11 @@ exp10_src2_sim0.75_days7_m0.03_tj0.15_num1
 ```
 
 6. Для кластеризованных новостей применяется финальная novelty-модель `10a`.
+
+## Связанные документы
+
+- [Эксперименты по улучшению модели](model_improvement.md)
+- [Основной README](../README.md)
 
 ## Что не нужно коммитить
 

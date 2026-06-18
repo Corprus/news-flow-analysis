@@ -114,9 +114,8 @@ scripts/run_final_pipeline.py
 scripts/benchmark_final_pipeline.py
 scripts/inspect_model_artifacts.py
 requirements_model_improvement.txt
-README_final_pipeline.md
-README_pipeline_v3.md
-docs/README_model_improvement.md
+docs/final_pipeline.md
+docs/model_improvement.md
 data/artifacts/models/final_exp10/final_novelty_model.joblib
 data/artifacts/models/final_exp10/final_pipeline_config.json
 ```
@@ -169,3 +168,8 @@ python scripts/benchmark_final_pipeline.py `
 Для сервиса важно использовать `load_pipeline(project_root=...)` из
 `src/final_pipeline/pipeline.py`: он автоматически загружает выбранную `10a`
 модель и сохраненный config кластеризации.
+
+## Связанные документы
+
+- [Финальный pipeline](final_pipeline.md)
+- [Основной README](../README.md)
