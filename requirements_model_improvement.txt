@@ -1,0 +1,9 @@
+pandas
+numpy
+sentence-transformers
+catboost
+torch
+scikit-learn
+jupyter
+nbformat
+tqdm

@@ -77,6 +77,7 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+notebooks/catboost_info/
 
 # IPython
 profile_default/
@@ -209,6 +210,7 @@ __marimo__/
 
 data/raw/
 data/prepared/
+data/predictions/
 /models/
 artifacts/
 .hf-cache/

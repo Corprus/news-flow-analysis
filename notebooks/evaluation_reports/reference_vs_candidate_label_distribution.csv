@@ -1,0 +1,10 @@
+source,novelty_label,count,share
+reference,significant,73,0.6033057851239669
+reference,<empty/story_start>,32,0.2644628099173554
+reference,minor,9,0.0743801652892562
+reference,duplicate,5,0.04132231404958678
+reference,wrong_cluster,2,0.01652892561983471
+candidate,<empty/story_start>,52,0.4297520661157025
+candidate,minor,46,0.38016528925619836
+candidate,significant,16,0.1322314049586777
+candidate,duplicate,7,0.05785123966942149

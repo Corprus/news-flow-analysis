@@ -1,0 +1,14 @@
+metric,value,target,status
+coverage,1.0,>= 0.95,OK
+pairwise_f1,0.6348448687350835,>= 0.75,WARN
+false_merge_rate,0.4267241379310345,<= 0.15,WARN
+false_split_rate,0.2887700534759358,,INFO
+important_update_precision,1.0,,INFO
+important_update_recall,0.25,>= 0.8,WARN
+important_update_f1,0.4,>= 0.75,WARN
+novelty_accuracy,0.3333333333333333,,INFO
+novelty_macro_f1,0.17249857061177815,,INFO
+novelty_weighted_f1,0.35959509330006756,,INFO
+cohen_kappa,0.10176306835756255,,INFO
+reference_needs_review_rate,0.10743801652892562,,INFO
+candidate_needs_review_rate,0.23140495867768596,,INFO
