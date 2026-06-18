@@ -6,6 +6,7 @@ from .incremental import (
     load_incremental_pipeline,
 )
 from .pipeline import FinalNewsNoveltyPipeline, FinalPipelineResult, load_pipeline
+from .result import PipelineResult, PipelineVersions
 
 __all__ = [
     "FinalPipelineConfig",
@@ -14,6 +15,8 @@ __all__ = [
     "IncrementalNewsNoveltyPipeline",
     "IncrementalPipelineConfig",
     "IncrementalPipelineResult",
+    "PipelineResult",
+    "PipelineVersions",
     "load_incremental_pipeline",
     "load_pipeline",
 ]

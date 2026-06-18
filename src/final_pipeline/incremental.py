@@ -17,6 +17,7 @@ from .config import (
     FINAL_PIPELINE_CONFIG_RELATIVE_PATH,
     FinalPipelineConfig,
 )
+from .result import PipelineResult, PipelineVersions
 
 
 @dataclass(frozen=True)
@@ -40,15 +41,7 @@ class IncrementalPipelineConfig:
     text_embedding_column: str = "model_text"
 
 
-@dataclass
-class IncrementalPipelineResult:
-    predictions: pd.DataFrame
-    updated_predictions: pd.DataFrame
-    assignments: pd.DataFrame
-    new_clustered_news: pd.DataFrame
-    combined_clustered_news: pd.DataFrame
-    combined_embeddings: np.ndarray
-    diagnostics: dict
+IncrementalPipelineResult = PipelineResult
 
 
 class IncrementalNewsNoveltyPipeline:
@@ -65,10 +58,12 @@ class IncrementalNewsNoveltyPipeline:
         encoder,
         novelty_model: CatBoostSignificanceModel,
         config: IncrementalPipelineConfig | None = None,
+        final_config: FinalPipelineConfig | None = None,
     ) -> None:
         self.encoder = encoder
         self.novelty_model = novelty_model
         self.config = config or IncrementalPipelineConfig()
+        self.final_config = final_config or FinalPipelineConfig()
 
     def process(
         self,
@@ -206,18 +201,27 @@ class IncrementalNewsNoveltyPipeline:
                 | predictions["assignment_needs_review"].fillna(False)
             )
 
-        updated_predictions = all_predictions[
+        recalculated_predictions = all_predictions[
             all_predictions[cfg.id_column].astype(str).isin(affected_historical_ids)
         ].copy()
         if affected_historical_ids:
             affected_order = historical_news[
                 historical_news[cfg.id_column].astype(str).isin(affected_historical_ids)
             ][[cfg.id_column]].copy()
-            updated_predictions = affected_order.merge(
-                updated_predictions,
+            recalculated_predictions = affected_order.merge(
+                recalculated_predictions,
                 on=cfg.id_column,
                 how="left",
             )
+        persistence_predictions = pd.concat(
+            [predictions, recalculated_predictions],
+            ignore_index=True,
+            sort=False,
+        )
+        requested_ids = new_clustered[cfg.id_column].astype(str).tolist()
+        recalculated_ids = recalculated_predictions[cfg.id_column].astype(str).tolist()
+        updated_ids = list(dict.fromkeys([*requested_ids, *recalculated_ids]))
+        context_ids = historical_news[cfg.id_column].astype(str).tolist()
 
         diagnostics = {
             "historical_rows": int(historical_count),
@@ -235,14 +239,17 @@ class IncrementalNewsNoveltyPipeline:
             "recalculated_historical_rows": int(len(affected_historical_ids)),
             "recalculated_news_ids": sorted(affected_historical_ids),
         }
-        return IncrementalPipelineResult(
-            predictions=predictions,
-            updated_predictions=updated_predictions,
+        return PipelineResult(
+            mode="incremental",
+            requested_ids=requested_ids,
+            updated_ids=updated_ids,
+            context_ids=context_ids,
+            predictions=persistence_predictions,
             assignments=assignments,
-            new_clustered_news=new_clustered,
-            combined_clustered_news=combined_news,
-            combined_embeddings=combined_embeddings,
+            embedding_ids=requested_ids.copy(),
+            embeddings=np.asarray(new_embeddings, dtype=np.float32),
             diagnostics=diagnostics,
+            versions=self._versions(),
         )
 
     def _prepare_without_embeddings(self, news_df: pd.DataFrame) -> pd.DataFrame:
@@ -538,6 +545,16 @@ class IncrementalNewsNoveltyPipeline:
             suffix += 1
         return cluster_id
 
+    def _versions(self) -> PipelineVersions:
+        cfg = self.final_config
+        return PipelineVersions(
+            pipeline_version=f"{cfg.pipeline_version}-incremental-v1",
+            embedding_model=cfg.embedding_model_name,
+            embedding_model_revision=cfg.embedding_model_revision,
+            novelty_model_version=cfg.novelty_model_version,
+            config_version=cfg.config_version,
+        )
+
 
 def load_incremental_pipeline(
     *,
@@ -576,4 +593,5 @@ def load_incremental_pipeline(
         encoder=encoder,
         novelty_model=novelty_model,
         config=incremental_config,
+        final_config=final_config,
     )

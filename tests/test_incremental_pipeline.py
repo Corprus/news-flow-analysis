@@ -106,6 +106,10 @@ def test_assigns_new_article_to_existing_cluster_by_baseline_similarity() -> Non
     assert assignment["cluster_id"] == "event-1"
     assert assignment["assignment_method"] == "baseline"
     assert result.predictions["news_id"].tolist() == ["new-1"]
+    assert result.requested_ids == ["new-1"]
+    assert result.updated_ids == ["new-1"]
+    assert result.embedding_ids == ["new-1"]
+    assert result.embeddings.shape == (1, 2)
     assert novelty_model.news_df is not None
     assert novelty_model.news_df["news_id"].tolist() == ["old-1", "new-1"]
 
@@ -217,9 +221,12 @@ def test_new_batch_is_processed_chronologically_and_embeddings_stay_aligned() ->
         ),
     )
 
-    assert result.new_clustered_news["news_id"].tolist() == ["new-1", "new-2"]
-    assert result.new_clustered_news["cluster_id"].nunique() == 1
+    assert result.requested_ids == ["new-1", "new-2"]
+    assert result.assignments["cluster_id"].nunique() == 1
     assert result.assignments["assignment_method"].tolist() == ["new_cluster", "baseline"]
+    assert result.embedding_ids == ["new-1", "new-2"]
+    np.testing.assert_allclose(result.embeddings[0], [1.0, 0.0])
+    np.testing.assert_allclose(result.embeddings[1], [0.9, 0.1])
     assert novelty_model.embeddings is not None
     np.testing.assert_allclose(novelty_model.embeddings[0], [1.0, 0.0])
     np.testing.assert_allclose(novelty_model.embeddings[1], [0.9, 0.1])
@@ -263,7 +270,8 @@ def test_late_arrival_uses_future_article_and_recalculates_later_cluster_items()
     assert assignment["assignment_method"] == "baseline"
     assert bool(assignment["late_arrival"])
     assert assignment["affected_historical_count"] == 1
-    assert result.updated_predictions["news_id"].tolist() == ["future-1"]
+    assert result.predictions["news_id"].tolist() == ["late-1", "future-1"]
+    assert result.updated_ids == ["late-1", "future-1"]
     assert result.diagnostics["recalculated_news_ids"] == ["future-1"]
 
 
@@ -304,4 +312,4 @@ def test_article_is_not_late_relative_to_unrelated_newer_cluster() -> None:
     assignment = result.assignments.iloc[0]
     assert assignment["cluster_id"] == "event-target"
     assert not bool(assignment["late_arrival"])
-    assert result.updated_predictions.empty
+    assert result.updated_ids == ["new-1"]

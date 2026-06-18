@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -21,14 +20,9 @@ from .config import (
     FINAL_PIPELINE_CONFIG_RELATIVE_PATH,
     FinalPipelineConfig,
 )
+from .result import PipelineResult, PipelineVersions
 
-
-@dataclass
-class FinalPipelineResult:
-    predictions: pd.DataFrame
-    clustered_news: pd.DataFrame
-    embeddings: np.ndarray
-    diagnostics: dict
+FinalPipelineResult = PipelineResult
 
 
 class FinalNewsNoveltyPipeline:
@@ -49,19 +43,17 @@ class FinalNewsNoveltyPipeline:
         self,
         raw_news_df: pd.DataFrame,
         *,
-        embeddings_cache_path: str | Path,
+        embeddings: np.ndarray | None = None,
+        embeddings_cache_path: str | Path | None = None,
         force_recompute_embeddings: bool = False,
     ) -> FinalPipelineResult:
         cfg = self.config
 
-        news = prepare_legacy_baseline_input(raw_news_df)
-        embeddings = get_or_create_id_aligned_embeddings(
-            encoder=self.encoder,
-            df=news,
-            cache_path=embeddings_cache_path,
-            id_column=cfg.id_column,
-            text_column=cfg.text_column,
-            force_recompute=force_recompute_embeddings,
+        news, embeddings = self._prepare_news_and_embeddings(
+            raw_news_df=raw_news_df,
+            embeddings=embeddings,
+            embeddings_cache_path=embeddings_cache_path,
+            force_recompute_embeddings=force_recompute_embeddings,
         )
 
         base_ids, base_diag = build_baseline_cluster_ids(
@@ -91,6 +83,7 @@ class FinalNewsNoveltyPipeline:
         )
 
         diagnostics = {
+            "mode": "full",
             "base_clustering": base_diag,
             "attach_clustering": attach_diag,
             "attach_clustering_config": {
@@ -107,11 +100,72 @@ class FinalNewsNoveltyPipeline:
             "selected_attachments": int(len(selected_attachments)),
             "final_clusters": int(clustered_news["cluster_id"].nunique()),
         }
-        return FinalPipelineResult(
+        requested_ids = news[cfg.id_column].astype(str).tolist()
+        assignments = clustered_news[[cfg.id_column, "cluster_id"]].copy()
+        assignments["assignment_method"] = "full"
+        return PipelineResult(
+            mode="full",
+            requested_ids=requested_ids,
+            updated_ids=requested_ids.copy(),
+            context_ids=[],
             predictions=predictions,
-            clustered_news=clustered_news,
+            assignments=assignments,
+            embedding_ids=requested_ids.copy(),
             embeddings=embeddings,
             diagnostics=diagnostics,
+            versions=self._versions(),
+        )
+
+    def _prepare_news_and_embeddings(
+        self,
+        *,
+        raw_news_df: pd.DataFrame,
+        embeddings: np.ndarray | None,
+        embeddings_cache_path: str | Path | None,
+        force_recompute_embeddings: bool,
+    ) -> tuple[pd.DataFrame, np.ndarray]:
+        cfg = self.config
+        position_column = "_final_pipeline_embedding_position"
+        positioned = raw_news_df.copy()
+        positioned[position_column] = np.arange(len(positioned))
+        news = prepare_legacy_baseline_input(positioned)
+        positions = news.pop(position_column).to_numpy(dtype=int)
+
+        if embeddings is not None:
+            matrix = np.asarray(embeddings, dtype=np.float32)
+            if matrix.ndim != 2 or len(matrix) != len(raw_news_df):
+                raise ValueError(
+                    "embeddings must be a two-dimensional matrix aligned with raw_news_df"
+                )
+            return news, matrix[positions]
+
+        if embeddings_cache_path is not None:
+            matrix = get_or_create_id_aligned_embeddings(
+                encoder=self.encoder,
+                df=news,
+                cache_path=embeddings_cache_path,
+                id_column=cfg.id_column,
+                text_column=cfg.text_column,
+                force_recompute=force_recompute_embeddings,
+            )
+        else:
+            matrix = self.encoder.encode_dataframe(
+                news,
+                text_column=cfg.text_column,
+                id_column=cfg.id_column,
+                cache_path=None,
+                force_recompute=True,
+            )
+        return news, np.asarray(matrix, dtype=np.float32)
+
+    def _versions(self) -> PipelineVersions:
+        cfg = self.config
+        return PipelineVersions(
+            pipeline_version=cfg.pipeline_version,
+            embedding_model=cfg.embedding_model_name,
+            embedding_model_revision=cfg.embedding_model_revision,
+            novelty_model_version=cfg.novelty_model_version,
+            config_version=cfg.config_version,
         )
 
 
