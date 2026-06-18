@@ -47,7 +47,11 @@ def main() -> None:
     config_path = args.pipeline_config or project_root / FINAL_PIPELINE_CONFIG_RELATIVE_PATH
     if not config_path.is_absolute():
         config_path = project_root / config_path
-    config = FinalPipelineConfig.from_json(config_path) if config_path.exists() else FinalPipelineConfig()
+    config = (
+        FinalPipelineConfig.from_json(config_path)
+        if config_path.exists()
+        else FinalPipelineConfig()
+    )
     if args.no_progress:
         config = FinalPipelineConfig(
             embedding_model_name=config.embedding_model_name,

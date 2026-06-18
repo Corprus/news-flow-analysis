@@ -39,11 +39,18 @@ class TorchTabularSignificanceMLP:
         self.std_ = None
 
     def _prepare_training_data(self, features_df: pd.DataFrame, labels_df: pd.DataFrame):
-        frame = features_df.merge(labels_df[["news_id", "novelty_label"]], on="news_id", how="inner")
+        frame = features_df.merge(
+            labels_df[["news_id", "novelty_label"]], on="news_id", how="inner"
+        )
         allowed = set(self.model_config.positive_labels) | set(self.model_config.negative_labels)
         frame["novelty_label"] = frame["novelty_label"].fillna("").astype(str).str.strip()
         frame = frame[frame["novelty_label"].isin(allowed)].copy()
-        y = frame["novelty_label"].isin(self.model_config.positive_labels).astype(np.float32).to_numpy()
+        y = (
+            frame["novelty_label"]
+            .isin(self.model_config.positive_labels)
+            .astype(np.float32)
+            .to_numpy()
+        )
         x = frame[self.feature_columns].astype(np.float32).to_numpy()
         return x, y
 
@@ -61,7 +68,9 @@ class TorchTabularSignificanceMLP:
         self.std_ = x.std(axis=0, keepdims=True) + 1e-6
         x = (x - self.mean_) / self.std_
 
-        dataset = TensorDataset(torch.tensor(x, dtype=torch.float32), torch.tensor(y[:, None], dtype=torch.float32))
+        dataset = TensorDataset(
+            torch.tensor(x, dtype=torch.float32), torch.tensor(y[:, None], dtype=torch.float32)
+        )
         loader = DataLoader(dataset, batch_size=self.mlp_config.batch_size, shuffle=True)
 
         self.model = nn.Sequential(
@@ -111,9 +120,15 @@ class TorchTabularSignificanceMLP:
         proba = self.predict_proba(features_df)
         out = features_df.copy()
         out["p_significant"] = proba
-        out["novelty_label"] = np.where(proba >= self.model_config.threshold, "significant", "minor")
+        out["novelty_label"] = np.where(
+            proba >= self.model_config.threshold, "significant", "minor"
+        )
         if "max_prev_sim" in out.columns:
-            duplicate_mask = (proba < self.model_config.threshold) & (out["max_prev_sim"] >= self.model_config.duplicate_threshold)
+            duplicate_mask = (proba < self.model_config.threshold) & (
+                out["max_prev_sim"] >= self.model_config.duplicate_threshold
+            )
             out.loc[duplicate_mask, "novelty_label"] = "duplicate"
-        out["needs_review"] = np.abs(proba - self.model_config.threshold) <= self.model_config.review_margin
+        out["needs_review"] = (
+            np.abs(proba - self.model_config.threshold) <= self.model_config.review_margin
+        )
         return out

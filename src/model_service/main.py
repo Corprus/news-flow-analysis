@@ -76,11 +76,7 @@ async def _handle_search_query(
 
 
 def _job_result(vectorization_result: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: value
-        for key, value in vectorization_result.items()
-        if key != "embedding"
-    }
+    return {key: value for key, value in vectorization_result.items() if key != "embedding"}
 
 
 @asynccontextmanager

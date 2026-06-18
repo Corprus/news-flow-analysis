@@ -29,11 +29,14 @@ def make_prediction_from_clusterer_and_model(
         labelled[id_column] = labelled[id_column].astype(str)
         base[id_column] = base[id_column].astype(str)
         pred = base.drop(columns=["cluster_id"]).merge(
-            labelled[[id_column, "cluster_id", "novelty_label", "needs_review"]], on=id_column, how="left"
+            labelled[[id_column, "cluster_id", "novelty_label", "needs_review"]],
+            on=id_column,
+            how="left",
         )
         pred["comment"] = ""
         pred = ensure_prediction_schema(pred)
     return pred
+
 
 def attach_clusters_from_prediction(
     news_df: pd.DataFrame,
@@ -63,6 +66,7 @@ def attach_clusters_from_prediction(
         )
 
     return out
+
 
 def run_and_evaluate_experiment(
     experiment_name: str,

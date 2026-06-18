@@ -143,23 +143,35 @@ class NewsService:
         content_hash: str,
     ) -> NewsArticle | None:
         if canonical_url:
-            article_by_url = self._session.execute(
-                select(NewsArticle).where(NewsArticle.canonical_url == canonical_url)
-            ).scalars().first()
+            article_by_url = (
+                self._session.execute(
+                    select(NewsArticle).where(NewsArticle.canonical_url == canonical_url)
+                )
+                .scalars()
+                .first()
+            )
             if article_by_url is not None:
                 return article_by_url
 
-        return self._session.execute(
-            select(NewsArticle).where(NewsArticle.content_hash == content_hash)
-        ).scalars().first()
+        return (
+            self._session.execute(
+                select(NewsArticle).where(NewsArticle.content_hash == content_hash)
+            )
+            .scalars()
+            .first()
+        )
 
     def _add_submission(self, article_id: str, user_id: UUID) -> None:
-        existing_submission = self._session.execute(
-            select(NewsArticleSubmission).where(
-                NewsArticleSubmission.article_id == article_id,
-                NewsArticleSubmission.user_id == str(user_id),
+        existing_submission = (
+            self._session.execute(
+                select(NewsArticleSubmission).where(
+                    NewsArticleSubmission.article_id == article_id,
+                    NewsArticleSubmission.user_id == str(user_id),
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if existing_submission is not None:
             return
 

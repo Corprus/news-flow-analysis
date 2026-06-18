@@ -1,16 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-import json
 from typing import Any
 
 from model.attach_clustering import AttachClusteringConfig, BaselineClusteringConfig
 
-
-FINAL_MODEL_RELATIVE_PATH = Path(
-    "data/artifacts/models/final_exp10/final_novelty_model.joblib"
-)
+FINAL_MODEL_RELATIVE_PATH = Path("data/artifacts/models/final_exp10/final_novelty_model.joblib")
 FINAL_PIPELINE_CONFIG_RELATIVE_PATH = Path(
     "data/artifacts/models/final_exp10/final_pipeline_config.json"
 )
@@ -35,7 +32,7 @@ class FinalPipelineConfig:
     attach_clustering: AttachClusteringConfig = field(default_factory=AttachClusteringConfig)
 
     @classmethod
-    def from_json(cls, path: str | Path) -> "FinalPipelineConfig":
+    def from_json(cls, path: str | Path) -> FinalPipelineConfig:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         kwargs: dict[str, Any] = dict(raw)
         if "base_clustering" in kwargs and isinstance(kwargs["base_clustering"], dict):

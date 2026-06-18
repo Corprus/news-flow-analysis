@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from itertools import combinations
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -14,7 +14,9 @@ def _safe_div(num: float, den: float) -> float:
     return float(num / den) if den else 0.0
 
 
-def _pairs_from_clusters(df: pd.DataFrame, id_column: str, cluster_column: str) -> set[tuple[str, str]]:
+def _pairs_from_clusters(
+    df: pd.DataFrame, id_column: str, cluster_column: str
+) -> set[tuple[str, str]]:
     pairs: set[tuple[str, str]] = set()
     for _, group in df[[id_column, cluster_column]].dropna().groupby(cluster_column):
         ids = sorted(group[id_column].astype(str).unique())
@@ -181,21 +183,10 @@ def compact_metrics_table(
         duplicated_mask = table.duplicated(subset=["experiment"], keep=False)
 
         if duplicated_mask.any():
-            duplicated_names = (
-                table.loc[duplicated_mask, "experiment"]
-                .drop_duplicates()
-                .tolist()
-            )
-            print(
-                "Removed duplicate experiment rows, "
-                f"keep={keep}: {duplicated_names}"
-            )
+            duplicated_names = table.loc[duplicated_mask, "experiment"].drop_duplicates().tolist()
+            print(f"Removed duplicate experiment rows, keep={keep}: {duplicated_names}")
 
-        table = (
-            table
-            .drop_duplicates(subset=["experiment"], keep=keep)
-            .reset_index(drop=True)
-        )
+        table = table.drop_duplicates(subset=["experiment"], keep=keep).reset_index(drop=True)
 
     compact_columns = [
         "experiment",
@@ -208,10 +199,6 @@ def compact_metrics_table(
         "comment",
     ]
 
-    existing_columns = [
-        column
-        for column in compact_columns
-        if column in table.columns
-    ]
+    existing_columns = [column for column in compact_columns if column in table.columns]
 
     return table[existing_columns]

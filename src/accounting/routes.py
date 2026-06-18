@@ -74,10 +74,7 @@ def get_my_transactions(
     reason: TransactionReason | None = None,
 ) -> list[TransactionResponse]:
     transactions = accounting.get_transaction_history(current_user.id, limit, offset, reason)
-    return [
-        _to_response(transaction)
-        for transaction in transactions
-    ]
+    return [_to_response(transaction) for transaction in transactions]
 
 
 def _to_response(transaction) -> TransactionResponse:

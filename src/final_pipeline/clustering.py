@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from itertools import product
 import re
+from itertools import product
 
 import numpy as np
 import pandas as pd
 
 from .config import AttachClusteringConfig, BaseClusteringConfig, SilverPositiveSelectionConfig
 from .embeddings import l2_normalize
-from .evaluation import evaluate_cluster_ids_on_annotation, normalize_news_id, pair_count
+from .evaluation import evaluate_cluster_ids_on_annotation, pair_count
 
 _TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9]+", flags=re.IGNORECASE)
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
@@ -97,7 +96,11 @@ def build_threshold_graph_cluster_ids(
     edge_count = 0
     similarity_checks = 0
 
-    groups = df.groupby(cfg.topic_column, sort=False, dropna=False) if cfg.use_topic_blocking else [("<all>", df)]
+    groups = (
+        df.groupby(cfg.topic_column, sort=False, dropna=False)
+        if cfg.use_topic_blocking
+        else [("<all>", df)]
+    )
 
     for _, part in groups:
         if len(part) <= 1:
@@ -191,18 +194,20 @@ def build_candidate_pairs(
                 similarity = float(sim_matrix[i, j])
                 if similarity < min_similarity:
                     continue
-                rows.append({
-                    "left_index": left,
-                    "right_index": right,
-                    "left_news_id": df.loc[left, id_column],
-                    "right_news_id": df.loc[right, id_column],
-                    "topic": df.loc[left, topic_column],
-                    "similarity": similarity,
-                    "days_diff": days_diff,
-                    "title_jaccard": jaccard(title_tokens[left], title_tokens[right]),
-                    "text_jaccard": jaccard(text_tokens[left], text_tokens[right]),
-                    "shared_numbers_count": int(len(number_sets[left] & number_sets[right])),
-                })
+                rows.append(
+                    {
+                        "left_index": left,
+                        "right_index": right,
+                        "left_news_id": df.loc[left, id_column],
+                        "right_news_id": df.loc[right, id_column],
+                        "topic": df.loc[left, topic_column],
+                        "similarity": similarity,
+                        "days_diff": days_diff,
+                        "title_jaccard": jaccard(title_tokens[left], title_tokens[right]),
+                        "text_jaccard": jaccard(text_tokens[left], text_tokens[right]),
+                        "shared_numbers_count": int(len(number_sets[left] & number_sets[right])),
+                    }
+                )
 
     return pd.DataFrame(rows)
 
@@ -223,12 +228,15 @@ def build_best_candidate_attach_clusters(
     Каждый маленький source-кластер получает максимум один target-кластер.
     """
 
-    n = len(news_df)
     cluster_ids = base_cluster_ids.astype(str).reset_index(drop=True).copy()
     cluster_sizes = _cluster_size_map(cluster_ids)
 
     if candidate_pairs.empty:
-        return cluster_ids, {"candidate_attach_edges": 0, "attached_source_clusters": 0, "attached_rows": 0}, pd.DataFrame()
+        return (
+            cluster_ids,
+            {"candidate_attach_edges": 0, "attached_source_clusters": 0, "attached_rows": 0},
+            pd.DataFrame(),
+        )
 
     rows: list[dict] = []
     for row in candidate_pairs.itertuples(index=False):
@@ -259,48 +267,67 @@ def build_best_candidate_attach_clusters(
                 continue
             if target_size <= source_size:
                 continue
-            rows.append({
-                "source_cluster": source_cluster,
-                "target_cluster": target_cluster,
-                "source_size": int(source_size),
-                "target_size": int(target_size),
-                "source_index": int(source_idx),
-                "target_index": int(target_idx),
-                "source_news_id": news_df.iloc[source_idx].get("news_id"),
-                "target_news_id": news_df.iloc[target_idx].get("news_id"),
-                "source_title": news_df.iloc[source_idx].get("title", ""),
-                "target_title": news_df.iloc[target_idx].get("title", ""),
-                "best_similarity": float(row.similarity),
-                "min_days_diff": float(row.days_diff),
-                "max_title_jaccard": float(row.title_jaccard),
-                "max_shared_numbers_count": int(row.shared_numbers_count),
-            })
+            rows.append(
+                {
+                    "source_cluster": source_cluster,
+                    "target_cluster": target_cluster,
+                    "source_size": int(source_size),
+                    "target_size": int(target_size),
+                    "source_index": int(source_idx),
+                    "target_index": int(target_idx),
+                    "source_news_id": news_df.iloc[source_idx].get("news_id"),
+                    "target_news_id": news_df.iloc[target_idx].get("news_id"),
+                    "source_title": news_df.iloc[source_idx].get("title", ""),
+                    "target_title": news_df.iloc[target_idx].get("title", ""),
+                    "best_similarity": float(row.similarity),
+                    "min_days_diff": float(row.days_diff),
+                    "max_title_jaccard": float(row.title_jaccard),
+                    "max_shared_numbers_count": int(row.shared_numbers_count),
+                }
+            )
 
     attach_edges = pd.DataFrame(rows)
     if attach_edges.empty:
-        diagnostics = {"candidate_attach_edges": 0, "attached_source_clusters": 0, "attached_rows": 0}
+        diagnostics = {
+            "candidate_attach_edges": 0,
+            "attached_source_clusters": 0,
+            "attached_rows": 0,
+        }
         return cluster_ids, diagnostics, attach_edges
 
     best_rows: list[pd.Series] = []
-    for source_cluster, part in attach_edges.groupby("source_cluster", sort=False):
+    for _source_cluster, part in attach_edges.groupby("source_cluster", sort=False):
         # Сначала агрегируем лучший edge по target-кластеру.
         per_target = (
-            part.sort_values(["best_similarity", "max_title_jaccard", "max_shared_numbers_count"], ascending=False)
+            part.sort_values(
+                ["best_similarity", "max_title_jaccard", "max_shared_numbers_count"],
+                ascending=False,
+            )
             .groupby("target_cluster", sort=False)
             .head(1)
             .sort_values("best_similarity", ascending=False)
             .reset_index(drop=True)
         )
         best = per_target.iloc[0].copy()
-        second_best_similarity = float(per_target.iloc[1]["best_similarity"]) if len(per_target) > 1 else -np.inf
+        second_best_similarity = (
+            float(per_target.iloc[1]["best_similarity"]) if len(per_target) > 1 else -np.inf
+        )
         best["second_best_similarity"] = second_best_similarity
-        best["margin"] = float(best["best_similarity"] - second_best_similarity) if np.isfinite(second_best_similarity) else np.inf
+        best["margin"] = (
+            float(best["best_similarity"] - second_best_similarity)
+            if np.isfinite(second_best_similarity)
+            else np.inf
+        )
         if best["margin"] >= config.min_margin:
             best_rows.append(best)
 
     selected = pd.DataFrame(best_rows)
     if selected.empty:
-        diagnostics = {"candidate_attach_edges": int(len(attach_edges)), "attached_source_clusters": 0, "attached_rows": 0}
+        diagnostics = {
+            "candidate_attach_edges": int(len(attach_edges)),
+            "attached_source_clusters": 0,
+            "attached_rows": 0,
+        }
         return cluster_ids, diagnostics, selected
 
     attached_rows = 0
@@ -336,7 +363,9 @@ def max_cluster_size(cluster_ids: pd.Series) -> int:
     return int(cluster_ids.astype(str).value_counts().max())
 
 
-def silver_positive_pair_count(silver_reference: pd.DataFrame, cluster_column: str = "cluster_id") -> int:
+def silver_positive_pair_count(
+    silver_reference: pd.DataFrame, cluster_column: str = "cluster_id"
+) -> int:
     return int(silver_reference[cluster_column].astype(str).value_counts().map(pair_count).sum())
 
 
@@ -362,29 +391,33 @@ def run_silver_positive_attach_sweep(
     base_pred_pairs = max(int(base_metrics["total_pred_pairs"]), 1)
 
     rows: list[dict] = []
-    cluster_ids_by_variant: dict[str, pd.Series] = {"baseline_strict_0.82": base_cluster_ids.astype(str).reset_index(drop=True)}
+    cluster_ids_by_variant: dict[str, pd.Series] = {
+        "baseline_strict_0.82": base_cluster_ids.astype(str).reset_index(drop=True)
+    }
     attachments_by_variant: dict[str, pd.DataFrame] = {}
 
-    rows.append({
-        "variant": "baseline_strict_0.82",
-        "min_similarity": np.nan,
-        "max_days": np.nan,
-        "min_margin": np.nan,
-        "source_max_cluster_size": np.nan,
-        "title_jaccard_threshold": np.nan,
-        "min_shared_numbers": np.nan,
-        "require_evidence": np.nan,
-        "candidate_attach_edges": 0,
-        "attached_source_clusters": 0,
-        "attached_rows": 0,
-        "all_data_max_cluster_size": max_cluster_size(base_cluster_ids),
-        "silver_positive_pairs": base_metrics["total_ref_pairs"],
-        "silver_recovered_positive_pairs": base_metrics["tp_same_pairs"],
-        "silver_missed_positive_pairs": base_metrics["fn_missed_same_pairs"],
-        "silver_positive_recall": base_metrics["pairwise_recall"],
-        "silver_total_pred_pairs": base_metrics["total_pred_pairs"],
-        "silver_pred_pair_growth": 1.0,
-    })
+    rows.append(
+        {
+            "variant": "baseline_strict_0.82",
+            "min_similarity": np.nan,
+            "max_days": np.nan,
+            "min_margin": np.nan,
+            "source_max_cluster_size": np.nan,
+            "title_jaccard_threshold": np.nan,
+            "min_shared_numbers": np.nan,
+            "require_evidence": np.nan,
+            "candidate_attach_edges": 0,
+            "attached_source_clusters": 0,
+            "attached_rows": 0,
+            "all_data_max_cluster_size": max_cluster_size(base_cluster_ids),
+            "silver_positive_pairs": base_metrics["total_ref_pairs"],
+            "silver_recovered_positive_pairs": base_metrics["tp_same_pairs"],
+            "silver_missed_positive_pairs": base_metrics["fn_missed_same_pairs"],
+            "silver_positive_recall": base_metrics["pairwise_recall"],
+            "silver_total_pred_pairs": base_metrics["total_pred_pairs"],
+            "silver_pred_pair_growth": 1.0,
+        }
+    )
 
     for values in product(
         cfg.min_similarities,
@@ -421,24 +454,26 @@ def run_silver_positive_attach_sweep(
             candidate_cluster_ids=cluster_ids,
         )
         pred_growth = silver_metrics["total_pred_pairs"] / base_pred_pairs
-        rows.append({
-            "variant": variant,
-            "min_similarity": min_similarity,
-            "max_days": max_days,
-            "min_margin": min_margin,
-            "source_max_cluster_size": source_size,
-            "title_jaccard_threshold": title_jaccard,
-            "min_shared_numbers": min_numbers,
-            "require_evidence": cfg.require_evidence,
-            **diagnostics,
-            "all_data_max_cluster_size": max_cluster_size(cluster_ids),
-            "silver_positive_pairs": silver_metrics["total_ref_pairs"],
-            "silver_recovered_positive_pairs": silver_metrics["tp_same_pairs"],
-            "silver_missed_positive_pairs": silver_metrics["fn_missed_same_pairs"],
-            "silver_positive_recall": silver_metrics["pairwise_recall"],
-            "silver_total_pred_pairs": silver_metrics["total_pred_pairs"],
-            "silver_pred_pair_growth": pred_growth,
-        })
+        rows.append(
+            {
+                "variant": variant,
+                "min_similarity": min_similarity,
+                "max_days": max_days,
+                "min_margin": min_margin,
+                "source_max_cluster_size": source_size,
+                "title_jaccard_threshold": title_jaccard,
+                "min_shared_numbers": min_numbers,
+                "require_evidence": cfg.require_evidence,
+                **diagnostics,
+                "all_data_max_cluster_size": max_cluster_size(cluster_ids),
+                "silver_positive_pairs": silver_metrics["total_ref_pairs"],
+                "silver_recovered_positive_pairs": silver_metrics["tp_same_pairs"],
+                "silver_missed_positive_pairs": silver_metrics["fn_missed_same_pairs"],
+                "silver_positive_recall": silver_metrics["pairwise_recall"],
+                "silver_total_pred_pairs": silver_metrics["total_pred_pairs"],
+                "silver_pred_pair_growth": pred_growth,
+            }
+        )
         cluster_ids_by_variant[variant] = cluster_ids
         attachments_by_variant[variant] = selected
 

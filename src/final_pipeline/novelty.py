@@ -9,7 +9,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from .config import FinalPipelineConfig, LEGACY_FEATURE_COLUMNS
+from .config import LEGACY_FEATURE_COLUMNS, FinalPipelineConfig
 from .embeddings import l2_normalize
 from .features import LegacyFeatureBuilder
 
@@ -36,7 +36,7 @@ class FinalNoveltyModel:
         *,
         model_config_path: str | Path | None = None,
         pipeline_config: FinalPipelineConfig | None = None,
-    ) -> "FinalNoveltyModel":
+    ) -> FinalNoveltyModel:
         model_path = Path(model_path)
         config = pipeline_config or FinalPipelineConfig()
 
@@ -59,6 +59,7 @@ class FinalNoveltyModel:
 
         if model_path.suffix.lower() == ".cbm":
             from catboost import CatBoostClassifier
+
             model = CatBoostClassifier()
             model.load_model(str(model_path))
         else:
@@ -81,13 +82,16 @@ class FinalNoveltyModel:
     def save(self, model_path: str | Path) -> None:
         model_path = Path(model_path)
         model_path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump({
-            "model": self.model,
-            "feature_columns": self.feature_columns,
-            "threshold": self.config.novelty_threshold,
-            "duplicate_threshold": self.config.duplicate_threshold,
-            "review_margin": self.config.review_margin,
-        }, model_path)
+        joblib.dump(
+            {
+                "model": self.model,
+                "feature_columns": self.feature_columns,
+                "threshold": self.config.novelty_threshold,
+                "duplicate_threshold": self.config.duplicate_threshold,
+                "review_margin": self.config.review_margin,
+            },
+            model_path,
+        )
 
     def _predict_one_from_context(
         self,
@@ -109,9 +113,13 @@ class FinalNoveltyModel:
         current_id = str(context_df.iloc[-1][cfg.id_column])
         current_features = features[features[cfg.id_column].astype(str).eq(current_id)]
         if len(current_features) != 1:
-            raise ValueError(f"Не удалось построить ровно одну строку признаков для news_id={current_id}")
+            raise ValueError(
+                f"Не удалось построить ровно одну строку признаков для news_id={current_id}"
+            )
 
-        missing = [column for column in self.feature_columns if column not in current_features.columns]
+        missing = [
+            column for column in self.feature_columns if column not in current_features.columns
+        ]
         if missing:
             raise ValueError(f"Нет feature columns для novelty model: {missing}")
 
@@ -122,10 +130,14 @@ class FinalNoveltyModel:
         else:
             label = "duplicate" if max_prev_similarity >= cfg.duplicate_threshold else "minor"
         needs_review = abs(proba - cfg.novelty_threshold) <= cfg.review_margin
-        comment = f"{reason}; p_significant={proba:.4f}; max_prev_similarity={max_prev_similarity:.4f}"
+        comment = (
+            f"{reason}; p_significant={proba:.4f}; max_prev_similarity={max_prev_similarity:.4f}"
+        )
         return label, bool(needs_review), comment
 
-    def predict_clustered_with_fallback(self, news_df: pd.DataFrame, embeddings: np.ndarray) -> pd.DataFrame:
+    def predict_clustered_with_fallback(
+        self, news_df: pd.DataFrame, embeddings: np.ndarray
+    ) -> pd.DataFrame:
         """Предсказывает novelty_label для уже кластеризованных новостей."""
 
         cfg = self.config
@@ -148,12 +160,18 @@ class FinalNoveltyModel:
             if pd.isna(current_date):
                 return []
             same_topic = df[cfg.topic_column].astype(str).eq(str(current[cfg.topic_column]))
-            different_cluster = ~df[cfg.cluster_column].astype(str).eq(str(current[cfg.cluster_column]))
+            different_cluster = ~df[cfg.cluster_column].astype(str).eq(
+                str(current[cfg.cluster_column])
+            )
             dates = df[cfg.date_column]
-            previous_time = (dates < current_date) | ((dates == current_date) & (df["_row_pos"] < int(current["_row_pos"])))
+            previous_time = (dates < current_date) | (
+                (dates == current_date) & (df["_row_pos"] < int(current["_row_pos"]))
+            )
             delta_days = (current_date - dates).dt.total_seconds() / (24 * 60 * 60)
             in_window = (delta_days >= 0) & (delta_days <= cfg.fallback_window_days)
-            candidates = df.index[same_topic & different_cluster & previous_time & in_window].to_numpy(dtype=int)
+            candidates = df.index[
+                same_topic & different_cluster & previous_time & in_window
+            ].to_numpy(dtype=int)
             if len(candidates) == 0:
                 return []
             sims = emb[candidates] @ emb[current_idx]
@@ -166,7 +184,9 @@ class FinalNoveltyModel:
             return selected[order].tolist()
 
         outputs: list[dict] = []
-        sorted_df = df.sort_values([cfg.cluster_column, cfg.date_column, "_row_pos"], kind="mergesort")
+        sorted_df = df.sort_values(
+            [cfg.cluster_column, cfg.date_column, "_row_pos"], kind="mergesort"
+        )
 
         for _, group in sorted_df.groupby(cfg.cluster_column, sort=False, dropna=False):
             history_indices: list[int] = []
@@ -179,7 +199,9 @@ class FinalNoveltyModel:
                 if history_indices:
                     context_indices = history_indices + [idx]
                     label, needs_review, comment = self._predict_one_from_context(
-                        df.iloc[context_indices].copy(), emb[context_indices], reason="cluster_context"
+                        df.iloc[context_indices].copy(),
+                        emb[context_indices],
+                        reason="cluster_context",
                     )
                 elif cfg.first_item_fallback_enabled:
                     fallback_indices = find_fallback_indices(idx)
@@ -192,17 +214,19 @@ class FinalNoveltyModel:
                             context_df, emb[context_indices], reason="first_item_fallback"
                         )
 
-                outputs.append({
-                    cfg.id_column: row[cfg.id_column],
-                    "published_at": row.get("published_at"),
-                    "topic": row.get("topic", ""),
-                    "title": row.get("title", ""),
-                    "text": row.get("text", ""),
-                    cfg.cluster_column: row[cfg.cluster_column],
-                    "novelty_label": label,
-                    "comment": comment,
-                    "needs_review": needs_review,
-                })
+                outputs.append(
+                    {
+                        cfg.id_column: row[cfg.id_column],
+                        "published_at": row.get("published_at"),
+                        "topic": row.get("topic", ""),
+                        "title": row.get("title", ""),
+                        "text": row.get("text", ""),
+                        cfg.cluster_column: row[cfg.cluster_column],
+                        "novelty_label": label,
+                        "comment": comment,
+                        "needs_review": needs_review,
+                    }
+                )
                 history_indices.append(idx)
 
         result = pd.DataFrame(outputs)

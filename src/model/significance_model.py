@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Sequence
 from dataclasses import fields
+from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
-
 from catboost import CatBoostClassifier
 
 from .config import SignificanceModelConfig
 from .data import ensure_prediction_schema
 from .embeddings import l2_normalize
 from .features import DEFAULT_FEATURE_COLUMNS, build_legacy_significance_features
+
 
 class CatBoostSignificanceModel:
     """Binary significant/not-significant model with deterministic post-processing."""
@@ -54,7 +53,7 @@ class CatBoostSignificanceModel:
         id_column: str = "news_id",
         label_column: str = "novelty_label",
         catboost_params: dict | None = None,
-    ) -> "CatBoostSignificanceModel":
+    ) -> CatBoostSignificanceModel:
         try:
             from catboost import CatBoostClassifier
         except ImportError as exc:
@@ -103,7 +102,9 @@ class CatBoostSignificanceModel:
             else None
         )
         if similarity_column is not None:
-            duplicate_mask = (proba < self.config.threshold) & (out[similarity_column] >= self.config.duplicate_threshold)
+            duplicate_mask = (proba < self.config.threshold) & (
+                out[similarity_column] >= self.config.duplicate_threshold
+            )
             out.loc[duplicate_mask, "novelty_label"] = "duplicate"
         out["needs_review"] = np.abs(proba - self.config.threshold) <= self.config.review_margin
         return out
@@ -144,7 +145,9 @@ class CatBoostSignificanceModel:
                 "random_state": self.config.random_state,
                 "feature_columns": self.feature_columns,
             }
-            Path(config_path).write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+            Path(config_path).write_text(
+                json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
 
     @classmethod
     def load(
@@ -152,16 +155,12 @@ class CatBoostSignificanceModel:
         model_path: Path,
         config_path: Path | None = None,
         config: SignificanceModelConfig | None = None,
-    ) -> "CatBoostSignificanceModel":
+    ) -> CatBoostSignificanceModel:
         if config_path and Path(config_path).exists():
             raw = json.loads(Path(config_path).read_text(encoding="utf-8"))
 
             allowed_fields = {field.name for field in fields(SignificanceModelConfig)}
-            filtered_raw = {
-                key: value
-                for key, value in raw.items()
-                if key in allowed_fields
-            }
+            filtered_raw = {key: value for key, value in raw.items() if key in allowed_fields}
 
             ignored_keys = sorted(set(raw) - allowed_fields)
             if ignored_keys:
@@ -183,9 +182,7 @@ class CatBoostSignificanceModel:
             elif isinstance(loaded, dict) and "model" in loaded:
                 model = loaded["model"]
             else:
-                raise TypeError(
-                    f"Unsupported joblib model object type: {type(loaded)}"
-                )
+                raise TypeError(f"Unsupported joblib model object type: {type(loaded)}")
         else:
             model = CatBoostClassifier()
             model.load_model(str(model_path))
@@ -193,7 +190,7 @@ class CatBoostSignificanceModel:
         wrapper = cls(config=config)
         wrapper.model = model
         return wrapper
-    
+
     def predict_clustered_with_fallback(
         self,
         news_df: pd.DataFrame,
@@ -341,19 +338,15 @@ class CatBoostSignificanceModel:
 
             dates = df[date_column]
 
-            previous_time_mask = (
-                (dates < current_date)
-                | ((dates == current_date) & (df["_row_pos"] < current_pos))
+            previous_time_mask = (dates < current_date) | (
+                (dates == current_date) & (df["_row_pos"] < current_pos)
             )
 
             delta_days = (current_date - dates).dt.total_seconds() / (24 * 60 * 60)
             window_mask = (delta_days >= 0) & (delta_days <= fallback_window_days)
 
             candidate_mask = (
-                same_topic_mask
-                & different_cluster_mask
-                & previous_time_mask
-                & window_mask
+                same_topic_mask & different_cluster_mask & previous_time_mask & window_mask
             )
 
             candidate_indices = df.index[candidate_mask].to_numpy(dtype=int)
@@ -382,7 +375,7 @@ class CatBoostSignificanceModel:
             kind="mergesort",
         )
 
-        for cluster_id, group in sorted_df.groupby(cluster_column, sort=False, dropna=False):
+        for _cluster_id, group in sorted_df.groupby(cluster_column, sort=False, dropna=False):
             group_indices = group.index.to_list()
 
             previous_indices_in_cluster: list[int] = []
@@ -472,4 +465,3 @@ class CatBoostSignificanceModel:
         )
 
         return result
-            

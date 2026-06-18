@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 
 from .embeddings import l2_normalize
-from tqdm.auto import tqdm
+
 
 @dataclass
 class PairDatasetConfig:
@@ -71,7 +72,7 @@ def build_contrastive_pairs(
     # ------------------------------------------------------------------
     cluster_groups = list(df.groupby(cluster_column, dropna=False, sort=False))
 
-    for cluster_id, group in tqdm(
+    for _cluster_id, group in tqdm(
         cluster_groups,
         desc="Building positive pairs by cluster",
         total=len(cluster_groups),
@@ -81,11 +82,7 @@ def build_contrastive_pairs(
         if len(ids) < 2:
             continue
 
-        all_pairs = [
-            (a, b)
-            for i, a in enumerate(ids)
-            for b in ids[i + 1 :]
-        ]
+        all_pairs = [(a, b) for i, a in enumerate(ids) for b in ids[i + 1 :]]
 
         if len(all_pairs) > cfg.max_positive_pairs_per_cluster:
             selected_idx = rng.choice(
@@ -142,9 +139,7 @@ def build_contrastive_pairs(
         different_cluster_mask = clusters[:, None] != clusters[None, :]
 
         hard_negative_mask = (
-            upper_mask
-            & different_cluster_mask
-            & (sim_matrix >= cfg.hard_negative_min_similarity)
+            upper_mask & different_cluster_mask & (sim_matrix >= cfg.hard_negative_min_similarity)
         )
 
         row_idx, col_idx = np.where(hard_negative_mask)

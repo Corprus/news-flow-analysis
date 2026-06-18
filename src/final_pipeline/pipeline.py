@@ -8,15 +8,19 @@ import pandas as pd
 
 from model.attach_clustering import (
     build_baseline_cluster_ids,
-    build_candidate_pairs,
     build_best_candidate_attach_clusters,
+    build_candidate_pairs,
     make_clustered_news,
 )
 from model.data import prepare_legacy_baseline_input
 from model.embeddings import SentenceTransformerEncoder, get_or_create_id_aligned_embeddings
 from model.significance_model import CatBoostSignificanceModel
 
-from .config import FINAL_MODEL_RELATIVE_PATH, FINAL_PIPELINE_CONFIG_RELATIVE_PATH, FinalPipelineConfig
+from .config import (
+    FINAL_MODEL_RELATIVE_PATH,
+    FINAL_PIPELINE_CONFIG_RELATIVE_PATH,
+    FinalPipelineConfig,
+)
 
 
 @dataclass
@@ -123,7 +127,11 @@ def load_pipeline(
     root = Path(project_root).resolve() if project_root is not None else Path.cwd().resolve()
     if config is None:
         config_path = root / FINAL_PIPELINE_CONFIG_RELATIVE_PATH
-        cfg = FinalPipelineConfig.from_json(config_path) if config_path.exists() else FinalPipelineConfig()
+        cfg = (
+            FinalPipelineConfig.from_json(config_path)
+            if config_path.exists()
+            else FinalPipelineConfig()
+        )
     else:
         cfg = config
     if model_path is None:

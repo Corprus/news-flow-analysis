@@ -20,7 +20,9 @@ class ThresholdSearchResult:
     recall: float
 
 
-def _sklearn_features(frame: pd.DataFrame, feature_columns: list[str] | tuple[str, ...]) -> pd.DataFrame:
+def _sklearn_features(
+    frame: pd.DataFrame, feature_columns: list[str] | tuple[str, ...]
+) -> pd.DataFrame:
     """Return finite numeric features while preserving sklearn feature names."""
 
     features = frame.loc[:, list(feature_columns)].copy().astype(np.float32)
@@ -79,7 +81,9 @@ def train_validation_split(
     if group_column in frame.columns and frame[group_column].nunique() >= 3:
         from sklearn.model_selection import GroupShuffleSplit
 
-        splitter = GroupShuffleSplit(n_splits=1, test_size=validation_size, random_state=random_state)
+        splitter = GroupShuffleSplit(
+            n_splits=1, test_size=validation_size, random_state=random_state
+        )
         train_idx, val_idx = next(splitter.split(frame, groups=frame[group_column].astype(str)))
         return frame.iloc[train_idx].copy(), frame.iloc[val_idx].copy()
 
@@ -176,11 +180,18 @@ def fit_catboost_binary(
         eval_set=(val_frame[list(feature_columns)], val_frame["is_significant"]),
         use_best_model=True,
     )
-    threshold = find_best_threshold(val_frame["is_significant"], candidate.predict_proba(val_frame[list(feature_columns)])[:, 1])
+    threshold = find_best_threshold(
+        val_frame["is_significant"], candidate.predict_proba(val_frame[list(feature_columns)])[:, 1]
+    )
 
     final = CatBoostClassifier(**params)
-    final.fit(pd.concat([train_frame, val_frame])[list(feature_columns)], pd.concat([train_frame, val_frame])["is_significant"])
-    return wrap_predict_proba_model(final, threshold=threshold.threshold, feature_columns=feature_columns), threshold
+    final.fit(
+        pd.concat([train_frame, val_frame])[list(feature_columns)],
+        pd.concat([train_frame, val_frame])["is_significant"],
+    )
+    return wrap_predict_proba_model(
+        final, threshold=threshold.threshold, feature_columns=feature_columns
+    ), threshold
 
 
 def fit_mlp_binary(
@@ -226,7 +237,9 @@ def fit_mlp_binary(
     final = make_model()
     full = pd.concat([train_frame, val_frame])
     final.fit(_sklearn_features(full, feature_columns), _target_vector(full))
-    return wrap_predict_proba_model(final, threshold=threshold.threshold, feature_columns=feature_columns), threshold
+    return wrap_predict_proba_model(
+        final, threshold=threshold.threshold, feature_columns=feature_columns
+    ), threshold
 
 
 def fit_logreg_binary(
@@ -268,4 +281,6 @@ def fit_logreg_binary(
     final = make_model()
     full = pd.concat([train_frame, val_frame])
     final.fit(_sklearn_features(full, feature_columns), _target_vector(full))
-    return wrap_predict_proba_model(final, threshold=threshold.threshold, feature_columns=feature_columns), threshold
+    return wrap_predict_proba_model(
+        final, threshold=threshold.threshold, feature_columns=feature_columns
+    ), threshold

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -53,7 +53,9 @@ class ExperimentTracker:
             "comment": comment,
         }
         if not self.results_table.empty and "experiment" in self.results_table.columns:
-            self.results_table = self.results_table[self.results_table["experiment"] != experiment].copy()
+            self.results_table = self.results_table[
+                self.results_table["experiment"] != experiment
+            ].copy()
         self.results_table = pd.concat([self.results_table, pd.DataFrame([row])], ignore_index=True)
         return metrics
 
@@ -125,7 +127,11 @@ def split_train_validation(
     """Group split по cluster_id, чтобы не смешивать один сюжет между train/validation."""
 
     splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
-    groups = frame[group_column].astype(str) if group_column in frame.columns else frame.index.astype(str)
+    groups = (
+        frame[group_column].astype(str)
+        if group_column in frame.columns
+        else frame.index.astype(str)
+    )
     train_idx, val_idx = next(splitter.split(frame, groups=groups))
     train = frame.iloc[train_idx].copy()
     val = frame.iloc[val_idx].copy()

@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 
 from .embeddings import l2_normalize
-
 
 # ---------------------------------------------------------------------------
 # Feature sets
@@ -135,7 +134,9 @@ def _mean_top_k(values: np.ndarray, k: int, default: float = 0.0) -> float:
     return float(top.mean())
 
 
-def _days_between(current_date: pd.Timestamp, previous_date: pd.Timestamp | None, default: float = -1.0) -> float:
+def _days_between(
+    current_date: pd.Timestamp, previous_date: pd.Timestamp | None, default: float = -1.0
+) -> float:
     if previous_date is None or pd.isna(current_date) or pd.isna(previous_date):
         return default
     return float((current_date - previous_date).total_seconds() / (24 * 60 * 60))
@@ -161,6 +162,7 @@ def _ensure_cluster_column(
 # ---------------------------------------------------------------------------
 # Legacy 18-feature builder
 # ---------------------------------------------------------------------------
+
 
 def build_legacy_significance_features(
     news_df: pd.DataFrame,
@@ -352,6 +354,7 @@ class LegacySignificanceFeatureBuilder:
 # Experimental 16-feature builder kept for later experiments
 # ---------------------------------------------------------------------------
 
+
 def build_experimental_previous_only_features(
     news_df: pd.DataFrame,
     embeddings: np.ndarray,
@@ -396,7 +399,11 @@ def build_experimental_previous_only_features(
                 in_window = (deltas >= 0) & (deltas <= topic_fallback_window_days)
 
             topic_candidates = np.asarray(hist, dtype=int)[in_window]
-            topic_sims = emb[topic_candidates] @ emb[idx] if len(topic_candidates) else np.asarray([], dtype=np.float32)
+            topic_sims = (
+                emb[topic_candidates] @ emb[idx]
+                if len(topic_candidates)
+                else np.asarray([], dtype=np.float32)
+            )
         else:
             topic_candidates = np.asarray([], dtype=int)
             topic_sims = np.asarray([], dtype=np.float32)
@@ -419,7 +426,9 @@ def build_experimental_previous_only_features(
     topic_features = pd.DataFrame(rows).set_index(id_column)
 
     cluster_rows: list[dict] = []
-    for _, group in df.sort_values(date_column, kind="mergesort").groupby(cluster_column, sort=False, dropna=False):
+    for _, group in df.sort_values(date_column, kind="mergesort").groupby(
+        cluster_column, sort=False, dropna=False
+    ):
         history_indices: list[int] = []
         history_dates: list[pd.Timestamp] = []
         cluster_start = None
@@ -445,11 +454,13 @@ def build_experimental_previous_only_features(
                     last_date = history_dates[-1]
                     days_since_prev = _days_between(current_date, last_date)
                     days_since_start = _days_between(current_date, cluster_start)
-                    deltas = np.array([
-                        (current_date - d).total_seconds() / (24 * 60 * 60)
-                        for d in history_dates
-                        if not pd.isna(d)
-                    ])
+                    deltas = np.array(
+                        [
+                            (current_date - d).total_seconds() / (24 * 60 * 60)
+                            for d in history_dates
+                            if not pd.isna(d)
+                        ]
+                    )
                     density3 = int(((deltas >= 0) & (deltas <= 3)).sum()) if deltas.size else 0
                     density7 = int(((deltas >= 0) & (deltas <= 7)).sum()) if deltas.size else 0
 

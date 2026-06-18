@@ -18,6 +18,13 @@ select = [
   "B",
 ]
 
+[lint.per-file-ignores]
+"notebooks/*.ipynb" = [
+  "E402", # Imports after setup/magic statements are normal in notebook cells.
+  "E501", # Markdown and explanatory cells are not constrained to source line length.
+  "F811", # Re-running/redefining helpers across experiment cells is intentional.
+]
+
 [lint.isort]
 known-first-party = [
   "accounting",

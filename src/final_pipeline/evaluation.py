@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Iterable
-
-import numpy as np
 import pandas as pd
 from sklearn.metrics import confusion_matrix
 
@@ -25,10 +20,12 @@ def compute_pairwise_cluster_metrics(
 ) -> dict:
     """Быстрые pairwise-метрики кластеризации без O(n^2) перебора пар."""
 
-    frame = pd.DataFrame({
-        "ref": reference_cluster_ids.astype(str).to_numpy(),
-        "cand": candidate_cluster_ids.astype(str).to_numpy(),
-    })
+    frame = pd.DataFrame(
+        {
+            "ref": reference_cluster_ids.astype(str).to_numpy(),
+            "cand": candidate_cluster_ids.astype(str).to_numpy(),
+        }
+    )
 
     n_items = len(frame)
     total_pairs = pair_count(n_items)
