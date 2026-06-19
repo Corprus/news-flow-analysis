@@ -30,6 +30,47 @@ def _clean_scalar(value: Any) -> Any:
     return value
 
 
+def _group_search_items(
+    items: list[dict[str, Any]],
+    *,
+    top_k: int,
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        cluster_id = str(item["cluster_id"])
+        grouped.setdefault(cluster_id, []).append(item)
+
+    clusters: list[dict[str, Any]] = []
+    for cluster_items in list(grouped.values())[:top_k]:
+        representative = cluster_items[0]
+        chronological_items = sorted(
+            cluster_items,
+            key=lambda item: (item.get("published_at") or "", item["rank"]),
+        )
+        published_dates = [
+            item["published_at"]
+            for item in chronological_items
+            if item.get("published_at")
+        ]
+        clusters.append(
+            {
+                "cluster_id": representative["cluster_id"],
+                "score": representative["score"],
+                "representative_article_id": representative["article_id"],
+                "representative_title": representative["title"],
+                "article_count": len(cluster_items),
+                "significant_count": sum(
+                    item.get("novelty_label") == "significant"
+                    for item in cluster_items
+                ),
+                "published_from": published_dates[0] if published_dates else None,
+                "published_to": published_dates[-1] if published_dates else None,
+                "items": chronological_items,
+            }
+        )
+    return clusters
+
+
 class NewsPipelineRepository:
     """PostgreSQL persistence boundary for full and incremental pipeline runs."""
 
@@ -382,17 +423,21 @@ class NewsPipelineRepository:
             conditions.append("a.novelty_score >= %s")
             params.append(float(filters["min_novelty_score"]))
         vector = _vector_literal(query_embedding)
+        candidate_limit = min(max(top_k * 10, 100), 1000)
         query = f"""
             SELECT
                 a.id::text, a.title, a.status, a.language, a.novelty_score,
-                a.published_at, 1 - (e.embedding <=> %s::vector) AS score
+                a.published_at, 1 - (e.embedding <=> %s::vector) AS score,
+                COALESCE(s.cluster_id, a.id::text) AS cluster_id,
+                s.novelty_label, s.p_significant, a.url
             FROM article_pipeline_embeddings e
             JOIN news_articles a ON a.id = e.article_id
+            LEFT JOIN article_pipeline_state s ON s.article_id = a.id
             WHERE {" AND ".join(conditions)}
             ORDER BY e.embedding <=> %s::vector
             LIMIT %s
         """
-        params = [vector, *params, vector, top_k]
+        params = [vector, *params, vector, candidate_limit]
         async with await AsyncConnection.connect(self._database_url) as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(query, params)
@@ -407,10 +452,21 @@ class NewsPipelineRepository:
                     "published_at": row[5].isoformat() if row[5] else None,
                     "score": float(row[6]),
                     "rank": rank,
+                    "cluster_id": row[7],
+                    "novelty_label": row[8],
+                    "p_significant": row[9],
+                    "url": row[10],
                 }
                 for rank, row in enumerate(rows, start=1)
             ]
-            result = {"items": items}
+            clusters = _group_search_items(items, top_k=top_k)
+            selected_cluster_ids = {
+                cluster["cluster_id"] for cluster in clusters
+            }
+            selected_items = [
+                item for item in items if item["cluster_id"] in selected_cluster_ids
+            ]
+            result = {"clusters": clusters, "items": selected_items}
             await connection.execute(
                 """
                 UPDATE news_search_queries
