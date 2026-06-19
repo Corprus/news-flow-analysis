@@ -4,7 +4,7 @@ from typing import Any
 from psycopg import AsyncConnection
 
 
-class NewsVectorizationJobRepository:
+class NewsPipelineJobRepository:
     def __init__(self, database_url: str) -> None:
         self._database_url = database_url
 
@@ -13,7 +13,7 @@ class NewsVectorizationJobRepository:
             await connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
             await connection.execute(
                 """
-                CREATE TABLE IF NOT EXISTS news_vectorization_jobs (
+                CREATE TABLE IF NOT EXISTS news_pipeline_jobs (
                     id uuid PRIMARY KEY,
                     status text NOT NULL,
                     request jsonb NOT NULL,
@@ -28,7 +28,7 @@ class NewsVectorizationJobRepository:
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
                 """
-                INSERT INTO news_vectorization_jobs (id, status, request, updated_at)
+                INSERT INTO news_pipeline_jobs (id, status, request, updated_at)
                 VALUES (%s, 'queued', %s::jsonb, now())
                 ON CONFLICT (id) DO UPDATE
                 SET status = 'queued',
@@ -42,7 +42,7 @@ class NewsVectorizationJobRepository:
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
                 """
-                INSERT INTO news_vectorization_jobs (id, status, request, updated_at)
+                INSERT INTO news_pipeline_jobs (id, status, request, updated_at)
                 VALUES (%s, 'processing', %s::jsonb, now())
                 ON CONFLICT (id) DO UPDATE
                 SET status = 'processing',
@@ -56,7 +56,7 @@ class NewsVectorizationJobRepository:
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
                 """
-                UPDATE news_vectorization_jobs
+                UPDATE news_pipeline_jobs
                 SET status = 'done',
                     result = %s::jsonb,
                     updated_at = now()
@@ -69,7 +69,7 @@ class NewsVectorizationJobRepository:
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
                 """
-                UPDATE news_vectorization_jobs
+                UPDATE news_pipeline_jobs
                 SET status = 'failed',
                     result = %s::jsonb,
                     updated_at = now()
@@ -84,7 +84,7 @@ class NewsVectorizationJobRepository:
                 await cursor.execute(
                     """
                     SELECT id::text, status, request, result, created_at, updated_at
-                    FROM news_vectorization_jobs
+                    FROM news_pipeline_jobs
                     WHERE id = %s
                     """,
                     (job_id,),

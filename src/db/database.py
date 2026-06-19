@@ -49,6 +49,19 @@ def create_tables() -> None:
     with get_engine().begin() as connection:
         connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(bind=get_engine())
+    with get_engine().begin() as connection:
+        connection.execute(
+            text("ALTER TABLE news_articles ADD COLUMN IF NOT EXISTS topic varchar(256)")
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_article_pipeline_embeddings_hnsw_cosine
+                ON article_pipeline_embeddings
+                USING hnsw (embedding vector_cosine_ops)
+                """
+            )
+        )
 
 
 @contextmanager

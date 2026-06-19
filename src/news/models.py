@@ -69,6 +69,7 @@ class NewsSource(Base):
     site_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     rss_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     language: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    topic: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
     country: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -144,9 +145,14 @@ class NewsArticle(Base):
         back_populates="article",
         cascade="all, delete-orphan",
     )
-    embeddings: Mapped[list[ArticleEmbedding]] = relationship(
+    embeddings: Mapped[list[ArticlePipelineEmbedding]] = relationship(
         back_populates="article",
         cascade="all, delete-orphan",
+    )
+    pipeline_state: Mapped[ArticlePipelineState | None] = relationship(
+        back_populates="article",
+        cascade="all, delete-orphan",
+        uselist=False,
     )
     event_links: Mapped[list[EventArticle]] = relationship(
         back_populates="article",
@@ -162,8 +168,8 @@ class NewsArticle(Base):
     )
 
 
-class ArticleEmbedding(Base):
-    __tablename__ = "article_embeddings"
+class ArticlePipelineEmbedding(Base):
+    __tablename__ = "article_pipeline_embeddings"
 
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
@@ -178,7 +184,7 @@ class ArticleEmbedding(Base):
     )
     model_name: Mapped[str] = mapped_column(String(256), nullable=False)
     model_revision: Mapped[str] = mapped_column(String(128), nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector(768), nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector(1024), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -192,9 +198,47 @@ class ArticleEmbedding(Base):
             "article_id",
             "model_name",
             "model_revision",
-            name="uq_article_embedding_model_revision",
+            name="uq_article_pipeline_embedding_model_revision",
         ),
     )
+
+
+class ArticlePipelineState(Base):
+    __tablename__ = "article_pipeline_state"
+
+    article_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("news_articles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    cluster_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    baseline_component_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    assignment_method: Mapped[str] = mapped_column(String(32), nullable=False)
+    update_method: Mapped[str] = mapped_column(String(32), nullable=False)
+    assignment_parent_news_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        nullable=True,
+    )
+    assignment_similarity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    attached_to_component_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    assignment_needs_review: Mapped[bool] = mapped_column(nullable=False, default=False)
+    late_arrival: Mapped[bool] = mapped_column(nullable=False, default=False)
+    novelty_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    p_significant: Mapped[float | None] = mapped_column(Float, nullable=True)
+    novelty_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    novelty_needs_review: Mapped[bool] = mapped_column(nullable=False, default=False)
+    pipeline_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    embedding_model: Mapped[str] = mapped_column(String(256), nullable=False)
+    embedding_model_revision: Mapped[str] = mapped_column(String(128), nullable=False)
+    novelty_model_version: Mapped[str] = mapped_column(String(256), nullable=False)
+    config_version: Mapped[str] = mapped_column(String(256), nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    article: Mapped[NewsArticle] = relationship(back_populates="pipeline_state")
 
 
 class NewsArticleSubmission(Base):

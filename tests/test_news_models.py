@@ -7,7 +7,8 @@ def test_news_storage_tables_are_registered() -> None:
     expected_tables = {
         "news_sources",
         "news_articles",
-        "article_embeddings",
+        "article_pipeline_embeddings",
+        "article_pipeline_state",
         "news_article_submissions",
         "news_events",
         "event_articles",

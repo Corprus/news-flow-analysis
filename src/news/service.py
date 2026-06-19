@@ -58,6 +58,7 @@ class NewsService:
         canonical_url: str | None = None,
         summary: str | None = None,
         language: str | None = None,
+        topic: str | None = None,
         published_at: datetime | None = None,
     ) -> NewsArticle:
         content_hash = hashlib.sha256(content.encode()).hexdigest()
@@ -75,6 +76,7 @@ class NewsService:
             canonical_url=canonical_url,
             published_at=published_at,
             language=language,
+            topic=topic,
             status=ArticleStatus.QUEUED.value,
             origin=ArticleOrigin.USER_SUBMITTED.value,
             content_hash=content_hash,

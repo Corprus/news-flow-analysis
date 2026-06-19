@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Request, status
@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from accounting.routes import router as accounting_router
 from db.database import create_tables, init_db
-from db.news_vectorization_jobs import NewsVectorizationJobRepository
+from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
 from news.routes import router as news_router
 from news.routes import search_router as news_search_router
@@ -18,9 +18,8 @@ from users.routes import router as users_router
 
 
 class NewsVectorizationRequest(BaseModel):
-    text: str = Field(min_length=1)
-    title: str | None = None
-    source_url: str | None = None
+    news_ids: list[str] = Field(min_length=1, max_length=10_000)
+    mode: Literal["full", "incremental"] = "incremental"
 
 
 class NewsVectorizationJobResponse(BaseModel):
@@ -39,7 +38,7 @@ def get_publisher(request: Request) -> RabbitPublisher:
     return request.app.state.publisher
 
 
-def get_repository(request: Request) -> NewsVectorizationJobRepository:
+def get_repository(request: Request) -> NewsPipelineJobRepository:
     return request.app.state.repository
 
 
@@ -48,7 +47,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     init_db(settings)
     create_tables()
-    repository = NewsVectorizationJobRepository(settings.database_url)
+    repository = NewsPipelineJobRepository(settings.database_url)
     publisher = RabbitPublisher(settings.rabbitmq_url, settings.news_vectorization_queue)
     await repository.initialize()
     await publisher.connect()
@@ -72,14 +71,14 @@ async def health(settings: Annotated[Settings, Depends(get_settings)]) -> dict[s
 
 
 @app.post(
-    "/v1/news-vectorization",
+    "/v1/news-pipeline",
     response_model=NewsVectorizationJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def create_news_vectorization_job(
     request: NewsVectorizationRequest,
     publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
-    repository: Annotated[NewsVectorizationJobRepository, Depends(get_repository)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_repository)],
 ) -> NewsVectorizationJobResponse:
     job_id = str(uuid4())
     payload = request.model_dump()
@@ -87,17 +86,17 @@ async def create_news_vectorization_job(
     await publisher.publish(
         {
             "job_id": job_id,
-            "type": "news_vectorization",
+            "type": "news_pipeline",
             "payload": payload,
         }
     )
     return NewsVectorizationJobResponse(job_id=job_id, status="queued")
 
 
-@app.get("/v1/news-vectorization/{job_id}", response_model=NewsVectorizationJobStatus)
+@app.get("/v1/news-pipeline/{job_id}", response_model=NewsVectorizationJobStatus)
 async def get_news_vectorization_job(
     job_id: str,
-    repository: Annotated[NewsVectorizationJobRepository, Depends(get_repository)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_repository)],
 ) -> NewsVectorizationJobStatus:
     job = await repository.get(job_id)
     if job is None:
@@ -109,3 +108,22 @@ async def get_news_vectorization_job(
         request=job["request"],
         result=job["result"],
     )
+
+
+app.add_api_route(
+    "/v1/news-vectorization",
+    create_news_vectorization_job,
+    methods=["POST"],
+    response_model=NewsVectorizationJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    deprecated=True,
+    include_in_schema=False,
+)
+app.add_api_route(
+    "/v1/news-vectorization/{job_id}",
+    get_news_vectorization_job,
+    methods=["GET"],
+    response_model=NewsVectorizationJobStatus,
+    deprecated=True,
+    include_in_schema=False,
+)

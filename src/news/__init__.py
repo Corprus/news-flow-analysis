@@ -1,6 +1,7 @@
 from news.models import (
-    ArticleEmbedding,
     ArticleOrigin,
+    ArticlePipelineEmbedding,
+    ArticlePipelineState,
     ArticleStatus,
     EventArticle,
     EventArticleRole,
@@ -14,7 +15,8 @@ from news.models import (
 )
 
 __all__ = [
-    "ArticleEmbedding",
+    "ArticlePipelineEmbedding",
+    "ArticlePipelineState",
     "ArticleOrigin",
     "ArticleStatus",
     "EventArticle",

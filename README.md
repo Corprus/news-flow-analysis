@@ -1,5 +1,20 @@
 # Semantic News Novelty
 
+## Актуальная runtime-архитектура
+
+Финальный BGE-M3 clustering/novelty pipeline встроен в отдельный
+`model-service` и полностью заменяет старый MPNet-векторизатор.
+
+- RabbitMQ job: `{"news_ids": ["uuid", ...], "mode": "incremental|full"}`;
+- API: `POST /api/v1/news-pipeline`;
+- embeddings: `BAAI/bge-m3`, `vector(1024)` в PostgreSQL/pgvector;
+- pipeline state: cluster assignment, novelty, provenance и версии моделей
+  хранятся в `article_pipeline_state`;
+- incremental mode читает историю и embeddings из PostgreSQL;
+- semantic search выполняется оператором cosine distance pgvector.
+
+Подробности запуска и контракта: [`docs/service_stack.md`](docs/service_stack.md).
+
 Модуль постобработки уже собранного новостного потока для отраслевого desk research.
 
 Проект группирует публикации в инфоповоды, находит повторы и близкие пересказы, выделяет

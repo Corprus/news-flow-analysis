@@ -37,23 +37,17 @@ class Settings(BaseSettings):
     )
     news_add_cost: Decimal = Field(default=Decimal("1.00"), alias="NEWS_ADD_COST")
     news_search_cost: Decimal = Field(default=Decimal("1.00"), alias="NEWS_SEARCH_COST")
-    use_local_model: bool = Field(default=False, alias="USE_LOCAL_MODEL")
-    local_model_source: str = Field(
-        default="models/news-flow-ru-vectorization-mpnet/final",
-        alias="LOCAL_MODEL_SOURCE",
+    pipeline_model_path: str = Field(
+        default="data/artifacts/models/final_exp10/final_novelty_model.joblib",
+        alias="PIPELINE_MODEL_PATH",
     )
-    remote_model_source: str = Field(
-        default="configs/model_registry/latest_model.json",
-        alias="REMOTE_MODEL_SOURCE",
+    pipeline_config_path: str = Field(
+        default="data/artifacts/models/final_exp10/final_pipeline_config.json",
+        alias="PIPELINE_CONFIG_PATH",
     )
+    pipeline_device: str | None = Field(default=None, alias="PIPELINE_DEVICE")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
-    @property
-    def model_source(self) -> str:
-        if self.use_local_model:
-            return self.local_model_source
-        return self.remote_model_source
 
     @property
     def database_url(self) -> str:
