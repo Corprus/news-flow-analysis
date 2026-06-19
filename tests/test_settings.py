@@ -30,6 +30,15 @@ def test_settings_uses_final_pipeline_artifacts_by_default() -> None:
     assert settings.pipeline_config_path.endswith("final_pipeline_config.json")
 
 
+def test_search_is_free_by_default() -> None:
+    settings = Settings(
+        POSTGRES_PASSWORD="secret",
+        RABBITMQ_PASSWORD="secret",
+    )
+
+    assert settings.news_search_cost == 0
+
+
 def test_settings_accepts_pipeline_runtime_overrides() -> None:
     settings = Settings(
         POSTGRES_PASSWORD="secret",

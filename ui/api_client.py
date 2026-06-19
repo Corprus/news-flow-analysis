@@ -66,11 +66,11 @@ class ApiClient:
         params = {"reason": reason} if reason else None
         return self._request("GET", "/v1/accounting/me/transactions", params=params)
 
-    def add_credit(self, user_id: str, amount: Decimal) -> dict:
+    def add_credit(self, organization_id: str, amount: Decimal) -> dict:
         return self._request(
             "POST",
             "/v1/accounting/credits",
-            json={"user_id": user_id, "amount": str(amount)},
+            json={"organization_id": organization_id, "amount": str(amount)},
         )
 
     def add_news(self, payload: dict) -> dict:

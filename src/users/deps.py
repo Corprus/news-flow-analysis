@@ -20,6 +20,7 @@ from users.tokens import AccessTokenHandler
 @dataclass(frozen=True)
 class CurrentUser:
     id: UUID
+    organization_id: UUID
     role: UserRole
 
 
@@ -78,9 +79,21 @@ def authenticate(
             detail="Invalid access token",
         ) from exc
 
-    return CurrentUser(id=UUID(payload["sub"]), role=UserRole(payload.get("role", UserRole.USER)))
+    return CurrentUser(
+        id=UUID(payload["sub"]),
+        organization_id=UUID(payload["organization_id"]),
+        role=UserRole(payload.get("role", UserRole.USER)),
+    )
 
 
 def ensure_admin(current_user: CurrentUser) -> None:
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role is required")
+
+
+def ensure_publisher(current_user: CurrentUser) -> None:
+    if current_user.role not in {UserRole.PUBLISHER, UserRole.ADMIN}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Publisher role is required",
+        )

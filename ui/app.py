@@ -75,8 +75,12 @@ def render_sidebar() -> str:
             st.session_state.clear()
             st.rerun()
 
-        pages = ["Search", "News", "History", "Transactions"]
-        if str(me.get("role", "")).lower() == "admin":
+        role = str(me.get("role", "")).lower()
+        pages = ["Search"]
+        if role in {"publisher", "admin"}:
+            pages.append("News")
+        pages.extend(["History", "Transactions"])
+        if role == "admin":
             pages.append("Admin")
         return st.radio("Navigation", pages, label_visibility="collapsed")
 
@@ -184,12 +188,114 @@ def render_search_history() -> None:
     st.subheader("Search History")
     try:
         history = client.list_search_history()
-        if history:
-            st.dataframe(pd.DataFrame(history), use_container_width=True, hide_index=True)
-        else:
+        if not history:
             st.info("No searches yet.")
+            return
+        for search in history:
+            status = search.get("status", "unknown")
+            query_text = search.get("query_text", "")
+            created_at = format_search_date(search.get("created_at"))
+            with st.expander(f"{query_text} · {status} · {created_at}"):
+                if status == "done":
+                    render_search_result(
+                        search.get("result") or {},
+                        key_prefix=str(search.get("query_id") or created_at),
+                    )
+                elif status == "failed":
+                    st.error(search.get("error") or "Search failed.")
+                else:
+                    st.info(f"Search status: {status}")
     except ApiError as exc:
         st.error(str(exc))
+
+
+def render_search_result(result: dict, *, key_prefix: str) -> None:
+    clusters = result.get("clusters")
+    if clusters is None:
+        clusters = [
+            {
+                "cluster_id": item.get("cluster_id") or item.get("article_id"),
+                "representative_title": item.get("title", ""),
+                "article_count": 1,
+                "significant_count": int(
+                    item.get("novelty_label") == "significant"
+                ),
+                "items": [item],
+            }
+            for item in result.get("items", [])
+        ]
+    if not clusters:
+        st.info("No matching news found.")
+        return
+
+    st.caption(f"{len(clusters)} matching story clusters")
+    for cluster_index, cluster in enumerate(clusters):
+        title = cluster.get("representative_title") or "Untitled story"
+        article_count = cluster.get("article_count", len(cluster.get("items", [])))
+        significant_count = cluster.get("significant_count", 0)
+        label = f"{title} · {article_count} articles"
+        if significant_count:
+            label += f" · {significant_count} significant"
+        with st.expander(label, expanded=cluster_index == 0):
+            items = cluster.get("items", [])
+            show_all = st.checkbox(
+                "Show duplicates and all matches",
+                key=(
+                    f"cluster-all-{key_prefix}-"
+                    f"{cluster.get('cluster_id')}-{cluster_index}"
+                ),
+            )
+            visible_items = (
+                items
+                if show_all
+                else [
+                    item
+                    for item in items
+                    if item.get("novelty_label") != "duplicate"
+                ][:3]
+            )
+            for item in visible_items:
+                render_search_article(item)
+            hidden_count = len(items) - len(visible_items)
+            if hidden_count > 0 and not show_all:
+                st.caption(f"{hidden_count} more or duplicate articles hidden")
+
+
+def render_search_article(item: dict) -> None:
+    title = escape_markdown(str(item.get("title") or "Untitled article"))
+    novelty_label = item.get("novelty_label")
+    if novelty_label == "significant":
+        st.markdown(f"**{title}** · `significant update`")
+    else:
+        suffix = f" · `{novelty_label}`" if novelty_label else ""
+        st.markdown(f"{title}{suffix}")
+
+    details = [format_search_date(item.get("published_at"))]
+    if item.get("score") is not None:
+        details.append(f"relevance {float(item['score']):.3f}")
+    if item.get("p_significant") is not None:
+        details.append(f"significance {float(item['p_significant']):.3f}")
+    st.caption(" · ".join(detail for detail in details if detail))
+    url = item.get("url")
+    if isinstance(url, str) and url.startswith(("http://", "https://")):
+        st.markdown(f"[Open source]({url})")
+
+
+def format_search_date(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime(
+            "%Y-%m-%d %H:%M"
+        )
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def escape_markdown(value: str) -> str:
+    for character in ("\\", "*", "_", "`", "[", "]"):
+        value = value.replace(character, f"\\{character}")
+    return value
 
 
 def render_history() -> None:
@@ -231,7 +337,7 @@ def render_admin() -> None:
 
     st.dataframe(pd.DataFrame(users), use_container_width=True, hide_index=True)
     with st.form("credit_form"):
-        user_id = st.text_input("User ID")
+        organization_id = st.text_input("Organization ID")
         amount_raw = st.text_input("Amount", value="10.00")
         submitted = st.form_submit_button("Add credits")
     if submitted:
@@ -240,7 +346,7 @@ def render_admin() -> None:
             st.warning("Invalid amount")
             return
         try:
-            client.add_credit(user_id, amount)
+            client.add_credit(organization_id, amount)
             st.success("Credits added")
         except ApiError as exc:
             st.error(str(exc))

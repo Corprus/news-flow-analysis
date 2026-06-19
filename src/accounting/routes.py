@@ -18,7 +18,7 @@ CurrentUserDep = Annotated[CurrentUser, Depends(authenticate)]
 
 
 class AddCreditRequest(BaseModel):
-    user_id: UUID
+    organization_id: UUID
     amount: Decimal = Field(gt=0)
 
 
@@ -27,12 +27,14 @@ class TransactionIdResponse(BaseModel):
 
 
 class BalanceResponse(BaseModel):
-    user_id: UUID
+    organization_id: UUID
     balance: str
 
 
 class TransactionResponse(BaseModel):
     id: UUID
+    organization_id: UUID
+    actor_user_id: UUID | None
     timestamp: datetime
     amount: str
     reason: str
@@ -50,7 +52,11 @@ def add_credit(
     accounting: Annotated[AccountingService, Depends(get_accounting_service)],
 ) -> TransactionIdResponse:
     ensure_admin(current_user)
-    transaction_id = accounting.add_credit(request.user_id, request.amount)
+    transaction_id = accounting.add_credit(
+        request.organization_id,
+        current_user.id,
+        request.amount,
+    )
     return TransactionIdResponse(transaction_id=transaction_id)
 
 
@@ -60,8 +66,8 @@ def get_my_balance(
     accounting: Annotated[AccountingService, Depends(get_accounting_service)],
 ) -> BalanceResponse:
     return BalanceResponse(
-        user_id=current_user.id,
-        balance=str(accounting.get_balance(current_user.id)),
+        organization_id=current_user.organization_id,
+        balance=str(accounting.get_balance(current_user.organization_id)),
     )
 
 
@@ -73,13 +79,20 @@ def get_my_transactions(
     offset: Annotated[int, Query(ge=0)] = 0,
     reason: TransactionReason | None = None,
 ) -> list[TransactionResponse]:
-    transactions = accounting.get_transaction_history(current_user.id, limit, offset, reason)
+    transactions = accounting.get_transaction_history(
+        current_user.organization_id,
+        limit,
+        offset,
+        reason,
+    )
     return [_to_response(transaction) for transaction in transactions]
 
 
 def _to_response(transaction) -> TransactionResponse:
     return TransactionResponse(
         id=UUID(transaction.id),
+        organization_id=UUID(transaction.organization_id),
+        actor_user_id=UUID(transaction.actor_user_id) if transaction.actor_user_id else None,
         timestamp=transaction.timestamp,
         amount=str(transaction.amount),
         reason=transaction.reason,
