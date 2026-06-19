@@ -3,7 +3,7 @@
 ## Актуальная runtime-архитектура
 
 Финальный BGE-M3 clustering/novelty pipeline встроен в отдельный
-`model-service` и полностью заменяет старый MPNet-векторизатор.
+`model-service`.
 
 - RabbitMQ job: `{"news_ids": ["uuid", ...], "mode": "incremental|full"}`;
 - API: `POST /api/v1/news-pipeline`;

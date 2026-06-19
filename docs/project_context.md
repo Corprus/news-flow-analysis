@@ -94,12 +94,11 @@ Novelty-метрики включают runtime-правило `cluster seed →
 - FastAPI API;
 - PostgreSQL с pgvector;
 - RabbitMQ jobs;
-- model-service с опубликованной MPNet embedding-моделью;
+- model-service с `BAAI/bge-m3` и финальным clustering/novelty pipeline;
 - Streamlit UI и nginx.
 
-Он поддерживает векторизацию, хранение и семантический поиск. Финальный BGE-M3
-clustering/novelty pipeline пока запускается отдельно и должен быть встроен в
-model-service на следующем этапе.
+Он поддерживает векторизацию, хранение, кластеризацию, оценку новизны и семантический
+поиск.
 
 ## Позиционирование и монетизация
 

@@ -1,35 +1,7 @@
 # Артефакты моделей
 
-В проекте используются два независимых набора model artifacts.
-
-## Сервисная embedding-модель
-
-FastAPI model-service использует дообученную sentence-transformers модель:
-
-```text
-Korprus/news-flow-ru-vectorization-mpnet
-```
-
-Базовая модель — `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`,
-датасет — `merionum/ru_paraphraser`, loss — `MultipleNegativesRankingLoss`.
-
-Зафиксированная Hugging Face ревизия хранится в:
-
-```text
-configs/model_registry/latest_model.json
-```
-
-Локальный путь:
-
-```text
-models/news-flow-ru-vectorization-mpnet/final
-```
-
-Модель создаётся `scripts/train_embeddings.py`, публикуется через
-`scripts/publish_model.py` и скачивается через `scripts/download_model.py`.
-
-MPNet retrieval-метрики относятся только к качеству поиска парафразов. Они не являются
-оценкой финальной кластеризации или novelty detection.
+В runtime используется один набор model artifacts финального clustering/novelty
+pipeline.
 
 ## Финальный clustering/novelty pipeline
 
