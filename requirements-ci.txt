@@ -7,3 +7,8 @@ SQLAlchemy
 psycopg[binary]
 pytest
 httpx
+
+# Lightweight data/ML stack required by final pipeline unit tests.
+numpy
+pandas
+scikit-learn
