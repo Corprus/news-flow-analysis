@@ -22,11 +22,15 @@ class FinalPipelineConfig:
     """
 
     embedding_model_name: str = "BAAI/bge-m3"
+    embedding_model_revision: str = "default"
     embedding_batch_size: int = 16
     normalize_embeddings: bool = True
     show_progress_bar: bool = True
     text_column: str = "model_text"
     id_column: str = "news_id"
+    pipeline_version: str = "final-v3-provenance-v1"
+    novelty_model_version: str = "exp_10a_current_model_on_exp10_clustering"
+    config_version: str = "exp10_src2_sim0.75_days7_m0.03_tj0.15_num1"
 
     base_clustering: BaselineClusteringConfig = field(default_factory=BaselineClusteringConfig)
     attach_clustering: AttachClusteringConfig = field(default_factory=AttachClusteringConfig)

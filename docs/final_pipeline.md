@@ -126,6 +126,53 @@ p_significant
 - `duplicate`;
 - пустое значение для первого элемента кластера без fallback-кандидатов.
 
+## Production-контракт результата
+
+Полный и инкрементальный режимы возвращают единый `PipelineResult`:
+
+```text
+mode
+requested_ids
+updated_ids
+context_ids
+predictions
+assignments
+embedding_ids
+embeddings
+diagnostics
+versions
+```
+
+`predictions` содержит только строки, которые вызывающий слой должен записать:
+
+- full — все requested ID;
+- incremental — requested ID и более поздние публикации с пересчитанным novelty при
+  late arrival.
+
+`embeddings` соответствуют только `embedding_ids`. В incremental-режиме это embeddings
+requested ID; матрица embeddings всей истории наружу не возвращается. `context_ids`
+показывает, какие исторические строки использовались только для вычисления.
+
+`versions` содержит `pipeline_version`, embedding model/revision, novelty model version
+и config version.
+
+`assignments` хранит как итоговое назначение, так и provenance:
+
+```text
+news_id
+cluster_id
+baseline_component_id
+assignment_method
+update_method
+assignment_parent_news_id
+assignment_similarity
+attached_to_component_id
+```
+
+`assignment_method` является устойчивым происхождением назначения: `baseline` или
+`attach`. `update_method` описывает операцию текущего запуска: например `full`,
+`new_cluster`, `baseline_merge`, `cluster_merge` или `new_cluster_ambiguous`.
+
 ## Как работает pipeline
 
 1. Входной CSV приводится к clean-like формату.
@@ -139,6 +186,62 @@ exp10_src2_sim0.75_days7_m0.03_tj0.15_num1
 ```
 
 6. Для кластеризованных новостей применяется финальная novelty-модель `10a`.
+
+## Инкрементальная обработка
+
+`FinalNewsNoveltyPipeline` остаётся эталонным batch pipeline. Для добавления новых
+публикаций без изменения ранее сохранённых `cluster_id` используется
+`IncrementalNewsNoveltyPipeline`.
+
+```python
+from final_pipeline import load_incremental_pipeline
+
+pipeline = load_incremental_pipeline(project_root=".", device="cuda")
+result = pipeline.process(
+    historical_news_df=history_with_cluster_ids,
+    historical_embeddings=history_embeddings,
+    new_news_df=news,
+)
+```
+
+История обязана содержать стабильный `cluster_id`, а `historical_embeddings` должны
+соответствовать её строкам. Embeddings новых строк можно передать через
+`new_embeddings`; иначе они рассчитываются encoder-ом.
+
+Новые публикации обрабатываются хронологически. Pipeline:
+
+- сохраняет исторические назначения, кроме доказанного baseline-объединения;
+- присоединяет публикацию максимум к одному кластеру;
+- использует baseline-порог `0.82` и evidence-aware attach из `exp_10`;
+- создаёт новый кластер, если подходящего кандидата нет;
+- при малом margin между двумя кластерами создаёт новый кластер с
+  `assignment_needs_review=True`;
+- рассчитывает novelty на общей истории, но возвращает predictions только для новых
+  публикаций.
+
+Для выбора кластера используется двустороннее временное окно: pipeline может учитывать
+публикации как до, так и после новой новости. После выбора существующего кластера
+публикация считается late arrival, только если её `published_at` меньше максимального
+`published_at` внутри этого выбранного кластера. Более новые публикации других
+кластеров на этот признак не влияют. Для нового кластера `late_arrival=False`.
+
+Novelty самой late-arrival новости по-прежнему рассчитывается только по более раннему
+контексту.
+
+Если новая публикация имеет baseline-связь `similarity >= 0.82` сразу с несколькими
+кластерами, pipeline объединяет их. Это воспроизводит связную компоненту baseline-графа,
+которую построил бы full pipeline. Неоднозначные attach-кандидаты ниже baseline-порога
+не объединяются.
+
+При объединении `result.assignments` содержит исторические строки с
+`update_method="cluster_merge"`, `previous_cluster_id` и
+`previous_baseline_component_id`. Вызывающий слой должен обновить их `cluster_id` и
+`baseline_component_id`. Исходный `assignment_method=baseline|attach` сохраняется.
+Novelty пересчитывается для всего объединённого исторического кластера.
+
+Без объединения pipeline пересчитывает novelty всех исторических публикаций выбранного
+кластера с более поздним `published_at`. `result.predictions` содержит новые и все
+пересчитанные строки, а их ID перечислены в `result.updated_ids`.
 
 ## Связанные документы
 

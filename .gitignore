@@ -211,6 +211,7 @@ __marimo__/
 data/raw/
 data/prepared/
 data/predictions/
+data/artifacts/incremental_pipeline_benchmark*/
 /models/
 artifacts/
 .hf-cache/
