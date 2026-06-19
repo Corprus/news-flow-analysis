@@ -19,14 +19,14 @@ src/
   final_pipeline/  финальный offline/inference pipeline
 ```
 
-Сервисный контур и финальный novelty pipeline используют разные runtime-модели. Детали
-этого разделения описаны в основном README.
+Сервисный контур использует финальный BGE-M3 novelty pipeline. Детали runtime-контракта
+описаны в основном README.
 
 ## Эксперименты
 
 Ноутбуки находятся в `notebooks/`:
 
-- `01_train_embeddings.ipynb` — раннее дообучение MPNet;
+- `01_train_embeddings.ipynb` — ранний эксперимент по дообучению embeddings;
 - `02_lenta_event_grouping.ipynb` — первичная событийная группировка;
 - `03_data_analysis_and_dataset_preparation.ipynb` — EDA и подготовка данных;
 - `04_evaluate_annotations_and_predictions.ipynb` — оценка разметки и предсказаний;
@@ -42,18 +42,13 @@ src/
 docker-compose.yml       PostgreSQL, RabbitMQ, API, model-service, UI и nginx
 docker/                  Dockerfiles и конфигурация сервисов
 ui/                      Streamlit-интерфейс
-configs/model_registry/  metadata опубликованной MPNet-модели
 .github/workflows/       Ruff, pytest, Compose validation и ручная сборка images
 ```
 
 ## Скрипты
 
-`scripts/` содержит:
-
-- обучение, публикацию и скачивание MPNet-модели;
-- запуск и benchmark финального BGE-M3 pipeline;
-- проверку model artifacts;
-- Windows wrappers для локального и Hugging Face workflow.
+`scripts/` содержит запуск и benchmark финального BGE-M3 pipeline, а также проверку
+runtime model artifacts.
 
 Локальная справка: [`scripts/README.md`](../scripts/README.md).
 

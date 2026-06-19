@@ -18,6 +18,5 @@ datasets
 sentence-transformers
 catboost
 accelerate
-faiss-cpu
 tqdm
 jsonlines

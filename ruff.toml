@@ -32,7 +32,6 @@ known-first-party = [
   "core",
   "db",
   "messaging",
-  "model_registry",
   "model_service",
   "news",
   "services",
