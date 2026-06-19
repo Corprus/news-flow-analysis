@@ -1,9 +1,15 @@
 from decimal import Decimal
+from uuid import UUID
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from api.demo import validate_demo_settings
 from settings import Settings
+from users.models import Organization, User, UserRole
+from users.passwords import PasswordHasher
+from users.service import UserService
 
 
 def make_settings(**overrides) -> Settings:
@@ -37,3 +43,32 @@ def test_demo_defaults_are_usable_locally() -> None:
 
     assert settings.demo_user_login == "demo"
     assert settings.demo_initial_credit == Decimal("100.00")
+
+
+def test_user_service_can_create_multiple_users_in_one_organization() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Organization.__table__.create(engine)
+    User.__table__.create(engine)
+
+    with Session(engine) as session:
+        organization = Organization(name="Shared organization")
+        session.add(organization)
+        session.flush()
+        organization_id = UUID(organization.id)
+        users = UserService(session, PasswordHasher("test-secret"))
+
+        publisher = users.create_user(
+            "publisher",
+            "publisher-password",
+            UserRole.PUBLISHER,
+            organization_id=organization_id,
+        )
+        analyst = users.create_user(
+            "analyst",
+            "analyst-password",
+            organization_id=organization_id,
+        )
+
+        assert publisher.organization_id == analyst.organization_id
+        assert publisher.organization_id == str(organization_id)
+        assert publisher.role == UserRole.PUBLISHER.value

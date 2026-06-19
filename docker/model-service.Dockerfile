@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.6
 
-FROM python:3.12-slim
+ARG PYTORCH_IMAGE=mirror.gcr.io/pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
+FROM ${PYTORCH_IMAGE}
 
 WORKDIR /app
 
@@ -10,7 +11,7 @@ ENV PYTHONPATH=/app/src
 ENV HF_HOME=/app/.cache/huggingface
 ENV HF_HUB_DISABLE_XET=1
 
-COPY requirements.txt /app/requirements.txt
+COPY requirements-model-service.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY src /app/src

@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pydantic-settings
+aio-pika
+SQLAlchemy
+psycopg[binary]
+numpy
+pandas
+scipy
+scikit-learn
+sentence-transformers
+catboost
+joblib

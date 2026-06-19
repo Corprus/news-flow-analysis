@@ -19,6 +19,10 @@ class Settings(BaseSettings):
         ge=0,
         alias="DEMO_INITIAL_CREDIT",
     )
+    demo_news_path: str = Field(
+        default="data/demo/lenta_demo.csv",
+        alias="DEMO_NEWS_PATH",
+    )
     postgres_host: str = Field(default="postgres", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
     postgres_db: str = Field(default="news_flow", alias="POSTGRES_DB")

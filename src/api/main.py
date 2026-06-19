@@ -58,15 +58,29 @@ async def lifespan(app: FastAPI):
     if settings.demo_drop_db:
         drop_tables()
     create_tables()
-    if settings.demo_mode:
-        with get_session() as session:
-            seed_demo(session, settings)
     repository = NewsPipelineJobRepository(settings.database_url)
     publisher = RabbitPublisher(settings.rabbitmq_url, settings.news_vectorization_queue)
     await repository.initialize()
     await publisher.connect()
     app.state.repository = repository
     app.state.publisher = publisher
+    if settings.demo_mode:
+        with get_session() as session:
+            demo = seed_demo(session, settings)
+        if demo.article_ids_to_process:
+            job_id = str(uuid4())
+            payload = {
+                "news_ids": demo.article_ids_to_process,
+                "mode": "incremental",
+            }
+            await repository.mark_queued(job_id, payload)
+            await publisher.publish(
+                {
+                    "job_id": job_id,
+                    "type": "news_pipeline",
+                    "payload": payload,
+                }
+            )
     yield
     await publisher.close()
 

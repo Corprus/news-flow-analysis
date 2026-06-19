@@ -155,6 +155,7 @@ golden-публикаций. Релевантность и повторы оце
 Требования:
 
 - Docker с Compose;
+- NVIDIA GPU with Docker Desktop GPU support for model-service;
 - доступ к Hugging Face при первом запуске remote-модели;
 - свободные порты `80` и `15672` либо их переопределение в `.env`.
 
@@ -179,7 +180,7 @@ ACCESS_TOKEN_SECRET
 
 ```text
 DEMO_MODE=true
-DEMO_DROP_DB=true
+MODEL_SERVICE_HF_CACHE=E:/MLCache/huggingface
 ```
 
 Запустите стек:
@@ -193,30 +194,58 @@ docker compose up --build
 Демо-пользователи:
 
 ```text
-demo  / demo12345   — publisher
-admin / admin12345  — administrator
+Организация Demo Research:
+demo    / demo12345    — publisher
+analyst / analyst12345 — user
+
+Организация Partner Analytics:
+partner_publisher / partner12345 — publisher
+partner_user      / partner12345 — user
+
+Отдельная административная организация:
+admin / admin12345 — administrator
 ```
 
-`DEMO_DROP_DB=true` полностью удаляет и заново создаёт таблицы при каждом старте
-API. Поэтому после первой успешной инициализации остановите стек и измените
-параметр в `.env`:
+При первом запуске API загружает 250 новостей Lenta.ru из
+`data/demo/lenta_demo.csv`, публикует их и ставит общую задачу обработки в
+RabbitMQ. Model service строит embeddings, кластеры и оценки новизны. Первичная
+обработка может занять несколько минут; до её окончания семантический поиск
+может возвращать пустой результат.
 
-```text
-DEMO_DROP_DB=false
-```
-
-Последующие запуски выполняются без пересоздания данных:
+Последующие запуски сохраняют данные:
 
 ```powershell
 docker compose up
 ```
 
-Чтобы намеренно получить чистое демо, снова установите `DEMO_DROP_DB=true` и
-перезапустите стек.
+Чтобы повторить демо с полностью чистой проектной БД:
+
+```powershell
+docker compose down -v
+docker compose up -d --no-build
+```
+
+API-контейнер всегда запускается с `DEMO_DROP_DB=false`. Поэтому автоматический
+рестарт API не может повторно удалить демо-данные.
+
+Полная автоматическая проверка пользователей, организаций и поиска:
+
+```powershell
+python scripts/demo_smoke_test.py
+```
+
+Скрипт входит как пользователь второй организации, запускает семантический
+поиск по общему корпусу и ждёт завершения pipeline до 30 минут.
+
+Демо-срез можно воспроизвести из подготовленного Lenta corpus:
+
+```powershell
+python scripts/build_demo_fixture.py
+```
 
 ### Запуск API без Docker
 
-Первичная инициализация демо:
+Первичная локальная инициализация демо без Docker:
 
 ```powershell
 python -m api --demo --drop-db
@@ -343,6 +372,18 @@ python scripts/benchmark_final_pipeline.py `
 ```
 
 Результаты сохраняются в `data/artifacts/final_pipeline_benchmark/`.
+
+Runtime benchmark Docker Compose на RTX 4070:
+
+- UI/API доступны примерно через `19.1` с после начала запуска;
+- CUDA model-service готов примерно через `44.8` с;
+- чистое демо с 250 публикациями полностью обработано через `56.5` с;
+- прогретый полный пересчёт 250 публикаций: `8.77` с end-to-end;
+- runtime throughput: `28.52` публикации/с;
+- прогретый semantic search: `0.12–0.17` с серверного времени.
+
+Методика, timestamps и различие с offline benchmark:
+[`docs/runtime_benchmark.md`](docs/runtime_benchmark.md).
 
 ## Данные и модели
 
