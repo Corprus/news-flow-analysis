@@ -1,19 +1,26 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.exceptions import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from accounting.exceptions import InsufficientBalanceError, UserAccountNotFoundError
 from accounting.models import TransactionReason
 from accounting.service import AccountingService
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
-from news.models import NewsArticle, NewsSearchQuery
+from news.models import (
+    ArticleOrigin,
+    ArticleStatus,
+    ArticleVisibility,
+    NewsArticle,
+    NewsSearchQuery,
+    SearchQueryStatus,
+)
 from news.service import NewsSearchFilters, NewsService
 from settings import Settings, get_settings
 from users.deps import CurrentUser, SessionDep, authenticate
@@ -25,6 +32,8 @@ CurrentUserDep = Annotated[CurrentUser, Depends(authenticate)]
 
 
 class AddNewsRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
     title: str = Field(min_length=1, max_length=1024)
     content: str = Field(min_length=1)
     url: str | None = Field(default=None, max_length=2048)
@@ -32,49 +41,91 @@ class AddNewsRequest(BaseModel):
     summary: str | None = None
     language: str | None = Field(default=None, max_length=16)
     topic: str | None = Field(default=None, max_length=256)
-    published_at: datetime | None = None
+    published_at: datetime
+
+    @field_validator("published_at")
+    @classmethod
+    def require_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("published_at must include timezone information")
+        return value
 
 
 class NewsArticleResponse(BaseModel):
     article_id: UUID
-    status: str
-    vectorization_job_id: UUID
+    visibility: ArticleVisibility
+    status: ArticleStatus
+
+
+class NewsArticlePublishResponse(BaseModel):
+    article_id: UUID
+    visibility: Literal[ArticleVisibility.PUBLIC]
+    status: Literal[ArticleStatus.PENDING]
+    job_id: UUID
 
 
 class NewsArticleHistoryItem(BaseModel):
     article_id: UUID
     title: str
-    status: str
-    origin: str
+    visibility: ArticleVisibility
+    status: ArticleStatus
+    origin: ArticleOrigin
     language: str | None
     novelty_score: float | None
-    published_at: datetime | None
+    cluster_id: str | None
+    novelty_label: Literal["significant", "minor", "duplicate"] | None
+    assignment_needs_review: bool | None
+    novelty_needs_review: bool | None
+    late_arrival: bool | None
+    processed_at: datetime | None
+    pipeline_error: dict | None
+    published_at: datetime
     fetched_at: datetime
     url: str | None
 
 
 class NewsSearchRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
     query_text: str = Field(min_length=1)
     top_k: int = Field(default=20, ge=1, le=100)
     language: str | None = Field(default=None, max_length=16)
     source_id: UUID | None = None
     published_from: datetime | None = None
     published_to: datetime | None = None
-    submitted_by_user_id: UUID | None = None
     min_novelty_score: float | None = Field(default=None, ge=0, le=1)
+
+    @field_validator("published_from", "published_to")
+    @classmethod
+    def require_filter_timezone(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("published date filters must include timezone information")
+        return value
+
+    @field_validator("published_to")
+    @classmethod
+    def require_valid_date_range(
+        cls,
+        value: datetime | None,
+        info,
+    ) -> datetime | None:
+        published_from = info.data.get("published_from")
+        if value is not None and published_from is not None and value < published_from:
+            raise ValueError("published_to must not be earlier than published_from")
+        return value
 
 
 class NewsSearchResponse(BaseModel):
     query_id: UUID
-    status: str
-    vectorization_job_id: UUID
+    status: SearchQueryStatus
+    job_id: UUID
 
 
 class NewsSearchHistoryItem(BaseModel):
     query_id: UUID
     query_text: str
-    status: str
-    filters: dict
+    status: SearchQueryStatus
+    filters: dict[str, str]
     top_k: int
     result: dict | None
     error: str | None
@@ -120,15 +171,11 @@ async def enqueue_vectorization_job(
     return job_id
 
 
-@router.post("", response_model=NewsArticleResponse, status_code=status.HTTP_202_ACCEPTED)
-async def add_news(
+@router.post("", response_model=NewsArticleResponse, status_code=status.HTTP_201_CREATED)
+def add_news(
     request: AddNewsRequest,
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],
-    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
-    settings: Annotated[Settings, Depends(get_settings)],
-    publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
-    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
 ) -> NewsArticleResponse:
     article = news.add_user_article(
         user_id=current_user.id,
@@ -141,12 +188,40 @@ async def add_news(
         topic=request.topic,
         published_at=request.published_at,
     )
+    news.commit()
+    return NewsArticleResponse(
+        article_id=UUID(article.id),
+        visibility=article.visibility,
+        status=article.status,
+    )
+
+
+@router.post(
+    "/{article_id}/publish",
+    response_model=NewsArticlePublishResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def publish_news(
+    article_id: UUID,
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
+) -> NewsArticlePublishResponse:
+    try:
+        article = news.publish_user_article(article_id, current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if article is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
     _withdraw_or_raise(
         accounting=accounting,
         user_id=current_user.id,
         amount=settings.news_add_cost,
         reason=TransactionReason.NEWS_ADD,
-        reference_id=UUID(article.id),
+        reference_id=article_id,
     )
     news.commit()
     job_id = await enqueue_vectorization_job(
@@ -154,10 +229,11 @@ async def add_news(
         publisher=publisher,
         payload=_article_vectorization_payload(article),
     )
-    return NewsArticleResponse(
-        article_id=UUID(article.id),
-        status=article.status,
-        vectorization_job_id=job_id,
+    return NewsArticlePublishResponse(
+        article_id=article_id,
+        visibility=ArticleVisibility.PUBLIC,
+        status=ArticleStatus.PENDING,
+        job_id=job_id,
     )
 
 
@@ -187,7 +263,6 @@ async def create_news_search(
         source_id=request.source_id,
         published_from=request.published_from,
         published_to=request.published_to,
-        submitted_by_user_id=request.submitted_by_user_id,
         min_novelty_score=request.min_novelty_score,
     )
     search_query = news.create_search_query(
@@ -212,7 +287,7 @@ async def create_news_search(
     return NewsSearchResponse(
         query_id=UUID(search_query.id),
         status=search_query.status,
-        vectorization_job_id=job_id,
+        job_id=job_id,
     )
 
 
@@ -247,13 +322,26 @@ def _search_vectorization_payload(search_query: NewsSearchQuery) -> dict:
 
 
 def _article_history_item(article: NewsArticle) -> NewsArticleHistoryItem:
+    pipeline_state = article.pipeline_state
     return NewsArticleHistoryItem(
         article_id=UUID(article.id),
         title=article.title,
+        visibility=article.visibility,
         status=article.status,
         origin=article.origin,
         language=article.language,
         novelty_score=article.novelty_score,
+        cluster_id=pipeline_state.cluster_id if pipeline_state else None,
+        novelty_label=pipeline_state.novelty_label if pipeline_state else None,
+        assignment_needs_review=(
+            pipeline_state.assignment_needs_review if pipeline_state else None
+        ),
+        novelty_needs_review=(
+            pipeline_state.novelty_needs_review if pipeline_state else None
+        ),
+        late_arrival=pipeline_state.late_arrival if pipeline_state else None,
+        processed_at=pipeline_state.processed_at if pipeline_state else None,
+        pipeline_error=article.extra_metadata.get("pipeline_error"),
         published_at=article.published_at,
         fetched_at=article.fetched_at,
         url=article.url,

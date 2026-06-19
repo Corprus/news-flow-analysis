@@ -10,8 +10,11 @@
 - embeddings: `BAAI/bge-m3`, `vector(1024)` в PostgreSQL/pgvector;
 - pipeline state: cluster assignment, novelty, provenance и версии моделей
   хранятся в `article_pipeline_state`;
+- пользовательские новости создаются как приватные drafts и попадают в общий
+  корпус только после явной публикации;
 - incremental mode читает историю и embeddings из PostgreSQL;
-- semantic search выполняется оператором cosine distance pgvector.
+- semantic search выполняется по всем `public/processed` новостям оператором
+  cosine distance pgvector.
 
 Подробности запуска и контракта: [`docs/service_stack.md`](docs/service_stack.md).
 
@@ -52,6 +55,9 @@
 - duplicate threshold: `0.90`;
 - review margin: `0.10`.
 
+Первый элемент кластера не передаётся novelty classifier: он является seed кластера
+и получает `significant` по детерминированному правилу.
+
 Runtime-артефакты:
 
 ```text
@@ -88,12 +94,16 @@ golden-разметки. После фиксации конфигурации и
 | Pairwise recall кластеризации | диагностическая | 0.6257 | **0.8342** | — |
 | Pairwise F1 кластеризации | ≥ 0.75–0.80 | 0.7697 | **0.9017** | достигнуто |
 | False merge rate | ≤ 10–15% | 0.00% | **1.89%** | достигнуто |
-| Precision значимых обновлений | диагностическая | 0.8356 | **0.8421** | — |
-| Recall значимых обновлений | ≥ 0.80 | 0.8356 | **0.8767** | достигнуто |
-| F1 значимых обновлений | ≥ 0.75 | 0.8356 | **0.8591** | достигнуто |
+| Precision значимых обновлений | диагностическая | 0.8471 | **0.8471** | — |
+| Recall значимых обновлений | ≥ 0.80 | 0.9863 | **0.9863** | достигнуто |
+| F1 значимых обновлений | ≥ 0.75 | 0.9114 | **0.9114** | достигнуто |
 
 Финальный вариант заметно уменьшает фрагментацию сюжетов. Цена прироста recall —
 3 ошибочно объединённые пары из 159 предсказанных same-story пар.
+
+Novelty-метрики включают детерминированное правило `cluster seed → significant`.
+Поэтому они одинаковы для baseline и `exp_10` при одной модели: улучшение `exp_10`
+относится к кластеризации, а не к novelty classifier.
 
 Результаты нельзя считать production-гарантией: golden-набор небольшой, а продуктовая
 проверка на 300–500 публикациях клиента ещё не проведена.
@@ -126,8 +136,8 @@ golden-публикаций. Релевантность и повторы оце
 |---|---:|---:|---|
 | Качество группировки инфоповодов | Pairwise F1 ≥ 0.75–0.80 | **0.9017** | достигнуто |
 | Ошибочная склейка разных сюжетов | False merge ≤ 10–15% | **1.89%** | достигнуто |
-| F1 значимых обновлений | F1 ≥ 0.75 | **0.8591** | достигнуто |
-| Полнота значимых обновлений | Recall ≥ 0.80 | **0.8767** | достигнуто |
+| F1 значимых обновлений | F1 ≥ 0.75 | **0.9114** | достигнуто |
+| Полнота значимых обновлений | Recall ≥ 0.80 | **0.9863** | достигнуто |
 | Семантический поиск | MRR@10 выше keyword baseline | **0.9944 против 0.9067** | достигнуто |
 | Снижение повторов в Top-10 | не менее 30% к baseline | **75.14%** | достигнуто |
 
@@ -176,16 +186,16 @@ docker compose up --build
 - RabbitMQ management: <http://localhost:15672/>
 - API health: <http://localhost/api/health>
 
-Простейшая асинхронная векторизация без авторизации:
+Простейший асинхронный запуск pipeline для уже сохранённой статьи:
 
 ```powershell
 $job = Invoke-RestMethod `
   -Method Post `
-  -Uri http://localhost/api/v1/news-vectorization `
+  -Uri http://localhost/api/v1/news-pipeline `
   -ContentType application/json `
-  -Body '{"title":"Пример","text":"Текст новости"}'
+  -Body '{"news_ids":["ARTICLE_UUID"],"mode":"incremental"}'
 
-Invoke-RestMethod "http://localhost/api/v1/news-vectorization/$($job.job_id)"
+Invoke-RestMethod "http://localhost/api/v1/news-pipeline/$($job.job_id)"
 ```
 
 Полные пользовательские сценарии включают регистрацию, bearer-аутентификацию,
@@ -231,8 +241,9 @@ comment
 max_prev_similarity
 ```
 
-`novelty_label` принимает значения `significant`, `minor`, `duplicate` либо остаётся
-пустым для первого элемента кластера, если fallback не нашёл более ранний контекст.
+`novelty_label` принимает значения `significant`, `minor` или `duplicate`. Первый
+элемент каждого нового кластера всегда получает `significant` и `p_significant=1.0`
+как seed кластера; классификатор для него не вызывается.
 
 ## Производительность
 

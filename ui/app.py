@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
 import pandas as pd
@@ -88,8 +89,12 @@ def render_news() -> None:
         col_url, col_lang = st.columns([3, 1])
         url = col_url.text_input("URL")
         language = col_lang.text_input("Language", placeholder="ru")
+        published_at = st.text_input(
+            "Published at (ISO 8601)",
+            value=datetime.now(UTC).isoformat(),
+        )
         summary = st.text_area("Summary", height=100)
-        submitted = st.form_submit_button("Add and queue vectorization")
+        submitted = st.form_submit_button("Save draft")
 
     if submitted:
         payload = {
@@ -99,13 +104,11 @@ def render_news() -> None:
             "url": url or None,
             "canonical_url": url or None,
             "language": language or None,
+            "published_at": published_at,
         }
         try:
             result = client.add_news(payload)
-            refresh_account()
-            st.success(
-                f"News queued: {result['article_id']} (job {result['vectorization_job_id']})"
-            )
+            st.success(f"Draft saved: {result['article_id']}")
         except ApiError as exc:
             st.error(str(exc))
 
@@ -114,6 +117,23 @@ def render_news() -> None:
         history = client.list_news_history()
         if history:
             st.dataframe(pd.DataFrame(history), use_container_width=True, hide_index=True)
+            drafts = [item for item in history if item.get("visibility") == "draft"]
+            for item in drafts:
+                article_id = item["article_id"]
+                if st.button(
+                    f"Publish: {item['title']}",
+                    key=f"publish-{article_id}",
+                    use_container_width=True,
+                ):
+                    try:
+                        result = client.publish_news(article_id)
+                        refresh_account()
+                        st.success(
+                            f"Published: {article_id} (job {result['job_id']})"
+                        )
+                        st.rerun()
+                    except ApiError as exc:
+                        st.error(str(exc))
         else:
             st.info("No user-added news yet.")
     except ApiError as exc:
@@ -152,7 +172,7 @@ def render_search() -> None:
             result = client.search_news(payload)
             refresh_account()
             st.success(
-                f"Search queued: {result['query_id']} (job {result['vectorization_job_id']})"
+                f"Search queued: {result['query_id']} (job {result['job_id']})"
             )
         except ApiError as exc:
             st.error(str(exc))

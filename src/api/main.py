@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Annotated, Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from accounting.routes import router as accounting_router
 from db.database import create_tables, init_db
@@ -16,22 +17,28 @@ from settings import Settings, get_settings
 from users.routes import auth_router
 from users.routes import router as users_router
 
+JobStatus = Literal["queued", "processing", "done", "failed"]
+
 
 class NewsVectorizationRequest(BaseModel):
-    news_ids: list[str] = Field(min_length=1, max_length=10_000)
+    model_config = ConfigDict(extra="forbid")
+
+    news_ids: list[UUID] = Field(min_length=1, max_length=10_000)
     mode: Literal["full", "incremental"] = "incremental"
 
 
 class NewsVectorizationJobResponse(BaseModel):
-    job_id: str
-    status: str
+    job_id: UUID
+    status: Literal["queued"]
 
 
 class NewsVectorizationJobStatus(BaseModel):
-    job_id: str
-    status: str
-    request: dict
-    result: dict | None
+    job_id: UUID
+    status: JobStatus
+    request: dict[str, object]
+    result: dict[str, object] | None
+    created_at: datetime
+    updated_at: datetime
 
 
 def get_publisher(request: Request) -> RabbitPublisher:
@@ -81,7 +88,7 @@ async def create_news_vectorization_job(
     repository: Annotated[NewsPipelineJobRepository, Depends(get_repository)],
 ) -> NewsVectorizationJobResponse:
     job_id = str(uuid4())
-    payload = request.model_dump()
+    payload = request.model_dump(mode="json")
     await repository.mark_queued(job_id, payload)
     await publisher.publish(
         {
@@ -90,23 +97,25 @@ async def create_news_vectorization_job(
             "payload": payload,
         }
     )
-    return NewsVectorizationJobResponse(job_id=job_id, status="queued")
+    return NewsVectorizationJobResponse(job_id=UUID(job_id), status="queued")
 
 
 @app.get("/v1/news-pipeline/{job_id}", response_model=NewsVectorizationJobStatus)
 async def get_news_vectorization_job(
-    job_id: str,
+    job_id: UUID,
     repository: Annotated[NewsPipelineJobRepository, Depends(get_repository)],
 ) -> NewsVectorizationJobStatus:
-    job = await repository.get(job_id)
+    job = await repository.get(str(job_id))
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
 
     return NewsVectorizationJobStatus(
-        job_id=job["job_id"],
+        job_id=UUID(job["job_id"]),
         status=job["status"],
         request=job["request"],
         result=job["result"],
+        created_at=job["created_at"],
+        updated_at=job["updated_at"],
     )
 
 

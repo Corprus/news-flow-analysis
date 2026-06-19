@@ -24,17 +24,21 @@ class Vector(UserDefinedType):
 
 
 class ArticleStatus(StrEnum):
-    RAW = "raw"
-    QUEUED = "queued"
+    NOT_STARTED = "not_started"
+    PENDING = "pending"
     PROCESSING = "processing"
-    PARSED = "parsed"
-    VECTORIZED = "vectorized"
-    FAILED = "failed"
+    PROCESSED = "processed"
+    ERROR = "error"
 
 
 class ArticleOrigin(StrEnum):
     USER_SUBMITTED = "user_submitted"
     AUTO_FETCHED = "auto_fetched"
+
+
+class ArticleVisibility(StrEnum):
+    DRAFT = "draft"
+    PUBLIC = "public"
 
 
 class SearchQueryStatus(StrEnum):
@@ -109,21 +113,28 @@ class NewsArticle(Base):
     canonical_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     title: Mapped[str] = mapped_column(String(1024), nullable=False)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    content: Mapped[str | None] = mapped_column(Text, nullable=True)
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(UTC),
     )
     language: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    topic: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
     author: Mapped[str | None] = mapped_column(String(512), nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     novelty_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    visibility: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=ArticleVisibility.DRAFT.value,
+        index=True,
+    )
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
-        default=ArticleStatus.RAW.value,
+        default=ArticleStatus.NOT_STARTED.value,
         index=True,
     )
     origin: Mapped[str] = mapped_column(
@@ -161,8 +172,8 @@ class NewsArticle(Base):
 
     __table_args__ = (
         UniqueConstraint("source_id", "external_id", name="uq_news_article_source_external_id"),
-        UniqueConstraint("canonical_url", name="uq_news_article_canonical_url"),
-        UniqueConstraint("content_hash", name="uq_news_article_content_hash"),
+        Index("ix_news_articles_canonical_url", "canonical_url"),
+        Index("ix_news_articles_content_hash", "content_hash"),
         Index("ix_news_articles_published_at", "published_at"),
         Index("ix_news_articles_novelty_score", "novelty_score"),
     )
@@ -223,8 +234,8 @@ class ArticlePipelineState(Base):
     attached_to_component_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     assignment_needs_review: Mapped[bool] = mapped_column(nullable=False, default=False)
     late_arrival: Mapped[bool] = mapped_column(nullable=False, default=False)
-    novelty_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    p_significant: Mapped[float | None] = mapped_column(Float, nullable=True)
+    novelty_label: Mapped[str] = mapped_column(String(32), nullable=False)
+    p_significant: Mapped[float] = mapped_column(Float, nullable=False)
     novelty_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     novelty_needs_review: Mapped[bool] = mapped_column(nullable=False, default=False)
     pipeline_version: Mapped[str] = mapped_column(String(128), nullable=False)

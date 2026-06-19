@@ -76,6 +76,9 @@ class ApiClient:
     def add_news(self, payload: dict) -> dict:
         return self._request("POST", "/v1/news", json=payload, timeout=60)
 
+    def publish_news(self, article_id: str) -> dict:
+        return self._request("POST", f"/v1/news/{article_id}/publish", timeout=60)
+
     def list_news_history(self) -> list[dict]:
         return self._request("GET", "/v1/news/me/history")
 

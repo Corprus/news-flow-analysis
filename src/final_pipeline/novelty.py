@@ -15,7 +15,7 @@ from .features import LegacyFeatureBuilder
 
 
 class FinalNoveltyModel:
-    """Final-step модель novelty detection с first-item fallback.
+    """Final-step модель novelty detection.
 
     Объект model может быть CatBoost, sklearn Pipeline/MLP/LogReg или любая модель
     с методом predict_proba. Это важно для exp_10c, где лучшим вариантом оказался
@@ -99,7 +99,7 @@ class FinalNoveltyModel:
         context_embeddings: np.ndarray,
         *,
         reason: str,
-    ) -> tuple[str, bool, str]:
+    ) -> tuple[str, bool, str, float]:
         cfg = self.config
         features = LegacyFeatureBuilder(
             cluster_column=cfg.cluster_column,
@@ -133,7 +133,7 @@ class FinalNoveltyModel:
         comment = (
             f"{reason}; p_significant={proba:.4f}; max_prev_similarity={max_prev_similarity:.4f}"
         )
-        return label, bool(needs_review), comment
+        return label, bool(needs_review), comment, proba
 
     def predict_clustered_with_fallback(
         self, news_df: pd.DataFrame, embeddings: np.ndarray
@@ -154,35 +154,6 @@ class FinalNoveltyModel:
         df["_row_pos"] = np.arange(len(df))
         emb = l2_normalize(np.asarray(embeddings, dtype=np.float32))
 
-        def find_fallback_indices(current_idx: int) -> list[int]:
-            current = df.iloc[current_idx]
-            current_date = current[cfg.date_column]
-            if pd.isna(current_date):
-                return []
-            same_topic = df[cfg.topic_column].astype(str).eq(str(current[cfg.topic_column]))
-            different_cluster = ~df[cfg.cluster_column].astype(str).eq(
-                str(current[cfg.cluster_column])
-            )
-            dates = df[cfg.date_column]
-            previous_time = (dates < current_date) | (
-                (dates == current_date) & (df["_row_pos"] < int(current["_row_pos"]))
-            )
-            delta_days = (current_date - dates).dt.total_seconds() / (24 * 60 * 60)
-            in_window = (delta_days >= 0) & (delta_days <= cfg.fallback_window_days)
-            candidates = df.index[
-                same_topic & different_cluster & previous_time & in_window
-            ].to_numpy(dtype=int)
-            if len(candidates) == 0:
-                return []
-            sims = emb[candidates] @ emb[current_idx]
-            strong = sims >= cfg.fallback_similarity_threshold
-            if not np.any(strong):
-                return []
-            selected = candidates[strong]
-            selected_sims = sims[strong]
-            order = np.argsort(-selected_sims)[: cfg.fallback_max_previous_candidates]
-            return selected[order].tolist()
-
         outputs: list[dict] = []
         sorted_df = df.sort_values(
             [cfg.cluster_column, cfg.date_column, "_row_pos"], kind="mergesort"
@@ -192,27 +163,18 @@ class FinalNoveltyModel:
             history_indices: list[int] = []
             for _, row in group.iterrows():
                 idx = int(row["_row_pos"])
-                label = ""
+                label = "significant"
                 needs_review = False
-                comment = "first item in cluster"
+                comment = "cluster seed; significant by definition"
+                proba = 1.0
 
                 if history_indices:
                     context_indices = history_indices + [idx]
-                    label, needs_review, comment = self._predict_one_from_context(
+                    label, needs_review, comment, proba = self._predict_one_from_context(
                         df.iloc[context_indices].copy(),
                         emb[context_indices],
                         reason="cluster_context",
                     )
-                elif cfg.first_item_fallback_enabled:
-                    fallback_indices = find_fallback_indices(idx)
-                    if fallback_indices:
-                        context_indices = fallback_indices + [idx]
-                        # Fallback-контекст временно считаем одним кластером.
-                        context_df = df.iloc[context_indices].copy()
-                        context_df[cfg.cluster_column] = str(row[cfg.cluster_column])
-                        label, needs_review, comment = self._predict_one_from_context(
-                            context_df, emb[context_indices], reason="first_item_fallback"
-                        )
 
                 outputs.append(
                     {
@@ -225,6 +187,7 @@ class FinalNoveltyModel:
                         "novelty_label": label,
                         "comment": comment,
                         "needs_review": needs_review,
+                        "p_significant": proba,
                     }
                 )
                 history_indices.append(idx)

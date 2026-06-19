@@ -202,18 +202,14 @@ class CatBoostSignificanceModel:
         title_column: str = "title",
         text_column: str = "text",
     ) -> pd.DataFrame:
-        """Predict novelty labels for already-clustered news with first-item fallback.
+        """Predict novelty labels for already-clustered news.
 
         This method reproduces the old inference logic:
 
         1. Inside each cluster, news are processed in chronological order.
         2. Non-first items are compared only with previous items from the same cluster.
-        3. First items are not automatically classified as significant.
-        Instead, optional fallback searches earlier news from the same topic within
-        a time window and with high semantic similarity.
-        4. If fallback candidates are found, the CatBoost model is applied to the
-        fallback context.
-        5. If no fallback candidates are found, novelty_label is left empty.
+        3. The first item of every cluster is a significant cluster seed.
+        4. The CatBoost model is applied only when previous in-cluster context exists.
 
         Parameters
         ----------
@@ -257,15 +253,6 @@ class CatBoostSignificanceModel:
 
         if not feature_columns:
             raise ValueError("No feature columns configured for CatBoostSignificanceModel")
-
-        fallback_enabled = bool(getattr(self.config, "first_item_fallback_enabled", True))
-        fallback_window_days = int(getattr(self.config, "fallback_window_days", 30))
-        fallback_similarity_threshold = float(
-            getattr(self.config, "fallback_similarity_threshold", 0.78)
-        )
-        fallback_max_previous_candidates = int(
-            getattr(self.config, "fallback_max_previous_candidates", 10)
-        )
 
         threshold = float(getattr(self.config, "threshold", 0.42))
         duplicate_threshold = float(getattr(self.config, "duplicate_threshold", 0.90))
@@ -321,53 +308,6 @@ class CatBoostSignificanceModel:
 
             return label, needs_review, comment, proba
 
-        def _find_fallback_indices(current_idx: int) -> list[int]:
-            """Find previous same-topic candidates for first item fallback."""
-            current = df.iloc[current_idx]
-            current_date = current[date_column]
-            current_topic = current[topic_column]
-            current_cluster = current[cluster_column]
-            current_pos = int(current["_row_pos"])
-
-            if pd.isna(current_date):
-                # Без даты fallback лучше не делать: иначе легко получить leakage по времени.
-                return []
-
-            same_topic_mask = df[topic_column].astype(str) == str(current_topic)
-            different_cluster_mask = df[cluster_column].astype(str) != str(current_cluster)
-
-            dates = df[date_column]
-
-            previous_time_mask = (dates < current_date) | (
-                (dates == current_date) & (df["_row_pos"] < current_pos)
-            )
-
-            delta_days = (current_date - dates).dt.total_seconds() / (24 * 60 * 60)
-            window_mask = (delta_days >= 0) & (delta_days <= fallback_window_days)
-
-            candidate_mask = (
-                same_topic_mask & different_cluster_mask & previous_time_mask & window_mask
-            )
-
-            candidate_indices = df.index[candidate_mask].to_numpy(dtype=int)
-
-            if len(candidate_indices) == 0:
-                return []
-
-            sims = emb[candidate_indices] @ emb[current_idx]
-            strong_mask = sims >= fallback_similarity_threshold
-
-            if not np.any(strong_mask):
-                return []
-
-            candidate_indices = candidate_indices[strong_mask]
-            sims = sims[strong_mask]
-
-            order = np.argsort(-sims)
-            order = order[:fallback_max_previous_candidates]
-
-            return candidate_indices[order].tolist()
-
         prediction_rows: list[dict] = []
 
         sorted_df = df.sort_values(
@@ -389,38 +329,10 @@ class CatBoostSignificanceModel:
                 proba: float | None
 
                 if position == 0:
-                    if not fallback_enabled:
-                        label = ""
-                        needs_review = False
-                        comment = "first item in cluster; fallback disabled"
-                        proba = None
-                    else:
-                        fallback_indices = _find_fallback_indices(current_idx)
-
-                        if not fallback_indices:
-                            label = ""
-                            needs_review = False
-                            comment = "first item in cluster; no fallback candidates"
-                            proba = None
-                        else:
-                            # Для fallback строим временный context-кластер:
-                            # предыдущие похожие новости той же topic + текущая новость.
-                            # Все строки получают cluster_id текущей новости, чтобы legacy
-                            # feature builder посчитал previous-only признаки относительно
-                            # fallback-контекста.
-                            context_indices = fallback_indices + [current_idx]
-                            context_df = df.loc[context_indices].copy()
-                            context_df[cluster_column] = current[cluster_column]
-                            context_embeddings = emb[context_indices]
-
-                            label, needs_review, comment, proba = _predict_from_context(
-                                context_df=context_df,
-                                context_embeddings=context_embeddings,
-                                reason=(
-                                    "first item fallback; "
-                                    f"fallback_candidates={len(fallback_indices)}"
-                                ),
-                            )
+                    label = "significant"
+                    needs_review = False
+                    comment = "cluster seed; significant by definition"
+                    proba = 1.0
                 else:
                     # Обычная ветка: текущая новость сравнивается только с предыдущими
                     # новостями своего же кластера.
