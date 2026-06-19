@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from accounting.exceptions import InsufficientBalanceError, UserAccountNotFoundError
 from accounting.models import TransactionReason
 from accounting.service import AccountingService
-from db.news_vectorization_jobs import NewsVectorizationJobRepository
+from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
 from news.models import NewsArticle, NewsSearchQuery
 from news.service import NewsSearchFilters, NewsService
@@ -31,6 +31,7 @@ class AddNewsRequest(BaseModel):
     canonical_url: str | None = Field(default=None, max_length=2048)
     summary: str | None = None
     language: str | None = Field(default=None, max_length=16)
+    topic: str | None = Field(default=None, max_length=256)
     published_at: datetime | None = None
 
 
@@ -93,13 +94,13 @@ def get_publisher(request: Request) -> RabbitPublisher:
     return request.app.state.publisher
 
 
-def get_job_repository(request: Request) -> NewsVectorizationJobRepository:
+def get_job_repository(request: Request) -> NewsPipelineJobRepository:
     return request.app.state.repository
 
 
 async def enqueue_vectorization_job(
     *,
-    repository: NewsVectorizationJobRepository,
+    repository: NewsPipelineJobRepository,
     publisher: RabbitPublisher,
     payload: dict,
 ) -> UUID:
@@ -108,7 +109,11 @@ async def enqueue_vectorization_job(
     await publisher.publish(
         {
             "job_id": str(job_id),
-            "type": "news_vectorization",
+            "type": (
+                "news_search"
+                if payload.get("target_type") == "news_search_query"
+                else "news_pipeline"
+            ),
             "payload": payload,
         }
     )
@@ -123,7 +128,7 @@ async def add_news(
     accounting: Annotated[AccountingService, Depends(get_accounting_service)],
     settings: Annotated[Settings, Depends(get_settings)],
     publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
-    repository: Annotated[NewsVectorizationJobRepository, Depends(get_job_repository)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
 ) -> NewsArticleResponse:
     article = news.add_user_article(
         user_id=current_user.id,
@@ -133,6 +138,7 @@ async def add_news(
         canonical_url=request.canonical_url,
         summary=request.summary,
         language=request.language,
+        topic=request.topic,
         published_at=request.published_at,
     )
     _withdraw_or_raise(
@@ -174,7 +180,7 @@ async def create_news_search(
     accounting: Annotated[AccountingService, Depends(get_accounting_service)],
     settings: Annotated[Settings, Depends(get_settings)],
     publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
-    repository: Annotated[NewsVectorizationJobRepository, Depends(get_job_repository)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
 ) -> NewsSearchResponse:
     filters = NewsSearchFilters(
         language=request.language,
@@ -225,11 +231,8 @@ def get_my_search_history(
 
 def _article_vectorization_payload(article: NewsArticle) -> dict:
     return {
-        "target_type": "news_article",
-        "article_id": article.id,
-        "text": article.content or article.summary or article.title,
-        "title": article.title,
-        "language": article.language,
+        "news_ids": [article.id],
+        "mode": "incremental",
     }
 
 

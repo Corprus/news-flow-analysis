@@ -71,12 +71,6 @@ services:
     build:
       context: .
       dockerfile: docker/model-service.Dockerfile
-      args:
-        PRELOAD_MODEL_FROM_HF: ${PRELOAD_MODEL_FROM_HF:-false}
-        HF_MODEL_ID: ${HF_MODEL_ID:-Korprus/news-flow-ru-vectorization-mpnet}
-        HF_MODEL_REVISION: ${HF_MODEL_REVISION:-789ab95331d9abc4f5f23d1e3d5d24bb8af28086}
-        HF_MODEL_DIR: ${HF_MODEL_DIR:-/app/models/news-flow-ru-vectorization-mpnet/final}
-        HF_MODEL_METADATA_PATH: ${HF_MODEL_METADATA_PATH:-/app/configs/model_registry/latest_model.json}
     environment:
       APP_ENV: ${APP_ENV:-local}
       POSTGRES_HOST: postgres
@@ -90,9 +84,9 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
-      USE_LOCAL_MODEL: ${USE_LOCAL_MODEL:-false}
-      LOCAL_MODEL_SOURCE: ${LOCAL_MODEL_SOURCE:-/app/local_models/news-flow-ru-vectorization-mpnet/final}
-      REMOTE_MODEL_SOURCE: ${REMOTE_MODEL_SOURCE:-/app/configs/model_registry/latest_model.json}
+      PIPELINE_MODEL_PATH: /app/data/artifacts/models/final_exp10/final_novelty_model.joblib
+      PIPELINE_CONFIG_PATH: /app/data/artifacts/models/final_exp10/final_pipeline_config.json
+      PIPELINE_DEVICE: ${PIPELINE_DEVICE:-cpu}
       HF_HOME: ${MODEL_SERVICE_HF_HOME:-/app/.cache/huggingface}
       HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
       HF_TOKEN: ${HF_TOKEN:-}
@@ -105,8 +99,8 @@ services:
       - "8000"
     volumes:
       - ./src:/app/src
-      - ./artifacts:/app/artifacts
-      - ./models:/app/local_models:ro
+      - ./data/artifacts/models/final_exp10:/app/data/artifacts/models/final_exp10:ro
+      - model_cache:/app/.cache/huggingface
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()\""]
       interval: 30s
@@ -146,3 +140,4 @@ services:
 volumes:
   postgres_data:
   rabbitmq_data:
+  model_cache:

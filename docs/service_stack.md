@@ -2,41 +2,34 @@
 
 Docker Compose starts:
 
-- `nginx`: public entry point.
-- `api`: external FastAPI service under `/api`.
-- `model-service`: internal FastAPI service and RabbitMQ consumer.
-- `rabbitmq`: job transport for news vectorization tasks.
-- `postgres`: PostgreSQL with the `pgvector` extension.
+- `api` — accepts news and creates pipeline jobs;
+- `model-service` — runs the final full or incremental pipeline;
+- `rabbitmq` — transports pipeline and semantic-search jobs;
+- `postgres` — stores articles, BGE-M3 vectors and pipeline state through `pgvector`.
 
-The model service loads the fine-tuned `sentence-transformers` model on startup.
-By default it uses the remote model registry source:
+The model service loads:
 
 ```text
-REMOTE_MODEL_SOURCE=/app/configs/model_registry/latest_model.json
+PIPELINE_MODEL_PATH=/app/data/artifacts/models/final_exp10/final_novelty_model.joblib
+PIPELINE_CONFIG_PATH=/app/data/artifacts/models/final_exp10/final_pipeline_config.json
+PIPELINE_DEVICE=
 ```
 
-Set `USE_LOCAL_MODEL=true` to use `LOCAL_MODEL_SOURCE` instead. The remote source can be
-a model registry JSON or a Hugging Face model reference; the local source should be a
-container-visible model directory.
+`PIPELINE_DEVICE` may be set to `cuda` in a GPU-enabled image.
 
-Main commands:
+Start the stack:
 
 ```bash
 docker compose up --build
 ```
 
-Submit a news vectorization job through nginx:
+Submit a pipeline job for existing article IDs:
 
 ```bash
-curl -X POST http://localhost/api/v1/news-vectorization \
+curl -X POST http://localhost/api/v1/news-pipeline \
   -H "Content-Type: application/json" \
-  -d "{\"text\":\"example news text\"}"
+  -d '{"news_ids":["ARTICLE_UUID"],"mode":"incremental"}'
 ```
 
-Check job status:
-
-```bash
-curl http://localhost/api/v1/news-vectorization/<job_id>
-```
-
-RabbitMQ management UI is exposed at `http://localhost:15672` by default.
+`mode` is `incremental` or `full`. Check status at
+`/api/v1/news-pipeline/<job_id>`.
