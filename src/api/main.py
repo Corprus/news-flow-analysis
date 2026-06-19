@@ -8,7 +8,8 @@ from fastapi.exceptions import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from accounting.routes import router as accounting_router
-from db.database import create_tables, init_db
+from api.demo import seed_demo, validate_demo_settings
+from db.database import create_tables, drop_tables, get_session, init_db
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
 from news.routes import router as news_router
@@ -52,8 +53,14 @@ def get_repository(request: Request) -> NewsPipelineJobRepository:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    validate_demo_settings(settings)
     init_db(settings)
+    if settings.demo_drop_db:
+        drop_tables()
     create_tables()
+    if settings.demo_mode:
+        with get_session() as session:
+            seed_demo(session, settings)
     repository = NewsPipelineJobRepository(settings.database_url)
     publisher = RabbitPublisher(settings.rabbitmq_url, settings.news_vectorization_queue)
     await repository.initialize()

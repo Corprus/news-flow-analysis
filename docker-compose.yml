@@ -38,6 +38,13 @@ services:
       dockerfile: docker/api.Dockerfile
     environment:
       APP_ENV: ${APP_ENV:-local}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      DEMO_DROP_DB: ${DEMO_DROP_DB:-false}
+      DEMO_USER_LOGIN: ${DEMO_USER_LOGIN:-demo}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-demo12345}
+      DEMO_ADMIN_LOGIN: ${DEMO_ADMIN_LOGIN:-admin}
+      DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-admin12345}
+      DEMO_INITIAL_CREDIT: ${DEMO_INITIAL_CREDIT:-100.00}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-news_flow}
@@ -94,6 +101,8 @@ services:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      api:
         condition: service_healthy
     expose:
       - "8000"

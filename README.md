@@ -173,10 +173,59 @@ PASSWORD_HASH_SECRET
 ACCESS_TOKEN_SECRET
 ```
 
+### Запуск демо
+
+Для первого запуска демо установите в `.env`:
+
+```text
+DEMO_MODE=true
+DEMO_DROP_DB=true
+```
+
 Запустите стек:
 
 ```powershell
 docker compose up --build
+```
+
+После старта откройте UI: <http://localhost/>.
+
+Демо-пользователи:
+
+```text
+demo  / demo12345   — publisher
+admin / admin12345  — administrator
+```
+
+`DEMO_DROP_DB=true` полностью удаляет и заново создаёт таблицы при каждом старте
+API. Поэтому после первой успешной инициализации остановите стек и измените
+параметр в `.env`:
+
+```text
+DEMO_DROP_DB=false
+```
+
+Последующие запуски выполняются без пересоздания данных:
+
+```powershell
+docker compose up
+```
+
+Чтобы намеренно получить чистое демо, снова установите `DEMO_DROP_DB=true` и
+перезапустите стек.
+
+### Запуск API без Docker
+
+Первичная инициализация демо:
+
+```powershell
+python -m api --demo --drop-db
+```
+
+Повторный безопасный запуск:
+
+```powershell
+python -m api --demo
 ```
 
 После старта:

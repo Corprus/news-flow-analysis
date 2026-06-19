@@ -23,6 +23,54 @@ Start the stack:
 docker compose up --build
 ```
 
+## Demo mode
+
+The API has an explicit Python entry point:
+
+```bash
+python -m api --host 0.0.0.0 --port 8000
+```
+
+To initialize repeatable demo data and start the API:
+
+```bash
+python -m api --demo
+```
+
+To discard the current database schema before creating the demo:
+
+```bash
+python -m api --demo --drop-db
+```
+
+`--drop-db` requires `--demo`, and demo mode is rejected when `APP_ENV` is
+`prod` or `production`.
+
+With Docker Compose, use the corresponding environment parameters:
+
+```text
+DEMO_MODE=true
+DEMO_DROP_DB=true
+```
+
+Then start or recreate the stack:
+
+```bash
+docker compose up --build
+```
+
+Demo credentials default to:
+
+```text
+publisher: demo / demo12345
+admin:     admin / admin12345
+```
+
+The credentials and initial credit are configurable through
+`DEMO_USER_*`, `DEMO_ADMIN_*`, and `DEMO_INITIAL_CREDIT`. After the first
+destructive initialization, set `DEMO_DROP_DB=false`; otherwise every API
+restart will erase the database again.
+
 Submit a pipeline job for existing article IDs:
 
 ```bash

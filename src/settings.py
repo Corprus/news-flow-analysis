@@ -8,6 +8,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_env: str = Field(default="local", alias="APP_ENV")
+    demo_mode: bool = Field(default=False, alias="DEMO_MODE")
+    demo_drop_db: bool = Field(default=False, alias="DEMO_DROP_DB")
+    demo_user_login: str = Field(default="demo", alias="DEMO_USER_LOGIN")
+    demo_user_password: str = Field(default="demo12345", alias="DEMO_USER_PASSWORD")
+    demo_admin_login: str = Field(default="admin", alias="DEMO_ADMIN_LOGIN")
+    demo_admin_password: str = Field(default="admin12345", alias="DEMO_ADMIN_PASSWORD")
+    demo_initial_credit: Decimal = Field(
+        default=Decimal("100.00"),
+        ge=0,
+        alias="DEMO_INITIAL_CREDIT",
+    )
     postgres_host: str = Field(default="postgres", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
     postgres_db: str = Field(default="news_flow", alias="POSTGRES_DB")
