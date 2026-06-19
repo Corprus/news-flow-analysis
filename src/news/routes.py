@@ -370,6 +370,9 @@ def _withdraw_or_raise(
     reason: TransactionReason,
     reference_id: UUID,
 ) -> None:
+    if amount == 0:
+        return
+
     try:
         accounting.withdraw_credit(user_id, amount, reason, reference_id)
     except InsufficientBalanceError as exc:

@@ -35,8 +35,8 @@ class Settings(BaseSettings):
         default=60 * 24,
         alias="ACCESS_TOKEN_TTL_MINUTES",
     )
-    news_add_cost: Decimal = Field(default=Decimal("1.00"), alias="NEWS_ADD_COST")
-    news_search_cost: Decimal = Field(default=Decimal("1.00"), alias="NEWS_SEARCH_COST")
+    news_add_cost: Decimal = Field(default=Decimal("1.00"), ge=0, alias="NEWS_ADD_COST")
+    news_search_cost: Decimal = Field(default=Decimal("0.00"), ge=0, alias="NEWS_SEARCH_COST")
     pipeline_model_path: str = Field(
         default="data/artifacts/models/final_exp10/final_novelty_model.joblib",
         alias="PIPELINE_MODEL_PATH",
