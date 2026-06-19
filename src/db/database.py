@@ -42,9 +42,7 @@ def get_engine() -> Engine:
 
 
 def create_tables() -> None:
-    import accounting.models  # noqa: F401
-    import news.models  # noqa: F401
-    import users.models  # noqa: F401
+    _import_models()
 
     with get_engine().begin() as connection:
         connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
@@ -279,6 +277,17 @@ def create_tables() -> None:
                 """
             )
         )
+
+
+def drop_tables() -> None:
+    _import_models()
+    Base.metadata.drop_all(bind=get_engine())
+
+
+def _import_models() -> None:
+    import accounting.models  # noqa: F401
+    import news.models  # noqa: F401
+    import users.models  # noqa: F401
 
 
 @contextmanager

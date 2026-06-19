@@ -26,7 +26,7 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_port_connectivity"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -38,6 +38,16 @@ services:
       dockerfile: docker/api.Dockerfile
     environment:
       APP_ENV: ${APP_ENV:-local}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      # Docker demo reset is performed explicitly with `docker compose down -v`.
+      # Never keep destructive database reset enabled in a restarting API container.
+      DEMO_DROP_DB: "false"
+      DEMO_USER_LOGIN: ${DEMO_USER_LOGIN:-demo}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-demo12345}
+      DEMO_ADMIN_LOGIN: ${DEMO_ADMIN_LOGIN:-admin}
+      DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-admin12345}
+      DEMO_INITIAL_CREDIT: ${DEMO_INITIAL_CREDIT:-100.00}
+      DEMO_NEWS_PATH: ${DEMO_NEWS_PATH:-data/demo/lenta_demo.csv}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-news_flow}
@@ -71,6 +81,8 @@ services:
     build:
       context: .
       dockerfile: docker/model-service.Dockerfile
+      args:
+        PYTORCH_IMAGE: ${PYTORCH_IMAGE:-mirror.gcr.io/pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime}
     environment:
       APP_ENV: ${APP_ENV:-local}
       POSTGRES_HOST: postgres
@@ -86,7 +98,9 @@ services:
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
       PIPELINE_MODEL_PATH: /app/data/artifacts/models/final_exp10/final_novelty_model.joblib
       PIPELINE_CONFIG_PATH: /app/data/artifacts/models/final_exp10/final_pipeline_config.json
-      PIPELINE_DEVICE: ${PIPELINE_DEVICE:-cpu}
+      PIPELINE_DEVICE: ${PIPELINE_DEVICE:-cuda}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
       HF_HOME: ${MODEL_SERVICE_HF_HOME:-/app/.cache/huggingface}
       HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
       HF_TOKEN: ${HF_TOKEN:-}
@@ -95,12 +109,15 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      api:
+        condition: service_healthy
     expose:
       - "8000"
+    gpus: all
     volumes:
       - ./src:/app/src
       - ./data/artifacts/models/final_exp10:/app/data/artifacts/models/final_exp10:ro
-      - model_cache:/app/.cache/huggingface
+      - ${MODEL_SERVICE_HF_CACHE:-model_cache}:/app/.cache/huggingface
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()\""]
       interval: 30s

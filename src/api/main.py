@@ -8,7 +8,8 @@ from fastapi.exceptions import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from accounting.routes import router as accounting_router
-from db.database import create_tables, init_db
+from api.demo import seed_demo, validate_demo_settings
+from db.database import create_tables, drop_tables, get_session, init_db
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
 from news.routes import router as news_router
@@ -52,7 +53,10 @@ def get_repository(request: Request) -> NewsPipelineJobRepository:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    validate_demo_settings(settings)
     init_db(settings)
+    if settings.demo_drop_db:
+        drop_tables()
     create_tables()
     repository = NewsPipelineJobRepository(settings.database_url)
     publisher = RabbitPublisher(settings.rabbitmq_url, settings.news_vectorization_queue)
@@ -60,6 +64,23 @@ async def lifespan(app: FastAPI):
     await publisher.connect()
     app.state.repository = repository
     app.state.publisher = publisher
+    if settings.demo_mode:
+        with get_session() as session:
+            demo = seed_demo(session, settings)
+        if demo.article_ids_to_process:
+            job_id = str(uuid4())
+            payload = {
+                "news_ids": demo.article_ids_to_process,
+                "mode": "incremental",
+            }
+            await repository.mark_queued(job_id, payload)
+            await publisher.publish(
+                {
+                    "job_id": job_id,
+                    "type": "news_pipeline",
+                    "payload": payload,
+                }
+            )
     yield
     await publisher.close()
 

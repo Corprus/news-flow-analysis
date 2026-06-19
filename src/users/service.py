@@ -26,16 +26,21 @@ class UserService:
         login: str,
         password: str,
         role: UserRole = UserRole.USER,
+        organization_id: UUID | None = None,
     ) -> User:
         if self.find_user(login) is not None:
             raise UserAlreadyExistsError()
 
-        organization = Organization(name=login)
-        self._session.add(organization)
-        self._session.flush()
+        if organization_id is None:
+            organization = Organization(name=login)
+            self._session.add(organization)
+            self._session.flush()
+            organization_id = UUID(organization.id)
+        elif self._session.get(Organization, str(organization_id)) is None:
+            raise ValueError("Organization does not exist")
 
         user = User(
-            organization_id=organization.id,
+            organization_id=str(organization_id),
             login=login,
             password_hash=self._password_hasher.hash(password),
             role=role.value,
