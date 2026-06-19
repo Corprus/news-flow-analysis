@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -10,7 +11,7 @@ import pandas as pd
 from psycopg import AsyncConnection
 
 from final_pipeline.result import PipelineResult
-from news.models import ArticleStatus, SearchQueryStatus
+from news.models import ArticleStatus, ArticleVisibility, SearchQueryStatus
 
 
 def _vector_literal(embedding: list[float] | np.ndarray) -> str:
@@ -44,15 +45,16 @@ class NewsPipelineRepository:
                     """
                     SELECT
                         id::text AS news_id,
-                        COALESCE(published_at, fetched_at) AS published_at,
+                        published_at,
                         COALESCE(topic, '<missing>') AS topic,
                         title,
-                        COALESCE(content, summary, '') AS text,
+                        content AS text,
                         COALESCE(url, '') AS url
                     FROM news_articles
                     WHERE id = ANY(%s::uuid[])
+                      AND visibility = %s
                     """,
-                    (news_ids,),
+                    (news_ids, ArticleVisibility.PUBLIC.value),
                 )
                 rows = await cursor.fetchall()
                 columns = [column.name for column in cursor.description]
@@ -60,7 +62,22 @@ class NewsPipelineRepository:
         found = set(frame.get("news_id", pd.Series(dtype=str)).astype(str))
         missing = [news_id for news_id in news_ids if news_id not in found]
         if missing:
-            raise ValueError(f"News articles not found: {missing[:10]}")
+            raise ValueError(f"News articles not found or not public: {missing[:10]}")
+        invalid: list[str] = []
+        for row in frame.to_dict("records"):
+            missing_fields = [
+                field
+                for field in ("title", "text", "published_at")
+                if row.get(field) is None
+                or (isinstance(row.get(field), str) and not row[field].strip())
+            ]
+            if missing_fields:
+                invalid.append(f"{row['news_id']}: {', '.join(missing_fields)}")
+        if invalid:
+            raise ValueError(
+                "News articles are not ready for pipeline; missing required fields: "
+                + "; ".join(invalid[:10])
+            )
         return frame
 
     async def load_history(
@@ -76,10 +93,10 @@ class NewsPipelineRepository:
                     """
                     SELECT
                         a.id::text AS news_id,
-                        COALESCE(a.published_at, a.fetched_at) AS published_at,
+                        a.published_at,
                         COALESCE(a.topic, '<missing>') AS topic,
                         a.title,
-                        COALESCE(a.content, a.summary, '') AS text,
+                        a.content AS text,
                         COALESCE(a.url, '') AS url,
                         s.cluster_id,
                         s.baseline_component_id,
@@ -92,12 +109,16 @@ class NewsPipelineRepository:
                     JOIN news_articles a ON a.id = s.article_id
                     JOIN article_pipeline_embeddings e ON e.article_id = a.id
                     WHERE NOT (a.id = ANY(%s::uuid[]))
+                      AND a.status = %s
+                      AND a.visibility = %s
                       AND e.model_name = %s
                       AND e.model_revision = %s
-                    ORDER BY COALESCE(a.published_at, a.fetched_at), a.id
+                    ORDER BY a.published_at, a.id
                     """,
                     (
                         exclude_news_ids,
+                        ArticleStatus.PROCESSED.value,
+                        ArticleVisibility.PUBLIC.value,
                         embedding_model,
                         embedding_model_revision,
                     ),
@@ -134,8 +155,17 @@ class NewsPipelineRepository:
     async def mark_articles_processing(self, news_ids: list[str]) -> None:
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
-                "UPDATE news_articles SET status = %s WHERE id = ANY(%s::uuid[])",
-                (ArticleStatus.PROCESSING.value, news_ids),
+                """
+                UPDATE news_articles
+                SET status = %s
+                WHERE id = ANY(%s::uuid[])
+                  AND visibility = %s
+                """,
+                (
+                    ArticleStatus.PROCESSING.value,
+                    news_ids,
+                    ArticleVisibility.PUBLIC.value,
+                ),
             )
 
     async def save_result(self, result: PipelineResult) -> None:
@@ -162,6 +192,13 @@ class NewsPipelineRepository:
                     *prediction_by_id.keys(),
                 ]
             )
+        )
+        self._validate_result(
+            result=result,
+            persisted_ids=persisted_ids,
+            prediction_by_id=prediction_by_id,
+            assignment_by_id=assignment_by_id,
+            embedding_by_id=embedding_by_id,
         )
 
         async with await AsyncConnection.connect(self._database_url) as connection:
@@ -198,6 +235,16 @@ class NewsPipelineRepository:
                 )
                 if cluster_id is None:
                     raise ValueError(f"Missing cluster assignment for news_id={news_id}")
+                novelty_label = _clean_scalar(prediction.get("novelty_label"))
+                p_significant = _clean_scalar(prediction.get("p_significant"))
+                if novelty_label not in {"significant", "minor", "duplicate"}:
+                    raise ValueError(
+                        f"Missing or invalid novelty_label for news_id={news_id}"
+                    )
+                if p_significant is None or not 0.0 <= float(p_significant) <= 1.0:
+                    raise ValueError(
+                        f"Missing or invalid p_significant for news_id={news_id}"
+                    )
                 await connection.execute(
                     """
                     INSERT INTO article_pipeline_state (
@@ -245,8 +292,8 @@ class NewsPipelineRepository:
                         _clean_scalar(assignment.get("attached_to_component_id")),
                         bool(_clean_scalar(assignment.get("assignment_needs_review")) or False),
                         bool(_clean_scalar(assignment.get("late_arrival")) or False),
-                        _clean_scalar(prediction.get("novelty_label")),
-                        _clean_scalar(prediction.get("p_significant")),
+                        novelty_label,
+                        p_significant,
                         _clean_scalar(prediction.get("comment")),
                         bool(_clean_scalar(prediction.get("needs_review")) or False),
                         result.versions.pipeline_version,
@@ -261,15 +308,22 @@ class NewsPipelineRepository:
                 """
                 UPDATE news_articles a
                 SET status = %s,
-                    novelty_score = s.p_significant
+                    novelty_score = s.p_significant,
+                    metadata = COALESCE(a.metadata, '{}'::jsonb) - 'pipeline_error'
                 FROM article_pipeline_state s
                 WHERE a.id = s.article_id
                   AND a.id = ANY(%s::uuid[])
                 """,
-                (ArticleStatus.VECTORIZED.value, persisted_ids),
+                (ArticleStatus.PROCESSED.value, persisted_ids),
             )
 
-    async def mark_articles_failed(self, news_ids: list[str], error: str) -> None:
+    async def mark_articles_error(self, news_ids: list[str], error: str) -> None:
+        error_payload = json.dumps(
+            {
+                "message": error,
+                "failed_at": datetime.now(UTC).isoformat(),
+            }
+        )
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
                 """
@@ -278,12 +332,18 @@ class NewsPipelineRepository:
                     metadata = jsonb_set(
                         COALESCE(metadata, '{}'::jsonb),
                         '{pipeline_error}',
-                        to_jsonb(%s::text),
+                        %s::jsonb,
                         true
                     )
                 WHERE id = ANY(%s::uuid[])
+                  AND visibility = %s
                 """,
-                (ArticleStatus.FAILED.value, error, news_ids),
+                (
+                    ArticleStatus.ERROR.value,
+                    error_payload,
+                    news_ids,
+                    ArticleVisibility.PUBLIC.value,
+                ),
             )
 
     async def complete_search_query(
@@ -298,18 +358,19 @@ class NewsPipelineRepository:
     ) -> dict[str, Any]:
         conditions = [
             "a.status = %s",
+            "a.visibility = %s",
             "e.model_name = %s",
             "e.model_revision = %s",
         ]
         params: list[Any] = [
-            ArticleStatus.VECTORIZED.value,
+            ArticleStatus.PROCESSED.value,
+            ArticleVisibility.PUBLIC.value,
             model_name,
             model_revision,
         ]
         filter_columns = {
             "language": "a.language = %s",
             "source_id": "a.source_id = %s",
-            "submitted_by_user_id": "a.submitted_by_user_id = %s",
             "published_from": "a.published_at >= %s",
             "published_to": "a.published_at <= %s",
         }
@@ -379,6 +440,40 @@ class NewsPipelineRepository:
             await connection.execute(
                 "UPDATE news_search_queries SET status = %s, updated_at = now() WHERE id = %s",
                 (status, query_id),
+            )
+
+    @staticmethod
+    def _validate_result(
+        *,
+        result: PipelineResult,
+        persisted_ids: list[str],
+        prediction_by_id: dict[str, dict[str, Any]],
+        assignment_by_id: dict[str, dict[str, Any]],
+        embedding_by_id: dict[str, np.ndarray],
+    ) -> None:
+        if not persisted_ids:
+            raise ValueError("Pipeline result does not contain any article IDs")
+        missing_embeddings = [
+            news_id for news_id in result.requested_ids if news_id not in embedding_by_id
+        ]
+        if missing_embeddings:
+            raise ValueError(f"Missing embeddings for requested news: {missing_embeddings[:10]}")
+        missing_predictions = [
+            news_id for news_id in result.requested_ids if news_id not in prediction_by_id
+        ]
+        if missing_predictions:
+            raise ValueError(
+                f"Missing novelty predictions for requested news: {missing_predictions[:10]}"
+            )
+        missing_assignments = [
+            news_id
+            for news_id in result.requested_ids
+            if news_id not in assignment_by_id
+            and not prediction_by_id.get(news_id, {}).get("cluster_id")
+        ]
+        if missing_assignments:
+            raise ValueError(
+                f"Missing cluster assignments for requested news: {missing_assignments[:10]}"
             )
 
     @staticmethod

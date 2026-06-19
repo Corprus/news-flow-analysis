@@ -5,12 +5,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session, selectinload
 
 from news.models import (
     ArticleOrigin,
     ArticleStatus,
+    ArticleVisibility,
     NewsArticle,
     NewsArticleSubmission,
     NewsSearchQuery,
@@ -24,7 +25,6 @@ class NewsSearchFilters:
     source_id: UUID | None = None
     published_from: datetime | None = None
     published_to: datetime | None = None
-    submitted_by_user_id: UUID | None = None
     min_novelty_score: float | None = None
 
     def to_payload(self) -> dict[str, str]:
@@ -37,8 +37,6 @@ class NewsSearchFilters:
             payload["published_from"] = self.published_from.isoformat()
         if self.published_to is not None:
             payload["published_to"] = self.published_to.isoformat()
-        if self.submitted_by_user_id is not None:
-            payload["submitted_by_user_id"] = str(self.submitted_by_user_id)
         if self.min_novelty_score is not None:
             payload["min_novelty_score"] = str(self.min_novelty_score)
         return payload
@@ -54,15 +52,19 @@ class NewsService:
         user_id: UUID,
         title: str,
         content: str,
+        published_at: datetime,
         url: str | None = None,
         canonical_url: str | None = None,
         summary: str | None = None,
         language: str | None = None,
         topic: str | None = None,
-        published_at: datetime | None = None,
     ) -> NewsArticle:
         content_hash = hashlib.sha256(content.encode()).hexdigest()
-        existing_article = self._find_existing_article(canonical_url, content_hash)
+        existing_article = self._find_existing_article(
+            canonical_url,
+            content_hash,
+            user_id,
+        )
         if existing_article is not None:
             self._add_submission(existing_article.id, user_id)
             return existing_article
@@ -77,13 +79,41 @@ class NewsService:
             published_at=published_at,
             language=language,
             topic=topic,
-            status=ArticleStatus.QUEUED.value,
+            visibility=ArticleVisibility.DRAFT.value,
+            status=ArticleStatus.NOT_STARTED.value,
             origin=ArticleOrigin.USER_SUBMITTED.value,
             content_hash=content_hash,
         )
         self._session.add(article)
         self._session.flush()
         self._add_submission(article.id, user_id)
+        return article
+
+    def publish_user_article(self, article_id: UUID, user_id: UUID) -> NewsArticle | None:
+        article = (
+            self._session.execute(
+                select(NewsArticle)
+                .join(
+                    NewsArticleSubmission,
+                    NewsArticleSubmission.article_id == NewsArticle.id,
+                )
+                .where(
+                    NewsArticle.id == str(article_id),
+                    NewsArticleSubmission.user_id == str(user_id),
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if article is None:
+            return None
+        if article.visibility != ArticleVisibility.DRAFT.value:
+            raise ValueError("Only draft articles can be published")
+        if article.status != ArticleStatus.NOT_STARTED.value:
+            raise ValueError("Draft article has already entered processing")
+        article.visibility = ArticleVisibility.PUBLIC.value
+        article.status = ArticleStatus.PENDING.value
+        self._session.flush()
         return article
 
     def create_search_query(
@@ -113,6 +143,7 @@ class NewsService:
     ) -> list[NewsArticle]:
         statement = (
             select(NewsArticle)
+            .options(selectinload(NewsArticle.pipeline_state))
             .join(NewsArticleSubmission, NewsArticleSubmission.article_id == NewsArticle.id)
             .where(NewsArticleSubmission.user_id == str(user_id))
             .order_by(NewsArticleSubmission.created_at.desc())
@@ -143,11 +174,19 @@ class NewsService:
         self,
         canonical_url: str | None,
         content_hash: str,
+        user_id: UUID,
     ) -> NewsArticle | None:
+        allowed = or_(
+            NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
+            NewsArticle.submitted_by_user_id == str(user_id),
+        )
         if canonical_url:
             article_by_url = (
                 self._session.execute(
-                    select(NewsArticle).where(NewsArticle.canonical_url == canonical_url)
+                    select(NewsArticle).where(
+                        NewsArticle.canonical_url == canonical_url,
+                        allowed,
+                    )
                 )
                 .scalars()
                 .first()
@@ -157,7 +196,10 @@ class NewsService:
 
         return (
             self._session.execute(
-                select(NewsArticle).where(NewsArticle.content_hash == content_hash)
+                select(NewsArticle).where(
+                    NewsArticle.content_hash == content_hash,
+                    allowed,
+                )
             )
             .scalars()
             .first()

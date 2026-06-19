@@ -29,9 +29,20 @@ notebooks/08_finetune_bge_m3_embeddings.ipynb
 exp_10a_current_model_on_exp10_clustering
 ```
 
-Это текущая сохраненная CatBoost/fallback модель, примененная к новой выбранной
+Это текущая сохраненная CatBoost-модель, примененная к новой выбранной
 `exp_10` кластеризации. По актуальной таблице экспериментов она дала лучший
 `significant_f1` среди `exp_10*`.
+
+После фиксации runtime-правила `cluster seed → significant` итоговая оценка на
+87 строках golden novelty-разметки:
+
+- precision: `0.8471`;
+- recall: `0.9863`;
+- F1: `0.9114`.
+
+Эти метрики одинаковы для `exp_00b` и `exp_10` при одной novelty-модели, потому что
+изменение clustering не поменяло labels на размеченном подмножестве. Измеренный
+прирост `exp_10` относится к кластеризации: pairwise F1 вырос с `0.7697` до `0.9017`.
 
 Финальные runtime-артефакты:
 
@@ -60,7 +71,7 @@ src/model/
   attach_clustering.py      # exp_10 attach clustering и silver-positive sweep
   features.py               # previous-only признаки для novelty model
   classifier_training.py    # CatBoost / MLP / LogisticRegression training helpers
-  significance_model.py     # общий wrapper novelty-модели с fallback
+  significance_model.py     # wrapper novelty-модели и deterministic seed rule
   evaluation.py             # метрики кластеризации и novelty labels
   experiment_tracking.py    # сохранение prediction CSV и таблицы экспериментов
 
@@ -70,7 +81,8 @@ src/final_pipeline/
 ```
 
 `src/final_pipeline/` использует реализацию из `src/model/`, чтобы notebook и
-runtime не расходились по clustering, feature engineering и fallback logic.
+runtime не расходились по clustering, feature engineering и правилу
+`cluster seed → significant`.
 
 ## Контракт признаков
 

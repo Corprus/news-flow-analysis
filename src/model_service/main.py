@@ -36,8 +36,8 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
         if mode not in {"full", "incremental"}:
             raise ValueError(f"Unsupported pipeline mode: {mode}")
         await jobs.mark_processing(job_id, payload)
-        await repository.mark_articles_processing(news_ids)
         requested = await repository.load_articles(news_ids)
+        await repository.mark_articles_processing(news_ids)
         if mode == "full":
             result = await asyncio.to_thread(app.state.full_pipeline.run, requested)
         else:
@@ -68,7 +68,7 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
         error = str(exc)
         await jobs.mark_failed(job_id, error)
         if news_ids:
-            await repository.mark_articles_failed(news_ids, error)
+            await repository.mark_articles_error(news_ids, error)
 
 
 async def _handle_search_job(app: FastAPI, message: dict[str, Any]) -> None:
