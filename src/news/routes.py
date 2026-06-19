@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
 from fastapi.exceptions import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -13,6 +14,11 @@ from accounting.models import TransactionReason
 from accounting.service import AccountingService
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
+from news.importers import (
+    MAX_IMPORT_FILE_BYTES,
+    NewsImportError,
+    news_importers,
+)
 from news.models import (
     ArticleOrigin,
     ArticleStatus,
@@ -42,6 +48,7 @@ class AddNewsRequest(BaseModel):
     language: str | None = Field(default=None, max_length=16)
     topic: str | None = Field(default=None, max_length=256)
     published_at: datetime
+    publish_immediately: bool = False
 
     @field_validator("published_at")
     @classmethod
@@ -55,6 +62,37 @@ class NewsArticleResponse(BaseModel):
     article_id: UUID
     visibility: ArticleVisibility
     status: ArticleStatus
+    job_id: UUID | None = None
+
+
+class NewsImportFormatResponse(BaseModel):
+    id: str
+    label: str
+    file_extensions: list[str]
+    media_types: list[str]
+
+
+class NewsImportResponse(BaseModel):
+    format: str
+    total_rows: int
+    created_count: int
+    duplicate_count: int
+    article_ids: list[UUID]
+    published_count: int
+    job_id: UUID | None = None
+
+
+class PublishNewsBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    article_ids: list[UUID] = Field(min_length=1, max_length=10_000)
+
+
+class PublishNewsBatchResponse(BaseModel):
+    article_ids: list[UUID]
+    published_count: int
+    status: Literal[ArticleStatus.PENDING]
+    job_id: UUID
 
 
 class NewsArticlePublishResponse(BaseModel):
@@ -172,28 +210,197 @@ async def enqueue_vectorization_job(
 
 
 @router.post("", response_model=NewsArticleResponse, status_code=status.HTTP_201_CREATED)
-def add_news(
+async def add_news(
     request: AddNewsRequest,
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],
+    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
 ) -> NewsArticleResponse:
     ensure_publisher(current_user)
-    article = news.add_user_article(
-        user_id=current_user.id,
-        title=request.title,
-        content=request.content,
-        url=request.url,
-        canonical_url=request.canonical_url,
-        summary=request.summary,
-        language=request.language,
-        topic=request.topic,
-        published_at=request.published_at,
+    try:
+        article = news.add_user_article(
+            user_id=current_user.id,
+            title=request.title,
+            content=request.content,
+            url=request.url,
+            canonical_url=request.canonical_url,
+            summary=request.summary,
+            language=request.language,
+            topic=request.topic,
+            published_at=request.published_at,
+        )
+        published: list[NewsArticle] = []
+        if request.publish_immediately:
+            published = news.publish_user_articles(
+                [UUID(article.id)],
+                current_user.id,
+                allow_already_public=True,
+            )
+            _withdraw_for_articles_or_raise(
+                accounting=accounting,
+                user_id=current_user.id,
+                amount_per_article=settings.news_add_cost,
+                articles=published,
+            )
+        news.commit()
+    except ValueError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception:
+        news.rollback()
+        raise
+    job_id = await _enqueue_articles_if_any(
+        repository=repository,
+        publisher=publisher,
+        articles=published,
     )
-    news.commit()
     return NewsArticleResponse(
         article_id=UUID(article.id),
         visibility=article.visibility,
         status=article.status,
+        job_id=job_id,
+    )
+
+
+@router.get("/import-formats", response_model=list[NewsImportFormatResponse])
+def get_news_import_formats(
+    current_user: CurrentUserDep,
+) -> list[NewsImportFormatResponse]:
+    ensure_publisher(current_user)
+    return [
+        NewsImportFormatResponse(
+            id=item.id,
+            label=item.label,
+            file_extensions=list(item.file_extensions),
+            media_types=list(item.media_types),
+        )
+        for item in news_importers.list_formats()
+    ]
+
+
+@router.post(
+    "/import",
+    response_model=NewsImportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_news(
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+    file: Annotated[UploadFile, File()],
+    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
+    import_format: Annotated[str, Form(alias="format")],
+    publish_immediately: Annotated[bool, Form()] = False,
+) -> NewsImportResponse:
+    ensure_publisher(current_user)
+    content = await file.read(MAX_IMPORT_FILE_BYTES + 1)
+    if len(content) > MAX_IMPORT_FILE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Uploaded news file exceeds the 50 MiB limit",
+        )
+    try:
+        articles = news_importers.parse(import_format, content)
+    except NewsImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    try:
+        result = news.import_user_articles(
+            user_id=current_user.id,
+            format_id=import_format,
+            articles=articles,
+        )
+        published: list[NewsArticle] = []
+        if publish_immediately:
+            published = news.publish_user_articles(
+                [UUID(article_id) for article_id in result.article_ids],
+                current_user.id,
+                allow_already_public=True,
+            )
+            _withdraw_for_articles_or_raise(
+                accounting=accounting,
+                user_id=current_user.id,
+                amount_per_article=settings.news_add_cost,
+                articles=published,
+            )
+        news.commit()
+    except ValueError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception:
+        news.rollback()
+        raise
+    job_id = await _enqueue_articles_if_any(
+        repository=repository,
+        publisher=publisher,
+        articles=published,
+    )
+    return NewsImportResponse(
+        format=import_format,
+        total_rows=result.total_rows,
+        created_count=result.created_count,
+        duplicate_count=result.duplicate_count,
+        article_ids=[UUID(article_id) for article_id in result.article_ids],
+        published_count=len(published),
+        job_id=job_id,
+    )
+
+
+@router.post(
+    "/publish",
+    response_model=PublishNewsBatchResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def publish_news_batch(
+    request: PublishNewsBatchRequest,
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
+) -> PublishNewsBatchResponse:
+    ensure_publisher(current_user)
+    try:
+        articles = news.publish_user_articles(
+            request.article_ids,
+            current_user.id,
+            allow_already_public=False,
+        )
+        _withdraw_for_articles_or_raise(
+            accounting=accounting,
+            user_id=current_user.id,
+            amount_per_article=settings.news_add_cost,
+            articles=articles,
+        )
+        news.commit()
+    except LookupError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception:
+        news.rollback()
+        raise
+    job_id = await _enqueue_articles_if_any(
+        repository=repository,
+        publisher=publisher,
+        articles=articles,
+    )
+    assert job_id is not None
+    return PublishNewsBatchResponse(
+        article_ids=[UUID(article.id) for article in articles],
+        published_count=len(articles),
+        status=ArticleStatus.PENDING,
+        job_id=job_id,
     )
 
 
@@ -313,6 +520,28 @@ def _article_vectorization_payload(article: NewsArticle) -> dict:
     }
 
 
+def _articles_vectorization_payload(articles: Iterable[NewsArticle]) -> dict:
+    return {
+        "news_ids": [article.id for article in articles],
+        "mode": "incremental",
+    }
+
+
+async def _enqueue_articles_if_any(
+    *,
+    repository: NewsPipelineJobRepository,
+    publisher: RabbitPublisher,
+    articles: list[NewsArticle],
+) -> UUID | None:
+    if not articles:
+        return None
+    return await enqueue_vectorization_job(
+        repository=repository,
+        publisher=publisher,
+        payload=_articles_vectorization_payload(articles),
+    )
+
+
 def _search_vectorization_payload(search_query: NewsSearchQuery) -> dict:
     return {
         "target_type": "news_search_query",
@@ -387,3 +616,20 @@ def _withdraw_or_raise(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User account not found",
         ) from exc
+
+
+def _withdraw_for_articles_or_raise(
+    *,
+    accounting: AccountingService,
+    user_id: UUID,
+    amount_per_article,
+    articles: Iterable[NewsArticle],
+) -> None:
+    for article in articles:
+        _withdraw_or_raise(
+            accounting=accounting,
+            user_id=user_id,
+            amount=amount_per_article,
+            reason=TransactionReason.NEWS_ADD,
+            reference_id=UUID(article.id),
+        )

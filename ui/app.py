@@ -87,6 +87,53 @@ def render_sidebar() -> str:
 
 def render_news() -> None:
     st.header("Add News")
+    manual_tab, file_tab = st.tabs(["Manual", "From file"])
+    with manual_tab:
+        render_manual_news_form()
+    with file_tab:
+        render_news_file_import()
+
+    st.subheader("My Added News")
+    try:
+        history = client.list_news_history()
+        if history:
+            st.dataframe(pd.DataFrame(history), use_container_width=True, hide_index=True)
+            drafts = [item for item in history if item.get("visibility") == "draft"]
+            if drafts:
+                draft_by_label = {
+                    f"{item['title']} · {item['article_id']}": item["article_id"]
+                    for item in drafts
+                }
+                selected_labels = st.multiselect(
+                    "Drafts to publish",
+                    list(draft_by_label),
+                )
+                if st.button(
+                    "Publish selected",
+                    disabled=not selected_labels,
+                    use_container_width=True,
+                ):
+                    try:
+                        result = client.publish_news_batch(
+                            [draft_by_label[label] for label in selected_labels]
+                        )
+                        refresh_account()
+                        st.success(
+                            f"Published {result['published_count']} articles "
+                            f"(job {result['job_id']})"
+                        )
+                        st.rerun()
+                    except ApiError as exc:
+                        st.error(str(exc))
+            else:
+                st.caption("No drafts available for publication.")
+        else:
+            st.info("No user-added news yet.")
+    except ApiError as exc:
+        st.error(str(exc))
+
+
+def render_manual_news_form() -> None:
     with st.form("add_news_form"):
         title = st.text_input("Title")
         content = st.text_area("Content", height=260)
@@ -98,7 +145,10 @@ def render_news() -> None:
             value=datetime.now(UTC).isoformat(),
         )
         summary = st.text_area("Summary", height=100)
-        submitted = st.form_submit_button("Save draft")
+        publish_immediately = st.checkbox("Publish immediately")
+        submitted = st.form_submit_button(
+            "Save and publish" if publish_immediately else "Save draft"
+        )
 
     if submitted:
         payload = {
@@ -109,39 +159,73 @@ def render_news() -> None:
             "canonical_url": url or None,
             "language": language or None,
             "published_at": published_at,
+            "publish_immediately": publish_immediately,
         }
         try:
             result = client.add_news(payload)
-            st.success(f"Draft saved: {result['article_id']}")
+            if result.get("job_id"):
+                refresh_account()
+                st.success(
+                    f"Published: {result['article_id']} (job {result['job_id']})"
+                )
+            else:
+                st.success(f"Draft saved: {result['article_id']}")
         except ApiError as exc:
             st.error(str(exc))
 
-    st.subheader("My Added News")
+
+def render_news_file_import() -> None:
     try:
-        history = client.list_news_history()
-        if history:
-            st.dataframe(pd.DataFrame(history), use_container_width=True, hide_index=True)
-            drafts = [item for item in history if item.get("visibility") == "draft"]
-            for item in drafts:
-                article_id = item["article_id"]
-                if st.button(
-                    f"Publish: {item['title']}",
-                    key=f"publish-{article_id}",
-                    use_container_width=True,
-                ):
-                    try:
-                        result = client.publish_news(article_id)
-                        refresh_account()
-                        st.success(
-                            f"Published: {article_id} (job {result['job_id']})"
-                        )
-                        st.rerun()
-                    except ApiError as exc:
-                        st.error(str(exc))
-        else:
-            st.info("No user-added news yet.")
+        formats = client.list_news_import_formats()
     except ApiError as exc:
         st.error(str(exc))
+        return
+    if not formats:
+        st.info("No file import formats are configured.")
+        return
+
+    format_by_label = {item["label"]: item for item in formats}
+    with st.form("import_news_form"):
+        label = st.selectbox("Format", list(format_by_label))
+        selected_format = format_by_label[label]
+        extensions = [
+            extension.lstrip(".")
+            for extension in selected_format.get("file_extensions", [])
+        ]
+        uploaded_file = st.file_uploader("News file", type=extensions or None)
+        publish_immediately = st.checkbox(
+            "Publish immediately",
+            key="import-publish-immediately",
+        )
+        submitted = st.form_submit_button(
+            "Import and publish" if publish_immediately else "Import drafts"
+        )
+
+    if submitted:
+        if uploaded_file is None:
+            st.warning("Select a file to import.")
+            return
+        try:
+            result = client.import_news(
+                selected_format["id"],
+                uploaded_file.name,
+                uploaded_file.getvalue(),
+                publish_immediately=publish_immediately,
+            )
+            message = (
+                "Import completed: "
+                f"{result['created_count']} created, "
+                f"{result['duplicate_count']} duplicates linked"
+            )
+            if result.get("published_count"):
+                refresh_account()
+                message += (
+                    f", {result['published_count']} published "
+                    f"(job {result['job_id']})"
+                )
+            st.success(message + ".")
+        except ApiError as exc:
+            st.error(str(exc))
 
 
 def render_search() -> None:

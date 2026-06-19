@@ -14,7 +14,9 @@ from news.routes import (
     NewsArticleResponse,
     NewsSearchRequest,
     NewsSearchResponse,
+    PublishNewsBatchRequest,
     _article_vectorization_payload,
+    _articles_vectorization_payload,
 )
 
 
@@ -45,6 +47,34 @@ def test_new_article_uses_incremental_pipeline_by_default() -> None:
         "news_ids": [_Article.id],
         "mode": "incremental",
     }
+
+
+def test_multiple_articles_use_one_incremental_pipeline_payload() -> None:
+    first = type("Article", (), {"id": "news-1"})()
+    second = type("Article", (), {"id": "news-2"})()
+
+    assert _articles_vectorization_payload([first, second]) == {
+        "news_ids": ["news-1", "news-2"],
+        "mode": "incremental",
+    }
+
+
+def test_add_and_batch_publish_contracts_expose_immediate_publication() -> None:
+    add_request = AddNewsRequest(
+        title="Title",
+        content="Content",
+        published_at="2026-01-01T12:00:00+00:00",
+        publish_immediately=True,
+    )
+    batch_request = PublishNewsBatchRequest(
+        article_ids=[
+            "00000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000002",
+        ]
+    )
+
+    assert add_request.publish_immediately
+    assert len(batch_request.article_ids) == 2
 
 
 def test_pipeline_storage_uses_bge_m3_vector_dimensions() -> None:
