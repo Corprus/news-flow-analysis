@@ -112,9 +112,10 @@ def test_full_pipeline_accepts_embeddings_and_returns_unified_result() -> None:
     assert result.embedding_ids == result.requested_ids
     np.testing.assert_allclose(result.embeddings[0], [1.0, 0.0])
     np.testing.assert_allclose(result.embeddings[1], [0.9, 0.1])
-    assert result.assignments["assignment_method"].tolist() == ["full", "full"]
+    assert result.assignments["assignment_method"].tolist() == ["baseline", "baseline"]
+    assert result.assignments["baseline_component_id"].nunique() == 1
     assert result.predictions["news_id"].tolist() == result.requested_ids
-    assert result.versions.pipeline_version == "final-v3"
+    assert result.versions.pipeline_version == "final-v3-provenance-v1"
     assert novelty_model.news_df is not None
     assert novelty_model.news_df["news_id"].tolist() == result.requested_ids
 
@@ -180,6 +181,11 @@ def test_full_pipeline_exp10_attaches_singleton_with_evidence() -> None:
     assert result.diagnostics["base_clustering"]["n_clusters"] == 2
     assert result.diagnostics["attach_clustering"]["attached_source_clusters"] == 1
     assert result.assignments["cluster_id"].nunique() == 1
+    attached = result.assignments[result.assignments["assignment_method"].eq("attach")]
+    assert len(attached) == 1
+    assert attached.iloc[0]["assignment_parent_news_id"] in {"target-1", "target-2"}
+    assert attached.iloc[0]["assignment_similarity"] > 0.75
+    assert attached.iloc[0]["baseline_component_id"] != attached.iloc[0]["cluster_id"]
 
 
 def test_full_pipeline_keeps_different_topics_in_separate_clusters() -> None:

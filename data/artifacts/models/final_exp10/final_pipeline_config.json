@@ -6,7 +6,7 @@
   "show_progress_bar": true,
   "text_column": "model_text",
   "id_column": "news_id",
-  "pipeline_version": "final-v3",
+  "pipeline_version": "final-v3-provenance-v1",
   "novelty_model_version": "exp_10a_current_model_on_exp10_clustering",
   "config_version": "exp10_src2_sim0.75_days7_m0.03_tj0.15_num1",
   "base_clustering": {

@@ -102,7 +102,34 @@ class FinalNewsNoveltyPipeline:
         }
         requested_ids = news[cfg.id_column].astype(str).tolist()
         assignments = clustered_news[[cfg.id_column, "cluster_id"]].copy()
-        assignments["assignment_method"] = "full"
+        assignments["baseline_component_id"] = (
+            pd.Series(base_ids, dtype="string").astype(str).to_numpy()
+        )
+        assignments["assignment_method"] = "baseline"
+        assignments["update_method"] = "full"
+        assignments["assignment_parent_news_id"] = pd.NA
+        assignments["assignment_similarity"] = np.nan
+        assignments["attached_to_component_id"] = pd.NA
+        if not selected_attachments.empty:
+            attach_by_component = selected_attachments.set_index("source_cluster")
+            source_components = set(attach_by_component.index.astype(str))
+            attached_mask = assignments["baseline_component_id"].isin(source_components)
+            assignments.loc[attached_mask, "assignment_method"] = "attach"
+            assignments.loc[attached_mask, "assignment_parent_news_id"] = (
+                assignments.loc[attached_mask, "baseline_component_id"]
+                .map(attach_by_component["target_news_id"])
+                .to_numpy()
+            )
+            assignments.loc[attached_mask, "assignment_similarity"] = (
+                assignments.loc[attached_mask, "baseline_component_id"]
+                .map(attach_by_component["best_similarity"])
+                .to_numpy()
+            )
+            assignments.loc[attached_mask, "attached_to_component_id"] = (
+                assignments.loc[attached_mask, "baseline_component_id"]
+                .map(attach_by_component["target_cluster"])
+                .to_numpy()
+            )
         return PipelineResult(
             mode="full",
             requested_ids=requested_ids,

@@ -22,7 +22,7 @@ from .result import PipelineResult, PipelineVersions
 
 @dataclass(frozen=True)
 class IncrementalPipelineConfig:
-    """Rules for assigning new articles without changing historical clusters."""
+    """Rules for assigning new articles and preserving baseline graph connectivity."""
 
     baseline_similarity: float = 0.82
     baseline_window_days: int = 14
@@ -31,7 +31,9 @@ class IncrementalPipelineConfig:
     min_margin: float = 0.03
     title_jaccard_threshold: float = 0.15
     min_shared_numbers: int = 1
+    merge_baseline_connected_clusters: bool = True
     new_cluster_prefix: str = "incremental"
+    baseline_component_column: str = "baseline_component_id"
     id_column: str = "news_id"
     cluster_column: str = "cluster_id"
     topic_column: str = "topic"
@@ -47,9 +49,10 @@ IncrementalPipelineResult = PipelineResult
 class IncrementalNewsNoveltyPipeline:
     """Assign new articles to stable clusters and predict novelty incrementally.
 
-    Historical cluster assignments are immutable. Each new article is assigned to at
-    most one existing cluster. If the best two clusters are too close, a new cluster is
-    created and the assignment is marked for review.
+    A new article is assigned to at most one resulting cluster. When it has baseline
+    edges to several existing clusters, those clusters are merged because the full
+    baseline graph would place them in the same connected component. Ambiguous
+    evidence-aware attach candidates are not merged.
     """
 
     def __init__(
@@ -108,10 +111,14 @@ class IncrementalNewsNoveltyPipeline:
         normalized_new_embeddings = l2_normalize(np.asarray(new_embeddings, dtype=np.float32))
 
         existing_cluster_ids = set(history[cfg.cluster_column].astype(str))
+        existing_component_ids = set(history[cfg.baseline_component_column].astype(str))
         historical_ids = set(historical_news[cfg.id_column].astype(str))
         affected_historical_ids: set[str] = set()
+        reassigned_historical_rows: list[dict] = []
+        reassigned_historical_ids: set[str] = set()
         assignment_rows: list[dict] = []
-        new_cluster_ids: list[str] = []
+        merged_cluster_count = 0
+        merged_component_count = 0
 
         for new_position, current in new_news.iterrows():
             current_embedding = normalized_new_embeddings[new_position]
@@ -122,13 +129,79 @@ class IncrementalNewsNoveltyPipeline:
                 current_embedding=current_embedding,
                 allow_future=True,
             )
+            merge = self._merge_baseline_connected_clusters(
+                history=history,
+                candidates=candidates,
+            )
+            if merge is not None:
+                (
+                    canonical_cluster_id,
+                    canonical_component_id,
+                    merged_cluster_ids,
+                    merged_component_ids,
+                    changed_rows,
+                ) = merge
+                merged_cluster_count += len(merged_cluster_ids) - 1
+                merged_component_count += len(merged_component_ids) - 1
+                for row in changed_rows:
+                    news_id = str(row[cfg.id_column])
+                    if news_id in historical_ids and news_id not in reassigned_historical_ids:
+                        reassigned_historical_rows.append(row)
+                        reassigned_historical_ids.add(news_id)
+                affected_historical_ids.update(
+                    history.loc[
+                        history[cfg.cluster_column].astype(str).eq(canonical_cluster_id)
+                        & history[cfg.id_column].astype(str).isin(historical_ids),
+                        cfg.id_column,
+                    ].astype(str)
+                )
+                candidates = candidates[
+                    ~candidates[cfg.cluster_column].astype(str).isin(merged_cluster_ids)
+                    | candidates[cfg.cluster_column].astype(str).eq(canonical_cluster_id)
+                ].copy()
+                candidates.loc[
+                    candidates[cfg.cluster_column].astype(str).eq(canonical_cluster_id),
+                    cfg.cluster_column,
+                ] = canonical_cluster_id
+                candidates = candidates.drop_duplicates(
+                    subset=[cfg.cluster_column],
+                    keep="first",
+                )
+                candidates.loc[
+                    candidates[cfg.cluster_column].astype(str).eq(canonical_cluster_id),
+                    "baseline_component_ids",
+                ] = pd.Series(
+                    [[canonical_component_id]],
+                    index=candidates.index[
+                        candidates[cfg.cluster_column].astype(str).eq(
+                            canonical_cluster_id
+                        )
+                    ],
+                )
             assignment = self._select_assignment(
                 current=current,
                 candidates=candidates,
                 existing_cluster_ids=existing_cluster_ids,
+                existing_component_ids=existing_component_ids,
             )
+            if merge is not None:
+                assignment["assignment_method"] = "baseline"
+                assignment["update_method"] = "baseline_merge"
+                assignment["merged_cluster_ids"] = merged_cluster_ids
+                assignment["merged_cluster_count"] = len(merged_cluster_ids) - 1
+                assignment["merged_baseline_component_ids"] = merged_component_ids
+            else:
+                assignment.setdefault("update_method", assignment["assignment_method"])
+                assignment["merged_cluster_ids"] = []
+                assignment["merged_cluster_count"] = 0
+                assignment["merged_baseline_component_ids"] = []
             cluster_id = str(assignment[cfg.cluster_column])
-            assigned_to_existing = assignment["assignment_method"] in {"baseline", "attach"}
+            baseline_component_id = str(assignment[cfg.baseline_component_column])
+            assigned_to_existing = assignment["update_method"] in {
+                "baseline",
+                "baseline_merge",
+                "attach",
+            }
             late_arrival = assigned_to_existing and self._is_late_arrival_for_cluster(
                 history=history,
                 current=current,
@@ -144,20 +217,37 @@ class IncrementalNewsNoveltyPipeline:
             assignment["late_arrival"] = bool(late_arrival)
             assignment["affected_historical_count"] = int(len(affected_ids))
             existing_cluster_ids.add(cluster_id)
-            new_cluster_ids.append(cluster_id)
+            existing_component_ids.add(baseline_component_id)
             assignment_rows.append(assignment)
 
             history_row = current.to_dict()
             history_row[cfg.cluster_column] = cluster_id
+            history_row[cfg.baseline_component_column] = baseline_component_id
             history = pd.concat([history, pd.DataFrame([history_row])], ignore_index=True)
             history_embeddings = np.vstack([history_embeddings, current_embedding])
 
         assignments = pd.DataFrame(assignment_rows)
+        final_cluster_by_id = history.set_index(cfg.id_column)[cfg.cluster_column].astype(str)
+        assignments[cfg.cluster_column] = (
+            assignments[cfg.id_column].astype(str).map(final_cluster_by_id)
+        )
+        final_component_by_id = history.set_index(cfg.id_column)[
+            cfg.baseline_component_column
+        ].astype(str)
+        assignments[cfg.baseline_component_column] = (
+            assignments[cfg.id_column].astype(str).map(final_component_by_id)
+        )
         new_clustered = new_news.copy()
-        new_clustered[cfg.cluster_column] = new_cluster_ids
+        new_clustered[cfg.cluster_column] = (
+            new_clustered[cfg.id_column].astype(str).map(final_cluster_by_id)
+        )
 
         historical_count = len(historical_news)
-        combined_news = pd.concat([historical_news, new_clustered], ignore_index=True)
+        historical_clustered = historical_news.copy()
+        historical_clustered[cfg.cluster_column] = (
+            historical_clustered[cfg.id_column].astype(str).map(final_cluster_by_id)
+        )
+        combined_news = pd.concat([historical_clustered, new_clustered], ignore_index=True)
         combined_embeddings = np.vstack([historical_embeddings, new_embeddings]).astype(np.float32)
 
         all_predictions = self.novelty_model.predict_clustered_with_fallback(
@@ -184,12 +274,15 @@ class IncrementalNewsNoveltyPipeline:
                 [
                     cfg.id_column,
                     "assignment_method",
+                    "update_method",
                     "assignment_similarity",
                     "second_best_similarity",
                     "assignment_margin",
                     "assignment_needs_review",
                     "late_arrival",
                     "affected_historical_count",
+                    "merged_cluster_ids",
+                    "merged_cluster_count",
                 ]
             ],
             on=cfg.id_column,
@@ -222,15 +315,22 @@ class IncrementalNewsNoveltyPipeline:
         recalculated_ids = recalculated_predictions[cfg.id_column].astype(str).tolist()
         updated_ids = list(dict.fromkeys([*requested_ids, *recalculated_ids]))
         context_ids = historical_news[cfg.id_column].astype(str).tolist()
+        persistence_assignments = pd.concat(
+            [assignments, pd.DataFrame(reassigned_historical_rows)],
+            ignore_index=True,
+            sort=False,
+        )
 
         diagnostics = {
             "historical_rows": int(historical_count),
             "new_rows": int(len(new_news)),
             "assigned_to_existing": int(
-                assignments["assignment_method"].isin(["baseline", "attach"]).sum()
+                assignments["update_method"].isin(
+                    ["baseline", "baseline_merge", "attach"]
+                ).sum()
             ),
             "created_clusters": int(
-                assignments["assignment_method"].isin(
+                assignments["update_method"].isin(
                     ["new_cluster", "new_cluster_ambiguous"]
                 ).sum()
             ),
@@ -238,6 +338,9 @@ class IncrementalNewsNoveltyPipeline:
             "late_arrivals": int(assignments["late_arrival"].sum()),
             "recalculated_historical_rows": int(len(affected_historical_ids)),
             "recalculated_news_ids": sorted(affected_historical_ids),
+            "merged_clusters": int(merged_cluster_count),
+            "merged_baseline_components": int(merged_component_count),
+            "reassigned_historical_rows": int(len(reassigned_historical_ids)),
         }
         return PipelineResult(
             mode="incremental",
@@ -245,7 +348,7 @@ class IncrementalNewsNoveltyPipeline:
             updated_ids=updated_ids,
             context_ids=context_ids,
             predictions=persistence_predictions,
-            assignments=assignments,
+            assignments=persistence_assignments,
             embedding_ids=requested_ids.copy(),
             embeddings=np.asarray(new_embeddings, dtype=np.float32),
             diagnostics=diagnostics,
@@ -294,7 +397,8 @@ class IncrementalNewsNoveltyPipeline:
             raise ValueError(f"Missing required columns: {sorted(missing)}")
 
     def _validate_history(self, historical_news: pd.DataFrame) -> None:
-        cluster_column = self.config.cluster_column
+        cfg = self.config
+        cluster_column = cfg.cluster_column
         if cluster_column not in historical_news.columns:
             raise ValueError(
                 f"historical_news_df must contain stable {cluster_column!r} assignments"
@@ -302,6 +406,24 @@ class IncrementalNewsNoveltyPipeline:
         if historical_news[cluster_column].isna().any():
             raise ValueError(f"historical_news_df contains empty {cluster_column!r} values")
         historical_news[cluster_column] = historical_news[cluster_column].astype(str)
+        if cfg.baseline_component_column not in historical_news.columns:
+            historical_news[cfg.baseline_component_column] = historical_news[cluster_column]
+        if historical_news[cfg.baseline_component_column].isna().any():
+            raise ValueError(
+                "historical_news_df contains empty "
+                f"{cfg.baseline_component_column!r} values"
+            )
+        historical_news[cfg.baseline_component_column] = historical_news[
+            cfg.baseline_component_column
+        ].astype(str)
+        if "assignment_method" not in historical_news.columns:
+            historical_news["assignment_method"] = "baseline"
+        if "assignment_parent_news_id" not in historical_news.columns:
+            historical_news["assignment_parent_news_id"] = pd.NA
+        if "assignment_similarity" not in historical_news.columns:
+            historical_news["assignment_similarity"] = np.nan
+        if "attached_to_component_id" not in historical_news.columns:
+            historical_news["attached_to_component_id"] = pd.NA
 
     def _validate_ids(
         self,
@@ -397,6 +519,10 @@ class IncrementalNewsNoveltyPipeline:
             rows.append(
                 {
                     cfg.cluster_column: str(previous[cfg.cluster_column]),
+                    cfg.baseline_component_column: str(
+                        previous[cfg.baseline_component_column]
+                    ),
+                    "parent_news_id": str(previous[cfg.id_column]),
                     "assignment_method": "baseline" if strong else "attach",
                     "similarity": float(similarity),
                     "days_diff": days,
@@ -430,12 +556,109 @@ class IncrementalNewsNoveltyPipeline:
                     "max_title_jaccard": float(part["title_jaccard"].max()),
                     "max_shared_numbers_count": int(part["shared_numbers_count"].max()),
                     "best_pair_method": str(best["assignment_method"]),
+                    "best_parent_news_id": str(best["parent_news_id"]),
+                    "best_parent_component_id": str(
+                        best[cfg.baseline_component_column]
+                    ),
+                    "baseline_component_ids": sorted(
+                        part.loc[
+                            part["assignment_method"].eq("baseline"),
+                            cfg.baseline_component_column,
+                        ]
+                        .astype(str)
+                        .unique()
+                        .tolist()
+                    ),
                 }
             )
         return pd.DataFrame(aggregated_rows).sort_values(
             ["similarity", "cluster_size", "min_days_diff", cfg.cluster_column],
             ascending=[False, False, True, True],
             kind="mergesort",
+        )
+
+    def _merge_baseline_connected_clusters(
+        self,
+        *,
+        history: pd.DataFrame,
+        candidates: pd.DataFrame,
+    ) -> tuple[str, str, list[str], list[str], list[dict]] | None:
+        cfg = self.config
+        if not cfg.merge_baseline_connected_clusters or candidates.empty:
+            return None
+        baseline_candidates = candidates[
+            candidates["assignment_method"].eq("baseline")
+        ].copy()
+        if baseline_candidates.empty:
+            return None
+        merged_cluster_ids = (
+            baseline_candidates[cfg.cluster_column].astype(str).drop_duplicates().tolist()
+        )
+        canonical_cluster_id = merged_cluster_ids[0]
+        merged_component_ids = list(
+            dict.fromkeys(
+                component_id
+                for component_ids in baseline_candidates["baseline_component_ids"]
+                for component_id in component_ids
+            )
+        )
+        if len(merged_component_ids) < 2:
+            return None
+        canonical_component_id = merged_component_ids[0]
+        absorbed_cluster_ids = set(merged_cluster_ids[1:])
+        absorbed_component_ids = set(merged_component_ids[1:])
+        mask = history[cfg.cluster_column].astype(str).isin(absorbed_cluster_ids)
+        component_mask = history[cfg.baseline_component_column].astype(str).isin(
+            absorbed_component_ids
+        )
+        changed = history.loc[
+            mask | component_mask,
+            [
+                cfg.id_column,
+                cfg.cluster_column,
+                cfg.baseline_component_column,
+                "assignment_method",
+                "assignment_parent_news_id",
+                "assignment_similarity",
+                "attached_to_component_id",
+            ],
+        ].copy()
+        history.loc[mask, cfg.cluster_column] = canonical_cluster_id
+        history.loc[component_mask, cfg.baseline_component_column] = canonical_component_id
+
+        rows: list[dict] = []
+        for _, row in changed.iterrows():
+            rows.append(
+                {
+                    cfg.id_column: str(row[cfg.id_column]),
+                    cfg.cluster_column: canonical_cluster_id,
+                    cfg.baseline_component_column: (
+                        canonical_component_id
+                        if str(row[cfg.baseline_component_column])
+                        in absorbed_component_ids
+                        else str(row[cfg.baseline_component_column])
+                    ),
+                    "previous_cluster_id": str(row[cfg.cluster_column]),
+                    "previous_baseline_component_id": str(
+                        row[cfg.baseline_component_column]
+                    ),
+                    "assignment_method": str(row["assignment_method"]),
+                    "assignment_parent_news_id": row["assignment_parent_news_id"],
+                    "assignment_similarity": row["assignment_similarity"],
+                    "attached_to_component_id": row["attached_to_component_id"],
+                    "update_method": "cluster_merge",
+                    "assignment_needs_review": False,
+                    "merged_cluster_ids": merged_cluster_ids,
+                    "merged_cluster_count": len(merged_cluster_ids) - 1,
+                    "merged_baseline_component_ids": merged_component_ids,
+                }
+            )
+        return (
+            canonical_cluster_id,
+            canonical_component_id,
+            merged_cluster_ids,
+            merged_component_ids,
+            rows,
         )
 
     def _is_late_arrival_for_cluster(
@@ -485,6 +708,7 @@ class IncrementalNewsNoveltyPipeline:
         current: pd.Series,
         candidates: pd.DataFrame,
         existing_cluster_ids: set[str],
+        existing_component_ids: set[str],
     ) -> dict:
         cfg = self.config
         news_id = str(current[cfg.id_column])
@@ -493,7 +717,14 @@ class IncrementalNewsNoveltyPipeline:
             return {
                 cfg.id_column: news_id,
                 cfg.cluster_column: cluster_id,
-                "assignment_method": "new_cluster",
+                cfg.baseline_component_column: self._make_new_component_id(
+                    news_id,
+                    existing_component_ids,
+                ),
+                "assignment_method": "baseline",
+                "update_method": "new_cluster",
+                "assignment_parent_news_id": pd.NA,
+                "attached_to_component_id": pd.NA,
                 "assignment_similarity": np.nan,
                 "second_best_similarity": np.nan,
                 "assignment_margin": np.nan,
@@ -501,6 +732,27 @@ class IncrementalNewsNoveltyPipeline:
             }
 
         candidates = candidates.reset_index(drop=True)
+        baseline_candidates = candidates[
+            candidates["assignment_method"].eq("baseline")
+        ].reset_index(drop=True)
+        if not baseline_candidates.empty:
+            best = baseline_candidates.iloc[0]
+            return {
+                cfg.id_column: news_id,
+                cfg.cluster_column: str(best[cfg.cluster_column]),
+                cfg.baseline_component_column: str(
+                    best["baseline_component_ids"][0]
+                ),
+                "assignment_method": "baseline",
+                "update_method": "baseline",
+                "assignment_parent_news_id": str(best["best_parent_news_id"]),
+                "attached_to_component_id": pd.NA,
+                "assignment_similarity": float(best["similarity"]),
+                "second_best_similarity": np.nan,
+                "assignment_margin": np.nan,
+                "assignment_needs_review": False,
+            }
+
         best = candidates.iloc[0]
         second_similarity = (
             float(candidates.iloc[1]["similarity"]) if len(candidates) > 1 else -np.inf
@@ -515,7 +767,14 @@ class IncrementalNewsNoveltyPipeline:
             return {
                 cfg.id_column: news_id,
                 cfg.cluster_column: cluster_id,
-                "assignment_method": "new_cluster_ambiguous",
+                cfg.baseline_component_column: self._make_new_component_id(
+                    news_id,
+                    existing_component_ids,
+                ),
+                "assignment_method": "baseline",
+                "update_method": "new_cluster_ambiguous",
+                "assignment_parent_news_id": pd.NA,
+                "attached_to_component_id": pd.NA,
                 "assignment_similarity": float(best["similarity"]),
                 "second_best_similarity": second_similarity,
                 "assignment_margin": margin,
@@ -525,7 +784,14 @@ class IncrementalNewsNoveltyPipeline:
         return {
             cfg.id_column: news_id,
             cfg.cluster_column: str(best[cfg.cluster_column]),
+            cfg.baseline_component_column: self._make_new_component_id(
+                news_id,
+                existing_component_ids,
+            ),
             "assignment_method": str(best["assignment_method"]),
+            "update_method": str(best["assignment_method"]),
+            "assignment_parent_news_id": str(best["best_parent_news_id"]),
+            "attached_to_component_id": str(best["best_parent_component_id"]),
             "assignment_similarity": float(best["similarity"]),
             "second_best_similarity": (
                 np.nan if not np.isfinite(second_similarity) else second_similarity
@@ -545,10 +811,21 @@ class IncrementalNewsNoveltyPipeline:
             suffix += 1
         return cluster_id
 
+    @staticmethod
+    def _make_new_component_id(news_id: str, existing_component_ids: set[str]) -> str:
+        digest = hashlib.sha1(news_id.encode("utf-8")).hexdigest()[:12]
+        base = f"incremental_base_{digest}"
+        component_id = base
+        suffix = 1
+        while component_id in existing_component_ids:
+            component_id = f"{base}_{suffix}"
+            suffix += 1
+        return component_id
+
     def _versions(self) -> PipelineVersions:
         cfg = self.final_config
         return PipelineVersions(
-            pipeline_version=f"{cfg.pipeline_version}-incremental-v1",
+            pipeline_version=f"{cfg.pipeline_version}-incremental-v3",
             embedding_model=cfg.embedding_model_name,
             embedding_model_revision=cfg.embedding_model_revision,
             novelty_model_version=cfg.novelty_model_version,
