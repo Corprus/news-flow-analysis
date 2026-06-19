@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import String
+from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,6 +17,25 @@ class UserRole(StrEnum):
     ADMIN = "admin"
 
 
+class Organization(Base, CrudMixin):
+    __tablename__ = "organizations"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        default=lambda: str(uuid4()),
+    )
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    def __repr__(self) -> str:
+        return f"Organization(id={self.id}, name={self.name})"
+
+
 class User(Base, CrudMixin):
     __tablename__ = "users"
 
@@ -23,6 +43,16 @@ class User(Base, CrudMixin):
         UUID(as_uuid=False),
         primary_key=True,
         default=lambda: str(uuid4()),
+    )
+    organization_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "organizations.id",
+            name="fk_users_organization_id",
+            ondelete="RESTRICT",
+        ),
+        index=True,
+        nullable=False,
     )
     login: Mapped[str] = mapped_column(
         String(128),
@@ -38,4 +68,7 @@ class User(Base, CrudMixin):
     )
 
     def __repr__(self) -> str:
-        return f"User(id={self.id}, login={self.login}, role={self.role})"
+        return (
+            f"User(id={self.id}, organization_id={self.organization_id}, "
+            f"login={self.login}, role={self.role})"
+        )

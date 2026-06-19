@@ -11,7 +11,7 @@ from users.exceptions import (
     UserAlreadyExistsError,
     UserNotFoundError,
 )
-from users.models import User, UserRole
+from users.models import Organization, User, UserRole
 from users.passwords import PasswordHasher
 from users.tokens import AccessTokenHandler
 
@@ -30,7 +30,12 @@ class UserService:
         if self.find_user(login) is not None:
             raise UserAlreadyExistsError()
 
+        organization = Organization(name=login)
+        self._session.add(organization)
+        self._session.flush()
+
         user = User(
+            organization_id=organization.id,
             login=login,
             password_hash=self._password_hasher.hash(password),
             role=role.value,
@@ -77,4 +82,8 @@ class AuthService:
             raise InvalidCredentialsError()
         if not self._password_hasher.verify(password, user.password_hash):
             raise InvalidCredentialsError()
-        return self._token_handler.create_access_token(UUID(user.id), user.role)
+        return self._token_handler.create_access_token(
+            UUID(user.id),
+            UUID(user.organization_id),
+            user.role,
+        )

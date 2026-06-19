@@ -20,6 +20,7 @@ from users.tokens import AccessTokenHandler
 @dataclass(frozen=True)
 class CurrentUser:
     id: UUID
+    organization_id: UUID
     role: UserRole
 
 
@@ -78,7 +79,11 @@ def authenticate(
             detail="Invalid access token",
         ) from exc
 
-    return CurrentUser(id=UUID(payload["sub"]), role=UserRole(payload.get("role", UserRole.USER)))
+    return CurrentUser(
+        id=UUID(payload["sub"]),
+        organization_id=UUID(payload["organization_id"]),
+        role=UserRole(payload.get("role", UserRole.USER)),
+    )
 
 
 def ensure_admin(current_user: CurrentUser) -> None:

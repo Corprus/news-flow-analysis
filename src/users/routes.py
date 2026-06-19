@@ -37,12 +37,18 @@ class TokenResponse(BaseModel):
 
 class UserResponse(BaseModel):
     id: UUID
+    organization_id: UUID
     login: str
     role: UserRole
 
 
 def _to_response(user: User) -> UserResponse:
-    return UserResponse(id=UUID(user.id), login=user.login, role=UserRole(user.role))
+    return UserResponse(
+        id=UUID(user.id),
+        organization_id=UUID(user.organization_id),
+        login=user.login,
+        role=UserRole(user.role),
+    )
 
 
 @auth_router.post("/login", response_model=TokenResponse)

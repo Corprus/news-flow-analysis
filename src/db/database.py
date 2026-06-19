@@ -51,6 +51,118 @@ def create_tables() -> None:
     Base.metadata.create_all(bind=get_engine())
     with get_engine().begin() as connection:
         connection.execute(
+            text(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS organization_id uuid
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO organizations (id, name, created_at)
+                SELECT id, login, NOW()
+                FROM users
+                WHERE organization_id IS NULL
+                ON CONFLICT (id) DO NOTHING
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE users
+                SET organization_id = id
+                WHERE organization_id IS NULL
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                ALTER TABLE users
+                    ALTER COLUMN organization_id SET NOT NULL,
+                    DROP CONSTRAINT IF EXISTS fk_users_organization_id;
+
+                ALTER TABLE users
+                    ADD CONSTRAINT fk_users_organization_id
+                    FOREIGN KEY (organization_id)
+                    REFERENCES organizations (id)
+                    ON DELETE RESTRICT;
+
+                CREATE INDEX IF NOT EXISTS ix_users_organization_id
+                    ON users (organization_id)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'accounts'
+                          AND column_name = 'user_id'
+                    ) THEN
+                        ALTER TABLE accounts RENAME COLUMN user_id TO organization_id;
+                        ALTER TABLE accounts
+                            DROP CONSTRAINT IF EXISTS accounts_user_id_fkey,
+                            ADD CONSTRAINT accounts_organization_id_fkey
+                            FOREIGN KEY (organization_id)
+                            REFERENCES organizations (id)
+                            ON DELETE CASCADE;
+                    END IF;
+                END
+                $$;
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'transactions'
+                          AND column_name = 'user_id'
+                    ) THEN
+                        ALTER TABLE transactions RENAME COLUMN user_id TO actor_user_id;
+                        ALTER TABLE transactions
+                            ADD COLUMN organization_id uuid;
+
+                        UPDATE transactions AS transaction
+                        SET organization_id = users.organization_id
+                        FROM users
+                        WHERE transaction.actor_user_id = users.id;
+
+                        ALTER TABLE transactions
+                            ALTER COLUMN organization_id SET NOT NULL,
+                            DROP CONSTRAINT IF EXISTS transactions_user_id_fkey,
+                            ADD CONSTRAINT transactions_actor_user_id_fkey
+                            FOREIGN KEY (actor_user_id)
+                            REFERENCES users (id)
+                            ON DELETE SET NULL,
+                            ADD CONSTRAINT transactions_organization_id_fkey
+                            FOREIGN KEY (organization_id)
+                            REFERENCES organizations (id)
+                            ON DELETE CASCADE;
+
+                        ALTER INDEX IF EXISTS ix_transactions_user_id
+                            RENAME TO ix_transactions_actor_user_id;
+                        CREATE INDEX IF NOT EXISTS ix_transactions_organization_id
+                            ON transactions (organization_id);
+                    END IF;
+                END
+                $$;
+                """
+            )
+        )
+        connection.execute(
             text("ALTER TABLE news_articles ADD COLUMN IF NOT EXISTS topic varchar(256)")
         )
         connection.execute(

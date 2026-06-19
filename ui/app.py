@@ -231,7 +231,7 @@ def render_admin() -> None:
 
     st.dataframe(pd.DataFrame(users), use_container_width=True, hide_index=True)
     with st.form("credit_form"):
-        user_id = st.text_input("User ID")
+        organization_id = st.text_input("Organization ID")
         amount_raw = st.text_input("Amount", value="10.00")
         submitted = st.form_submit_button("Add credits")
     if submitted:
@@ -240,7 +240,7 @@ def render_admin() -> None:
             st.warning("Invalid amount")
             return
         try:
-            client.add_credit(user_id, amount)
+            client.add_credit(organization_id, amount)
             st.success("Credits added")
         except ApiError as exc:
             st.error(str(exc))

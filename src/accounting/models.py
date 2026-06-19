@@ -22,9 +22,9 @@ class TransactionReason(StrEnum):
 class Account(Base):
     __tablename__ = "accounts"
 
-    user_id: Mapped[str] = mapped_column(
+    organization_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
         primary_key=True,
     )
     balance: Mapped[Decimal] = mapped_column(
@@ -48,11 +48,17 @@ class Transaction(Base):
         primary_key=True,
         default=lambda: str(uuid4()),
     )
-    user_id: Mapped[str] = mapped_column(
+    organization_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
+    )
+    actor_user_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
     )
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
