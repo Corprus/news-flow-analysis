@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from news.routes import AddNewsRequest, add_news, publish_news
+from news.routes import AddNewsRequest, add_news, get_news_import_formats, publish_news
 from users.deps import CurrentUser, ensure_publisher
 from users.models import UserRole
 
@@ -49,10 +49,27 @@ def test_add_news_endpoint_rejects_regular_user_before_side_effects() -> None:
     )
 
     with pytest.raises(HTTPException) as error:
-        add_news(request, _current_user(UserRole.USER), news)
+        asyncio.run(
+            add_news(
+                request=request,
+                current_user=_current_user(UserRole.USER),
+                news=news,
+                accounting=None,
+                settings=None,
+                publisher=None,
+                repository=None,
+            )
+        )
 
     assert error.value.status_code == 403
     assert news.add_calls == []
+
+
+def test_import_formats_endpoint_requires_publisher_role() -> None:
+    with pytest.raises(HTTPException) as error:
+        get_news_import_formats(_current_user(UserRole.USER))
+
+    assert error.value.status_code == 403
 
 
 def test_publish_news_endpoint_rejects_regular_user_before_side_effects() -> None:

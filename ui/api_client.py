@@ -76,8 +76,38 @@ class ApiClient:
     def add_news(self, payload: dict) -> dict:
         return self._request("POST", "/v1/news", json=payload, timeout=60)
 
+    def list_news_import_formats(self) -> list[dict]:
+        return self._request("GET", "/v1/news/import-formats")
+
+    def import_news(
+        self,
+        format_id: str,
+        file_name: str,
+        content: bytes,
+        *,
+        publish_immediately: bool = False,
+    ) -> dict:
+        return self._request(
+            "POST",
+            "/v1/news/import",
+            data={
+                "format": format_id,
+                "publish_immediately": str(publish_immediately).lower(),
+            },
+            files={"file": (file_name, content, "text/csv")},
+            timeout=120,
+        )
+
     def publish_news(self, article_id: str) -> dict:
         return self._request("POST", f"/v1/news/{article_id}/publish", timeout=60)
+
+    def publish_news_batch(self, article_ids: list[str]) -> dict:
+        return self._request(
+            "POST",
+            "/v1/news/publish",
+            json={"article_ids": article_ids},
+            timeout=120,
+        )
 
     def list_news_history(self) -> list[dict]:
         return self._request("GET", "/v1/news/me/history")
