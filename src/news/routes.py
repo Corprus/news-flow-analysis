@@ -23,7 +23,7 @@ from news.models import (
 )
 from news.service import NewsSearchFilters, NewsService
 from settings import Settings, get_settings
-from users.deps import CurrentUser, SessionDep, authenticate
+from users.deps import CurrentUser, SessionDep, authenticate, ensure_publisher
 
 router = APIRouter(prefix="/v1/news", tags=["news"])
 search_router = APIRouter(prefix="/v1/news-search", tags=["news-search"])
@@ -177,6 +177,7 @@ def add_news(
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],
 ) -> NewsArticleResponse:
+    ensure_publisher(current_user)
     article = news.add_user_article(
         user_id=current_user.id,
         title=request.title,
@@ -210,6 +211,7 @@ async def publish_news(
     publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
     repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
 ) -> NewsArticlePublishResponse:
+    ensure_publisher(current_user)
     try:
         article = news.publish_user_article(article_id, current_user.id)
     except ValueError as exc:

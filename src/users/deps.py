@@ -89,3 +89,11 @@ def authenticate(
 def ensure_admin(current_user: CurrentUser) -> None:
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role is required")
+
+
+def ensure_publisher(current_user: CurrentUser) -> None:
+    if current_user.role not in {UserRole.PUBLISHER, UserRole.ADMIN}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Publisher role is required",
+        )

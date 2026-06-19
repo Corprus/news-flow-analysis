@@ -14,6 +14,7 @@ from db.models.mixins import CrudMixin
 
 class UserRole(StrEnum):
     USER = "user"
+    PUBLISHER = "publisher"
     ADMIN = "admin"
 
 

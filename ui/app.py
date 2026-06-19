@@ -75,8 +75,12 @@ def render_sidebar() -> str:
             st.session_state.clear()
             st.rerun()
 
-        pages = ["Search", "News", "History", "Transactions"]
-        if str(me.get("role", "")).lower() == "admin":
+        role = str(me.get("role", "")).lower()
+        pages = ["Search"]
+        if role in {"publisher", "admin"}:
+            pages.append("News")
+        pages.extend(["History", "Transactions"])
+        if role == "admin":
             pages.append("Admin")
         return st.radio("Navigation", pages, label_visibility="collapsed")
 
