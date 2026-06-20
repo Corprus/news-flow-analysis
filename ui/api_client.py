@@ -7,7 +7,9 @@ import requests
 
 
 class ApiError(RuntimeError):
-    pass
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class ApiClient:
@@ -33,7 +35,10 @@ class ApiClient:
             **kwargs,
         )
         if not 200 <= response.status_code < 300:
-            raise ApiError(f"{method} {path} failed: {response.status_code} {response.text}")
+            raise ApiError(
+                f"{method} {path} failed: {response.status_code} {response.text}",
+                status_code=response.status_code,
+            )
         if response.status_code == 204:
             return None
         return response.json()
@@ -109,8 +114,48 @@ class ApiClient:
             timeout=120,
         )
 
-    def list_news_history(self) -> list[dict]:
-        return self._request("GET", "/v1/news/me/history")
+    def delete_news_drafts(self, article_ids: list[str]) -> dict:
+        return self._request(
+            "DELETE",
+            "/v1/news",
+            json={"article_ids": article_ids},
+        )
+
+    def archive_news(self, article_ids: list[str]) -> dict:
+        return self._request(
+            "POST",
+            "/v1/news/archive",
+            json={"article_ids": article_ids},
+        )
+
+    def restore_news(self, article_ids: list[str]) -> dict:
+        return self._request(
+            "POST",
+            "/v1/news/restore",
+            json={"article_ids": article_ids},
+        )
+
+    def update_news_novelty_labels(self, updates: list[dict]) -> dict:
+        return self._request(
+            "POST",
+            "/v1/news/moderation-labels",
+            json={"updates": updates},
+        )
+
+    def reprocess_news(self, article_ids: list[str]) -> dict:
+        return self._request(
+            "POST",
+            "/v1/news/reprocess",
+            json={"article_ids": article_ids},
+            timeout=120,
+        )
+
+    def list_news_history(self, limit: int = 10_000) -> list[dict]:
+        return self._request(
+            "GET",
+            "/v1/news/me/history",
+            params={"limit": limit},
+        )
 
     def search_news(self, payload: dict) -> dict:
         return self._request("POST", "/v1/news-search", json=payload, timeout=60)

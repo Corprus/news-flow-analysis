@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC
+from datetime import UTC, datetime
 from io import BytesIO
 from types import SimpleNamespace
 from uuid import uuid4
@@ -7,9 +7,15 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException, UploadFile
 
-from news.importers import MAX_IMPORT_ROWS, NewsImportError, news_importers
+from news.importers import (
+    MAX_IMPORT_ROWS,
+    ImportedNews,
+    NewsImportError,
+    news_importers,
+)
+from news.models import NewsArticle
 from news.routes import import_news
-from news.service import NewsImportResult
+from news.service import NewsImportResult, NewsService
 from users.deps import CurrentUser
 from users.models import UserRole
 
@@ -78,6 +84,50 @@ def test_lenta_csv_row_limit_is_enforced() -> None:
 
     with pytest.raises(NewsImportError, match="more than"):
         news_importers.parse("lenta", "\n".join(rows).encode())
+
+
+class _ImportSession:
+    def __init__(self) -> None:
+        self.added: list[NewsArticle] = []
+
+    def add(self, article: NewsArticle) -> None:
+        self.added.append(article)
+
+    def flush(self) -> None:
+        for article in self.added:
+            if article.id is None:
+                article.id = str(uuid4())
+
+
+def test_import_keeps_detected_duplicate_as_separate_draft(monkeypatch) -> None:
+    session = _ImportSession()
+    service = NewsService(session)  # type: ignore[arg-type]
+    existing_id = str(uuid4())
+    monkeypatch.setattr(
+        service,
+        "_find_existing_article",
+        lambda *_args: SimpleNamespace(id=existing_id),
+    )
+    monkeypatch.setattr(service, "_add_submission", lambda *_args: None)
+
+    result = service.import_user_articles(
+        user_id=uuid4(),
+        format_id="lenta",
+        articles=[
+            ImportedNews(
+                title="Repeated title",
+                content="Repeated content",
+                published_at=datetime(2020, 1, 1, tzinfo=UTC),
+                url="https://example.test/repeated",
+            )
+        ],
+    )
+
+    assert result.created_count == 1
+    assert result.duplicate_count == 1
+    assert len(result.article_ids) == 1
+    assert result.article_ids[0] != existing_id
+    assert session.added[0].extra_metadata["import"]["possible_duplicate_of"] == existing_id
 
 
 class _ImportNewsServiceSpy:

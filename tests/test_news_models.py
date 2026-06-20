@@ -49,3 +49,4 @@ def test_accounting_is_scoped_to_organization_and_tracks_actor() -> None:
         for foreign_key in transactions.c.actor_user_id.foreign_keys
     } == {"users.id"}
     assert transactions.c.actor_user_id.nullable is True
+    assert transactions.c.batch_id.nullable is True

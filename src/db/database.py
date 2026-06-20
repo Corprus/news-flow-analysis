@@ -166,6 +166,17 @@ def create_tables() -> None:
         connection.execute(
             text(
                 """
+                ALTER TABLE transactions
+                ADD COLUMN IF NOT EXISTS batch_id uuid;
+
+                CREATE INDEX IF NOT EXISTS ix_transactions_batch_id
+                    ON transactions (batch_id)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
                 ALTER TABLE news_articles
                 ADD COLUMN IF NOT EXISTS visibility varchar(32) NOT NULL DEFAULT 'public'
                 """
@@ -245,6 +256,34 @@ def create_tables() -> None:
         connection.execute(
             text(
                 """
+                ALTER TABLE article_pipeline_state
+                    ADD COLUMN IF NOT EXISTS manual_novelty_label varchar(32),
+                    ADD COLUMN IF NOT EXISTS manual_novelty_actor_id uuid,
+                    ADD COLUMN IF NOT EXISTS manual_novelty_updated_at timestamptz;
+
+                ALTER TABLE article_pipeline_state
+                    DROP CONSTRAINT IF EXISTS ck_article_pipeline_manual_novelty_label,
+                    DROP CONSTRAINT IF EXISTS fk_article_pipeline_manual_novelty_actor;
+
+                ALTER TABLE article_pipeline_state
+                    ADD CONSTRAINT ck_article_pipeline_manual_novelty_label
+                    CHECK (
+                        manual_novelty_label IS NULL
+                        OR manual_novelty_label IN ('significant', 'minor', 'duplicate')
+                    ),
+                    ADD CONSTRAINT fk_article_pipeline_manual_novelty_actor
+                    FOREIGN KEY (manual_novelty_actor_id)
+                    REFERENCES users (id)
+                    ON DELETE SET NULL;
+
+                CREATE INDEX IF NOT EXISTS ix_article_pipeline_manual_novelty_actor
+                    ON article_pipeline_state (manual_novelty_actor_id);
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
                 ALTER TABLE news_articles
                     DROP CONSTRAINT IF EXISTS ck_news_articles_status,
                     DROP CONSTRAINT IF EXISTS ck_news_articles_visibility,
@@ -259,7 +298,7 @@ def create_tables() -> None:
                         )
                     ),
                     ADD CONSTRAINT ck_news_articles_visibility
-                    CHECK (visibility IN ('draft', 'public'));
+                    CHECK (visibility IN ('draft', 'public', 'archived'));
 
                 CREATE INDEX IF NOT EXISTS ix_news_articles_canonical_url
                     ON news_articles (canonical_url);
@@ -280,8 +319,9 @@ def create_tables() -> None:
 
 
 def drop_tables() -> None:
-    _import_models()
-    Base.metadata.drop_all(bind=get_engine())
+    with get_engine().begin() as connection:
+        connection.execute(text("DROP SCHEMA public CASCADE"))
+        connection.execute(text("CREATE SCHEMA public"))
 
 
 def _import_models() -> None:

@@ -39,6 +39,7 @@ class ArticleOrigin(StrEnum):
 class ArticleVisibility(StrEnum):
     DRAFT = "draft"
     PUBLIC = "public"
+    ARCHIVED = "archived"
 
 
 class SearchQueryStatus(StrEnum):
@@ -238,6 +239,16 @@ class ArticlePipelineState(Base):
     p_significant: Mapped[float] = mapped_column(Float, nullable=False)
     novelty_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     novelty_needs_review: Mapped[bool] = mapped_column(nullable=False, default=False)
+    manual_novelty_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    manual_novelty_actor_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    manual_novelty_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     pipeline_version: Mapped[str] = mapped_column(String(128), nullable=False)
     embedding_model: Mapped[str] = mapped_column(String(256), nullable=False)
     embedding_model_revision: Mapped[str] = mapped_column(String(128), nullable=False)

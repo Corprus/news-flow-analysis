@@ -5,7 +5,18 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from news.routes import AddNewsRequest, add_news, get_news_import_formats, publish_news
+from news.routes import (
+    AddNewsRequest,
+    DeleteNewsBatchRequest,
+    NoveltyLabelUpdate,
+    UpdateNoveltyLabelsRequest,
+    add_news,
+    delete_news_drafts,
+    get_news_import_formats,
+    publish_news,
+    reprocess_news,
+    update_novelty_labels,
+)
 from users.deps import CurrentUser, ensure_publisher
 from users.models import UserRole
 
@@ -87,3 +98,43 @@ def test_publish_news_endpoint_rejects_regular_user_before_side_effects() -> Non
         )
 
     assert error.value.status_code == 403
+
+
+def test_delete_news_endpoint_rejects_regular_user_before_side_effects() -> None:
+    with pytest.raises(HTTPException) as error:
+        delete_news_drafts(
+            request=DeleteNewsBatchRequest(article_ids=[uuid4()]),
+            current_user=_current_user(UserRole.USER),
+            news=None,
+        )
+
+    assert error.value.status_code == 403
+
+
+def test_moderation_and_reprocessing_require_publisher_role() -> None:
+    article_id = uuid4()
+    current_user = _current_user(UserRole.USER)
+
+    with pytest.raises(HTTPException) as moderation_error:
+        update_novelty_labels(
+            request=UpdateNoveltyLabelsRequest(
+                updates=[NoveltyLabelUpdate(article_id=article_id, label="minor")]
+            ),
+            current_user=current_user,
+            news=None,
+        )
+    with pytest.raises(HTTPException) as reprocess_error:
+        asyncio.run(
+            reprocess_news(
+                request=DeleteNewsBatchRequest(article_ids=[article_id]),
+                current_user=current_user,
+                news=None,
+                accounting=None,
+                settings=None,
+                publisher=None,
+                repository=None,
+            )
+        )
+
+    assert moderation_error.value.status_code == 403
+    assert reprocess_error.value.status_code == 403

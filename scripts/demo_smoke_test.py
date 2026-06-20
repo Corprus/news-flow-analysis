@@ -98,11 +98,40 @@ def main() -> None:
     if len(users) < 5:
         raise RuntimeError(f"Expected at least five demo users, got {len(users)}")
 
+    operations = client.request(
+        "GET",
+        "/v1/accounting/me/transactions",
+        token=demo_token,
+    )
+    batched_publications = [
+        operation
+        for operation in operations
+        if operation["reason"] == "news_add" and operation.get("item_count", 1) > 1
+    ]
+    single_publications = [
+        operation
+        for operation in operations
+        if operation["reason"] == "news_add" and operation.get("item_count", 1) == 1
+    ]
+    if len(batched_publications) != 1:
+        raise RuntimeError(
+            f"Expected one batched demo publication, got {len(batched_publications)}"
+        )
+    if len(single_publications) < 3:
+        raise RuntimeError(
+            f"Expected at least three single demo publications, got {len(single_publications)}"
+        )
+
     created = client.request(
         "POST",
         "/v1/news-search",
         token=partner_token,
-        json={"query_text": args.query, "top_k": 5, "language": "ru"},
+        json={
+            "query_text": args.query,
+            "top_k": 5,
+            "language": "ru",
+            "min_relevance": 0.0,
+        },
     )
     completed = wait_for_search(
         client,
@@ -117,7 +146,9 @@ def main() -> None:
 
     print(
         "Demo smoke test passed: "
-        f"{len(users)} users, cross-organization search returned {len(clusters)} clusters."
+        f"{len(users)} users, one publication batch, "
+        f"{len(single_publications)} single publications, "
+        f"cross-organization search returned {len(clusters)} clusters."
     )
     for cluster in clusters[:3]:
         print(f"- {cluster['score']:.3f}: {cluster['representative_title']}")

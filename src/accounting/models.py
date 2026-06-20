@@ -14,6 +14,7 @@ from db.database import Base
 
 class TransactionReason(StrEnum):
     NEWS_ADD = "news_add"
+    NEWS_REPROCESS = "news_reprocess"
     NEWS_SEARCH = "news_search"
     CREDIT_ADD = "credit_add"
     CREDIT_WITHDRAW = "credit_withdraw"
@@ -68,5 +69,10 @@ class Transaction(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     reason: Mapped[str] = mapped_column(String(64), nullable=False)
     reference_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
+    batch_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        index=True,
+        nullable=True,
+    )
 
     __table_args__ = (Index("ix_transactions_timestamp", "timestamp"),)

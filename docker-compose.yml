@@ -39,9 +39,6 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-local}
       DEMO_MODE: ${DEMO_MODE:-false}
-      # Docker demo reset is performed explicitly with `docker compose down -v`.
-      # Never keep destructive database reset enabled in a restarting API container.
-      DEMO_DROP_DB: "false"
       DEMO_USER_LOGIN: ${DEMO_USER_LOGIN:-demo}
       DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-demo12345}
       DEMO_ADMIN_LOGIN: ${DEMO_ADMIN_LOGIN:-admin}

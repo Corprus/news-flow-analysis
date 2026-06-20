@@ -32,6 +32,8 @@ class _FakeCursor:
                 "minor",
                 0.2,
                 "https://example.com/minor",
+                "Short summary",
+                "Full article text",
             ),
             (
                 "00000000-0000-0000-0000-000000000002",
@@ -45,6 +47,8 @@ class _FakeCursor:
                 "significant",
                 0.9,
                 "https://example.com/significant",
+                None,
+                "Significant full article text",
             ),
             (
                 "00000000-0000-0000-0000-000000000003",
@@ -58,6 +62,8 @@ class _FakeCursor:
                 "significant",
                 0.8,
                 None,
+                None,
+                "Another story text",
             )
         ]
 
@@ -113,7 +119,10 @@ def test_search_returns_all_public_articles_without_publisher_scope(monkeypatch)
     assert "user_id" not in normalized_sql
     assert "organization_id" not in normalized_sql
     assert result["items"][0]["title"] == "Public article from another publisher"
+    assert result["items"][0]["summary"] == "Short summary"
+    assert result["items"][0]["content"] == "Full article text"
     assert "left join article_pipeline_state" in normalized_sql
+    assert "coalesce(s.manual_novelty_label, s.novelty_label)" in normalized_sql
     assert len(result["clusters"]) == 2
     assert result["clusters"][0]["cluster_id"] == "cluster-1"
     assert result["clusters"][0]["representative_article_id"] == (
@@ -126,3 +135,29 @@ def test_search_returns_all_public_articles_without_publisher_scope(monkeypatch)
         "Significant earlier update",
         "Public article from another publisher",
     ]
+
+
+def test_search_filters_candidates_below_minimum_relevance(monkeypatch) -> None:
+    connection = _FakeConnection()
+
+    async def connect(_database_url):
+        return connection
+
+    monkeypatch.setattr(
+        "news.pipeline_repository.AsyncConnection.connect",
+        connect,
+    )
+    repository = NewsPipelineRepository("postgresql://test")
+
+    result = asyncio.run(
+        repository.complete_search_query(
+            query_id="00000000-0000-0000-0000-000000000002",
+            query_embedding=[1.0, 0.0],
+            filters={"min_relevance": 0.91},
+            top_k=20,
+            model_name="test-model",
+            model_revision="test-revision",
+        )
+    )
+
+    assert [item["score"] for item in result["items"]] == [0.95]

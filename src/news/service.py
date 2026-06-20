@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 from news.importers import ImportedNews
 from news.models import (
     ArticleOrigin,
+    ArticlePipelineState,
     ArticleStatus,
     ArticleVisibility,
     NewsArticle,
@@ -28,6 +29,7 @@ class NewsSearchFilters:
     published_from: datetime | None = None
     published_to: datetime | None = None
     min_novelty_score: float | None = None
+    min_relevance: float = 0.5
 
     def to_payload(self) -> dict[str, str]:
         payload: dict[str, str] = {}
@@ -41,6 +43,7 @@ class NewsSearchFilters:
             payload["published_to"] = self.published_to.isoformat()
         if self.min_novelty_score is not None:
             payload["min_novelty_score"] = str(self.min_novelty_score)
+        payload["min_relevance"] = str(self.min_relevance)
         return payload
 
 
@@ -76,7 +79,21 @@ class NewsService:
             user_id,
         )
         if existing_article is not None:
+            if existing_article.visibility != ArticleVisibility.DRAFT.value:
+                raise ValueError(
+                    "Такая новость уже существует и не является черновиком"
+                )
+            existing_article.title = title
+            existing_article.content = content
+            existing_article.summary = summary
+            existing_article.url = url
+            existing_article.canonical_url = canonical_url
+            existing_article.published_at = published_at
+            existing_article.language = language
+            existing_article.topic = topic
+            existing_article.content_hash = content_hash
             self._add_submission(existing_article.id, user_id)
+            self._session.flush()
             return existing_article
 
         article = NewsArticle(
@@ -108,6 +125,7 @@ class NewsService:
     ) -> NewsImportResult:
         article_ids: list[str] = []
         created_count = 0
+        duplicate_count = 0
         total_rows = 0
         for imported in articles:
             total_rows += 1
@@ -118,14 +136,17 @@ class NewsService:
                 user_id,
             )
             if existing_article is not None:
-                self._add_submission(existing_article.id, user_id)
-                article_ids.append(existing_article.id)
-                continue
+                duplicate_count += 1
 
             metadata = {
                 "import": {
                     "format": format_id,
                     **(imported.metadata or {}),
+                    **(
+                        {"possible_duplicate_of": existing_article.id}
+                        if existing_article is not None
+                        else {}
+                    ),
                 }
             }
             article = NewsArticle(
@@ -153,7 +174,7 @@ class NewsService:
         return NewsImportResult(
             total_rows=total_rows,
             created_count=created_count,
-            duplicate_count=total_rows - created_count,
+            duplicate_count=duplicate_count,
             article_ids=article_ids,
         )
 
@@ -242,6 +263,227 @@ class NewsService:
             published.append(article)
         self._session.flush()
         return published
+
+    def delete_user_drafts(
+        self,
+        article_ids: Iterable[UUID],
+        user_id: UUID,
+    ) -> int:
+        unique_ids = list(dict.fromkeys(str(article_id) for article_id in article_ids))
+        if not unique_ids:
+            return 0
+        articles = list(
+            self._session.execute(
+                select(NewsArticle)
+                .join(
+                    NewsArticleSubmission,
+                    NewsArticleSubmission.article_id == NewsArticle.id,
+                )
+                .where(
+                    NewsArticle.id.in_(unique_ids),
+                    NewsArticleSubmission.user_id == str(user_id),
+                )
+                .with_for_update()
+            )
+            .scalars()
+            .all()
+        )
+        article_by_id = {article.id: article for article in articles}
+        missing = [article_id for article_id in unique_ids if article_id not in article_by_id]
+        if missing:
+            raise LookupError(f"Draft articles not found: {missing[:10]}")
+
+        invalid = [
+            article.id
+            for article in articles
+            if article.visibility != ArticleVisibility.DRAFT.value
+            or article.status != ArticleStatus.NOT_STARTED.value
+        ]
+        if invalid:
+            raise ValueError(
+                "Only unprocessed draft articles can be deleted: "
+                + "; ".join(invalid[:10])
+            )
+
+        for article in articles:
+            self._session.delete(article)
+        self._session.flush()
+        return len(articles)
+
+    def archive_user_articles(
+        self,
+        article_ids: Iterable[UUID],
+        user_id: UUID,
+    ) -> int:
+        return self._change_user_article_visibility(
+            article_ids,
+            user_id,
+            expected=ArticleVisibility.PUBLIC,
+            target=ArticleVisibility.ARCHIVED,
+        )
+
+    def restore_user_articles(
+        self,
+        article_ids: Iterable[UUID],
+        user_id: UUID,
+    ) -> int:
+        return self._change_user_article_visibility(
+            article_ids,
+            user_id,
+            expected=ArticleVisibility.ARCHIVED,
+            target=ArticleVisibility.PUBLIC,
+        )
+
+    def set_user_article_novelty_labels(
+        self,
+        labels: dict[UUID, str | None],
+        user_id: UUID,
+    ) -> int:
+        if not labels:
+            return 0
+        valid_labels = {"significant", "minor", "duplicate"}
+        invalid_labels = {
+            label for label in labels.values() if label is not None and label not in valid_labels
+        }
+        if invalid_labels:
+            raise ValueError(f"Unsupported novelty labels: {sorted(invalid_labels)}")
+
+        article_ids = [str(article_id) for article_id in labels]
+        states = list(
+            self._session.execute(
+                select(ArticlePipelineState)
+                .join(NewsArticle, NewsArticle.id == ArticlePipelineState.article_id)
+                .join(
+                    NewsArticleSubmission,
+                    NewsArticleSubmission.article_id == NewsArticle.id,
+                )
+                .where(
+                    ArticlePipelineState.article_id.in_(article_ids),
+                    NewsArticleSubmission.user_id == str(user_id),
+                    NewsArticle.visibility.in_(
+                        [
+                            ArticleVisibility.PUBLIC.value,
+                            ArticleVisibility.ARCHIVED.value,
+                        ]
+                    ),
+                )
+                .with_for_update()
+            )
+            .scalars()
+            .all()
+        )
+        state_by_id = {state.article_id: state for state in states}
+        missing = [article_id for article_id in article_ids if article_id not in state_by_id]
+        if missing:
+            raise LookupError(f"Processed articles not found: {missing[:10]}")
+
+        updated_at = datetime.now(UTC)
+        for article_id, label in labels.items():
+            state = state_by_id[str(article_id)]
+            state.manual_novelty_label = label
+            state.manual_novelty_actor_id = str(user_id) if label is not None else None
+            state.manual_novelty_updated_at = updated_at if label is not None else None
+        self._session.flush()
+        return len(states)
+
+    def prepare_user_articles_for_reprocessing(
+        self,
+        article_ids: Iterable[UUID],
+        user_id: UUID,
+    ) -> list[NewsArticle]:
+        unique_ids = list(dict.fromkeys(str(article_id) for article_id in article_ids))
+        if not unique_ids:
+            return []
+        articles = list(
+            self._session.execute(
+                select(NewsArticle)
+                .join(
+                    NewsArticleSubmission,
+                    NewsArticleSubmission.article_id == NewsArticle.id,
+                )
+                .where(
+                    NewsArticle.id.in_(unique_ids),
+                    NewsArticleSubmission.user_id == str(user_id),
+                )
+                .with_for_update()
+            )
+            .scalars()
+            .all()
+        )
+        article_by_id = {article.id: article for article in articles}
+        missing = [article_id for article_id in unique_ids if article_id not in article_by_id]
+        if missing:
+            raise LookupError(f"Articles not found: {missing[:10]}")
+
+        invalid = [
+            article.id
+            for article in articles
+            if article.visibility != ArticleVisibility.PUBLIC.value
+            or article.status
+            not in {ArticleStatus.PROCESSED.value, ArticleStatus.ERROR.value}
+        ]
+        if invalid:
+            raise ValueError(
+                "Only completed or failed public articles can be reprocessed: "
+                + "; ".join(invalid[:10])
+            )
+
+        ordered_articles = [article_by_id[article_id] for article_id in unique_ids]
+        for article in ordered_articles:
+            article.status = ArticleStatus.PENDING.value
+            article.extra_metadata = {
+                key: value
+                for key, value in (article.extra_metadata or {}).items()
+                if key != "pipeline_error"
+            }
+        self._session.flush()
+        return ordered_articles
+
+    def _change_user_article_visibility(
+        self,
+        article_ids: Iterable[UUID],
+        user_id: UUID,
+        *,
+        expected: ArticleVisibility,
+        target: ArticleVisibility,
+    ) -> int:
+        unique_ids = list(dict.fromkeys(str(article_id) for article_id in article_ids))
+        if not unique_ids:
+            return 0
+        articles = list(
+            self._session.execute(
+                select(NewsArticle)
+                .join(
+                    NewsArticleSubmission,
+                    NewsArticleSubmission.article_id == NewsArticle.id,
+                )
+                .where(
+                    NewsArticle.id.in_(unique_ids),
+                    NewsArticleSubmission.user_id == str(user_id),
+                )
+                .with_for_update()
+            )
+            .scalars()
+            .all()
+        )
+        article_by_id = {article.id: article for article in articles}
+        missing = [article_id for article_id in unique_ids if article_id not in article_by_id]
+        if missing:
+            raise LookupError(f"Articles not found: {missing[:10]}")
+        invalid = [
+            article.id
+            for article in articles
+            if article.visibility != expected.value
+        ]
+        if invalid:
+            raise ValueError(
+                f"Articles must have visibility {expected.value}: "
+                + "; ".join(invalid[:10])
+            )
+        for article in articles:
+            article.visibility = target.value
+        self._session.flush()
+        return len(articles)
 
     def create_search_query(
         self,

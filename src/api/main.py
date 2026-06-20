@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     validate_demo_settings(settings)
     init_db(settings)
-    if settings.demo_drop_db:
+    if settings.demo_mode:
         drop_tables()
     create_tables()
     repository = NewsPipelineJobRepository(settings.database_url)
