@@ -7,7 +7,9 @@ import requests
 
 
 class ApiError(RuntimeError):
-    pass
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class ApiClient:
@@ -33,7 +35,10 @@ class ApiClient:
             **kwargs,
         )
         if not 200 <= response.status_code < 300:
-            raise ApiError(f"{method} {path} failed: {response.status_code} {response.text}")
+            raise ApiError(
+                f"{method} {path} failed: {response.status_code} {response.text}",
+                status_code=response.status_code,
+            )
         if response.status_code == 204:
             return None
         return response.json()
