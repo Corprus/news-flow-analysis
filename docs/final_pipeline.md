@@ -92,7 +92,39 @@ python scripts/run_final_pipeline.py `
 
 ## Benchmark
 
-Пример benchmark на 10 000 строк:
+Для одного и того же набора из 10 000 новостей Lenta.ru сохранены три замера:
+
+| Вариант | Режим | Время обработки | Скорость |
+|---|---|---:|---:|
+| Standalone notebook/script | `full`, включая загрузку модели | 238.93 с | 41.85 новости/с |
+| Docker Compose service pipeline | `full`, модель прогрета | 226.33 с | 44.18 новости/с |
+| Docker Compose service pipeline | `incremental`, пустая история, модель прогрета | 697.71 с | 14.33 новости/с |
+
+Горячий сервисный `full` практически совпал со standalone pipeline без загрузки
+модели: `238.93 − 13.97 = 224.96` с против `226.33` с. Следовательно, основная
+причина медленного первого сервисного замера — последовательный incremental
+алгоритм, а не Docker, RabbitMQ или запись результата в PostgreSQL.
+
+В incremental-режиме готовая история и её embeddings читаются из PostgreSQL один
+раз перед началом job. Затем каждая новая публикация обрабатывается
+последовательно: для неё фильтруется уже растущий контекст, вычисляется сходство с
+кандидатами и выбирается кластер. После назначения публикация добавляется в
+контекст для следующей итерации. При batch из 10 000 новых публикаций это приводит
+к многократному просмотру растущей истории и повторному копированию DataFrame и
+матрицы embeddings через `pd.concat` и `np.vstack`. Поэтому такой сценарий
+существенно дороже пакетного `full`, который обрабатывает весь набор совместно.
+
+Построчный persistence всё ещё следует заменить пакетной записью для лучшей
+масштабируемости и меньшего числа SQL round trips. Однако этот эксперимент не
+показывает, что persistence является существенным bottleneck: вся сервисная
+обвязка вместе уложилась примерно в разницу между `224.96` и `226.33` с с учётом
+естественной вариативности CUDA-вычислений.
+
+Импорт 22.51 MiB CSV через HTTP, создание публикаций и постановка задачи заняли
+49.47 с. Полное пользовательское время от начала импорта до статуса `done` составило
+747.47 с.
+
+Standalone benchmark:
 
 ```powershell
 python scripts/benchmark_final_pipeline.py `
@@ -101,11 +133,27 @@ python scripts/benchmark_final_pipeline.py `
   --device cuda
 ```
 
-Результаты сохраняются в:
+Service benchmark на тех же ID:
+
+```powershell
+python scripts/benchmark_service_pipeline.py --reset-news --timeout 1800
+```
+
+Повторный `full` без импорта уже загруженных новостей:
+
+```powershell
+python scripts/benchmark_existing_service_pipeline.py --mode full --limit 10000
+```
+
+Результаты сохраняются локально в:
 
 ```text
 data/artifacts/final_pipeline_benchmark/
+data/artifacts/service_runtime_benchmark/
 ```
+
+Подробная методика и параметры окружения приведены в
+[`docs/runtime_benchmark.md`](runtime_benchmark.md).
 
 ## Выходной формат
 
