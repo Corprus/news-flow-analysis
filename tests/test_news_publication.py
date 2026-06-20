@@ -116,6 +116,8 @@ def test_batch_publication_uses_one_pipeline_job_with_multiple_ids() -> None:
     assert response.article_ids == article_ids
     assert news.commit_calls == 1
     assert len(accounting.withdraw_calls) == 2
+    assert accounting.withdraw_calls[0][4] is not None
+    assert accounting.withdraw_calls[0][4] == accounting.withdraw_calls[1][4]
     assert len(repository.queued) == 1
     assert repository.queued[0][1] == {
         "news_ids": [str(article_id) for article_id in article_ids],

@@ -152,3 +152,37 @@ def test_transaction_records_actor_without_moving_balance_to_user(session: Sessi
     assert withdrawal.actor_user_id == str(second_user_id)
     assert accounting.get_balance(organization_id) == Decimal("7.50")
     _assert_ledger_matches_balance(session, organization_id)
+
+
+def test_batch_id_groups_related_withdrawals(session: Session) -> None:
+    organization_id, user_id = _create_organization_with_user(
+        session,
+        organization_name="Batch",
+        login="batch-user",
+    )
+    accounting = AccountingService(session)
+    accounting.add_credit(organization_id, user_id, Decimal("10.00"))
+    batch_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    accounting.withdraw_credit(
+        user_id,
+        Decimal("1.00"),
+        TransactionReason.NEWS_ADD,
+        UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        batch_id,
+    )
+    accounting.withdraw_credit(
+        user_id,
+        Decimal("1.00"),
+        TransactionReason.NEWS_ADD,
+        UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+        batch_id,
+    )
+
+    withdrawals = [
+        transaction
+        for transaction in accounting.get_transaction_history(organization_id)
+        if transaction.amount < 0
+    ]
+    assert len(withdrawals) == 2
+    assert {transaction.batch_id for transaction in withdrawals} == {str(batch_id)}

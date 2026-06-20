@@ -68,5 +68,10 @@ class Transaction(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     reason: Mapped[str] = mapped_column(String(64), nullable=False)
     reference_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
+    batch_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        index=True,
+        nullable=True,
+    )
 
     __table_args__ = (Index("ix_transactions_timestamp", "timestamp"),)

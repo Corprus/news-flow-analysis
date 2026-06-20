@@ -132,6 +132,7 @@ class NewsSearchRequest(BaseModel):
     published_from: datetime | None = None
     published_to: datetime | None = None
     min_novelty_score: float | None = Field(default=None, ge=0, le=1)
+    min_relevance: float = Field(default=0.5, ge=0, le=1)
 
     @field_validator("published_from", "published_to")
     @classmethod
@@ -244,6 +245,7 @@ async def add_news(
                 user_id=current_user.id,
                 amount_per_article=settings.news_add_cost,
                 articles=published,
+                batch_id=uuid4() if len(published) > 1 else None,
             )
         news.commit()
     except ValueError as exc:
@@ -379,6 +381,7 @@ async def publish_news_batch(
             user_id=current_user.id,
             amount_per_article=settings.news_add_cost,
             articles=articles,
+            batch_id=uuid4() if len(articles) > 1 else None,
         )
         news.commit()
     except LookupError as exc:
@@ -473,6 +476,7 @@ async def create_news_search(
         published_from=request.published_from,
         published_to=request.published_to,
         min_novelty_score=request.min_novelty_score,
+        min_relevance=request.min_relevance,
     )
     search_query = news.create_search_query(
         user_id=current_user.id,
@@ -600,12 +604,13 @@ def _withdraw_or_raise(
     amount,
     reason: TransactionReason,
     reference_id: UUID,
+    batch_id: UUID | None = None,
 ) -> None:
     if amount == 0:
         return
 
     try:
-        accounting.withdraw_credit(user_id, amount, reason, reference_id)
+        accounting.withdraw_credit(user_id, amount, reason, reference_id, batch_id)
     except InsufficientBalanceError as exc:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -624,6 +629,7 @@ def _withdraw_for_articles_or_raise(
     user_id: UUID,
     amount_per_article,
     articles: Iterable[NewsArticle],
+    batch_id: UUID | None = None,
 ) -> None:
     for article in articles:
         _withdraw_or_raise(
@@ -632,4 +638,5 @@ def _withdraw_for_articles_or_raise(
             amount=amount_per_article,
             reason=TransactionReason.NEWS_ADD,
             reference_id=UUID(article.id),
+            batch_id=batch_id,
         )

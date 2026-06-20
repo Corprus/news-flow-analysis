@@ -460,6 +460,7 @@ class NewsPipelineRepository:
                     "content": row[12],
                 }
                 for rank, row in enumerate(rows, start=1)
+                if float(row[6]) >= float(filters.get("min_relevance", 0.5))
             ]
             clusters = _group_search_items(items, top_k=top_k)
             selected_cluster_ids = {

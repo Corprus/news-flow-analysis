@@ -166,6 +166,17 @@ def create_tables() -> None:
         connection.execute(
             text(
                 """
+                ALTER TABLE transactions
+                ADD COLUMN IF NOT EXISTS batch_id uuid;
+
+                CREATE INDEX IF NOT EXISTS ix_transactions_batch_id
+                    ON transactions (batch_id)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
                 ALTER TABLE news_articles
                 ADD COLUMN IF NOT EXISTS visibility varchar(32) NOT NULL DEFAULT 'public'
                 """

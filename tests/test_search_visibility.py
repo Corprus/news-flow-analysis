@@ -134,3 +134,29 @@ def test_search_returns_all_public_articles_without_publisher_scope(monkeypatch)
         "Significant earlier update",
         "Public article from another publisher",
     ]
+
+
+def test_search_filters_candidates_below_minimum_relevance(monkeypatch) -> None:
+    connection = _FakeConnection()
+
+    async def connect(_database_url):
+        return connection
+
+    monkeypatch.setattr(
+        "news.pipeline_repository.AsyncConnection.connect",
+        connect,
+    )
+    repository = NewsPipelineRepository("postgresql://test")
+
+    result = asyncio.run(
+        repository.complete_search_query(
+            query_id="00000000-0000-0000-0000-000000000002",
+            query_embedding=[1.0, 0.0],
+            filters={"min_relevance": 0.91},
+            top_k=20,
+            model_name="test-model",
+            model_revision="test-revision",
+        )
+    )
+
+    assert [item["score"] for item in result["items"]] == [0.95]

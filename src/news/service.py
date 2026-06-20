@@ -28,6 +28,7 @@ class NewsSearchFilters:
     published_from: datetime | None = None
     published_to: datetime | None = None
     min_novelty_score: float | None = None
+    min_relevance: float = 0.5
 
     def to_payload(self) -> dict[str, str]:
         payload: dict[str, str] = {}
@@ -41,6 +42,7 @@ class NewsSearchFilters:
             payload["published_to"] = self.published_to.isoformat()
         if self.min_novelty_score is not None:
             payload["min_novelty_score"] = str(self.min_novelty_score)
+        payload["min_relevance"] = str(self.min_relevance)
         return payload
 
 
@@ -76,7 +78,21 @@ class NewsService:
             user_id,
         )
         if existing_article is not None:
+            if existing_article.visibility == ArticleVisibility.PUBLIC.value:
+                raise ValueError(
+                    "Такая новость уже существует и была опубликована"
+                )
+            existing_article.title = title
+            existing_article.content = content
+            existing_article.summary = summary
+            existing_article.url = url
+            existing_article.canonical_url = canonical_url
+            existing_article.published_at = published_at
+            existing_article.language = language
+            existing_article.topic = topic
+            existing_article.content_hash = content_hash
             self._add_submission(existing_article.id, user_id)
+            self._session.flush()
             return existing_article
 
         article = NewsArticle(

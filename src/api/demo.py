@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from accounting.models import TransactionReason
 from accounting.service import AccountingService
 from news.importers import NewsImportError, news_importers
 from news.models import ArticleStatus, ArticleVisibility, NewsArticle
@@ -91,12 +92,11 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
         ),
     )
 
-    for user in (demo_publisher, partner_publisher):
-        _ensure_credit(
-            accounting,
-            user,
-            settings.demo_initial_credit,
-        )
+    _ensure_credit(
+        accounting,
+        partner_publisher,
+        settings.demo_initial_credit,
+    )
 
     articles = _load_demo_articles(settings.demo_news_path)
     news = NewsService(session)
@@ -105,7 +105,19 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
         format_id="lenta",
         articles=articles,
     )
-    article_ids_to_process = _publish_demo_articles(session, result.article_ids)
+    _ensure_credit(
+        accounting,
+        demo_publisher,
+        settings.demo_initial_credit
+        + settings.news_add_cost * len(result.article_ids),
+    )
+    article_ids_to_process = _publish_demo_articles(
+        session,
+        accounting,
+        demo_publisher,
+        result.article_ids,
+        settings.news_add_cost,
+    )
     session.flush()
     return DemoSeedResult(
         article_ids_to_process=article_ids_to_process,
@@ -177,7 +189,13 @@ def _load_demo_articles(path_value: str):
         raise RuntimeError(f"Invalid demo news fixture {path}: {exc}") from exc
 
 
-def _publish_demo_articles(session: Session, article_ids: list[str]) -> list[str]:
+def _publish_demo_articles(
+    session: Session,
+    accounting: AccountingService,
+    publisher: User,
+    article_ids: list[str],
+    amount_per_article: Decimal,
+) -> list[str]:
     articles = list(
         session.execute(
             select(NewsArticle).where(NewsArticle.id.in_(article_ids))
@@ -190,4 +208,25 @@ def _publish_demo_articles(session: Session, article_ids: list[str]) -> list[str
         article.visibility = ArticleVisibility.PUBLIC.value
         article.status = ArticleStatus.PENDING.value
         to_process.append(article.id)
+
+    batch_article_ids = to_process[:-3]
+    single_article_ids = to_process[-3:]
+    batch_id = uuid4() if len(batch_article_ids) > 1 else None
+    for article_id in batch_article_ids:
+        if amount_per_article > 0:
+            accounting.withdraw_credit(
+                UUID(publisher.id),
+                amount_per_article,
+                reason=TransactionReason.NEWS_ADD,
+                reference_id=UUID(article_id),
+                batch_id=batch_id,
+            )
+    for article_id in single_article_ids:
+        if amount_per_article > 0:
+            accounting.withdraw_credit(
+                UUID(publisher.id),
+                amount_per_article,
+                reason=TransactionReason.NEWS_ADD,
+                reference_id=UUID(article_id),
+            )
     return to_process

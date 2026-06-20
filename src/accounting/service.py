@@ -45,6 +45,7 @@ class AccountingService:
         amount: Decimal,
         reason: TransactionReason,
         reference_id: UUID | None = None,
+        batch_id: UUID | None = None,
     ) -> UUID:
         if amount <= 0:
             raise ValueError("amount must be > 0")
@@ -62,6 +63,7 @@ class AccountingService:
             -amount,
             reason,
             reference_id,
+            batch_id,
         )
         return UUID(transaction.id)
 
@@ -72,7 +74,7 @@ class AccountingService:
     def get_transaction_history(
         self,
         organization_id: UUID,
-        limit: int = 50,
+        limit: int | None = 50,
         offset: int = 0,
         reason: TransactionReason | None = None,
     ) -> list[Transaction]:
@@ -83,7 +85,8 @@ class AccountingService:
         )
         if reason is not None:
             statement = statement.where(Transaction.reason == reason.value)
-        statement = statement.limit(limit).offset(offset)
+        if limit is not None:
+            statement = statement.limit(limit).offset(offset)
         return list(self._session.execute(statement).scalars().all())
 
     def _get_or_create_account_locked(self, organization_id: UUID) -> Account:
@@ -108,6 +111,7 @@ class AccountingService:
         amount: Decimal,
         reason: TransactionReason,
         reference_id: UUID | None,
+        batch_id: UUID | None = None,
     ) -> Transaction:
         transaction = Transaction(
             organization_id=str(organization_id),
@@ -115,6 +119,7 @@ class AccountingService:
             amount=amount,
             reason=reason.value,
             reference_id=str(reference_id) if reference_id is not None else None,
+            batch_id=str(batch_id) if batch_id is not None else None,
         )
         self._session.add(transaction)
         self._session.flush()

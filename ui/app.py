@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import html
 import os
-from datetime import UTC, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 import extra_streamlit_components as stx
@@ -18,7 +18,6 @@ MOSCOW_TIMEZONE = timezone(timedelta(hours=3))
 PAGE_LABELS = {
     "Search": "Поиск",
     "News": "Новости",
-    "History": "История",
     "Transactions": "Операции",
     "Admin": "Администрирование",
 }
@@ -70,6 +69,36 @@ st.markdown(
         color: #79c0ff;
         background: transparent;
     }
+    .sidebar-profile {
+        color: #f0f2f6;
+        font-size: 1.05rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+    }
+    .sidebar-profile span {
+        color: #8b949e;
+        font-size: 0.9rem;
+        font-weight: 400;
+    }
+    .organization-balance {
+        color: #8b949e;
+        font-size: 0.85rem;
+        white-space: nowrap;
+    }
+    .organization-balance strong {
+        color: #d7dbe0;
+        font-size: 0.95rem;
+        font-weight: 600;
+    }
+    div.st-key-refresh-balance button {
+        padding: 0.15rem 0.45rem;
+        min-height: auto;
+    }
+    div.st-key-refresh-balance {
+        display: flex;
+        align-items: center;
+        height: 100%;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -78,12 +107,15 @@ cookie_manager = stx.CookieManager(key="auth_cookie_manager")
 
 
 def get_client() -> ApiClient:
-    cookie_token = cookie_manager.get(AUTH_COOKIE_NAME)
+    logout_pending = st.session_state.get("logout_pending", False)
+    cookie_token = None if logout_pending else cookie_manager.get(AUTH_COOKIE_NAME)
     if "client" not in st.session_state:
         st.session_state.client = ApiClient(
             API_INTERNAL,
             token=cookie_token,
         )
+    elif logout_pending:
+        st.session_state.client.logout()
     elif not st.session_state.client.token and cookie_token:
         # The cookie component is asynchronous: immediately after F5 its first
         # render can return no cookies and trigger another run once they load.
@@ -92,9 +124,12 @@ def get_client() -> ApiClient:
 
 
 client = get_client()
+if st.session_state.get("logout_pending"):
+    cookie_manager.delete(AUTH_COOKIE_NAME, key="delete_auth_cookie")
 
 
 def persist_token(token: str) -> None:
+    st.session_state.pop("logout_pending", None)
     client.set_token(token)
     cookie_manager.set(
         AUTH_COOKIE_NAME,
@@ -106,8 +141,9 @@ def persist_token(token: str) -> None:
 
 def clear_authentication() -> None:
     client.logout()
-    cookie_manager.delete(AUTH_COOKIE_NAME, key="delete_auth_cookie")
-    st.session_state.clear()
+    st.session_state["logout_pending"] = True
+    for key in ("me", "balance", "active_page"):
+        st.session_state.pop(key, None)
 
 
 def refresh_account() -> None:
@@ -149,21 +185,53 @@ def render_sidebar() -> str:
     me = st.session_state.get("me") or {}
     balance = st.session_state.get("balance") or {}
     with st.sidebar:
-        st.subheader(me.get("login", "Пользователь"))
         role = str(me.get("role", "")).lower()
-        st.caption(ROLE_LABELS.get(role, role))
-        st.metric("Баланс", balance.get("balance", "0.00"))
-        if st.button("Обновить баланс", use_container_width=True):
-            refresh_account()
-            st.rerun()
+        st.markdown(
+            (
+                "<div class='sidebar-profile'>"
+                f"{html.escape(str(me.get('login', 'Пользователь')))}"
+                f" <span>· {html.escape(ROLE_LABELS.get(role, role))}</span>"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+        if role in {"publisher", "admin"}:
+            try:
+                balance_value = Decimal(str(balance.get("balance", "0")))
+                balance_text = (
+                    str(int(balance_value))
+                    if balance_value == balance_value.to_integral_value()
+                    else format(balance_value.normalize(), "f")
+                )
+            except (InvalidOperation, ValueError):
+                balance_text = str(balance.get("balance", "0"))
+            balance_col, refresh_col = st.columns([5, 1], vertical_alignment="center")
+            with balance_col:
+                st.markdown(
+                    (
+                        "<div class='organization-balance'>"
+                        "Баланс организации · "
+                        f"<strong>{balance_text}</strong>"
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+            with refresh_col:
+                if st.button(
+                    "↻",
+                    key="refresh-balance",
+                    help="Обновить баланс",
+                    type="tertiary",
+                ):
+                    refresh_account()
+                    st.rerun()
         if st.button("Выйти", use_container_width=True):
             clear_authentication()
             st.rerun()
 
         pages = ["Search"]
         if role in {"publisher", "admin"}:
-            pages.append("News")
-        pages.extend(["History", "Transactions"])
+            pages.extend(["News", "Transactions"])
         if role == "admin":
             pages.append("Admin")
 
@@ -187,90 +255,89 @@ def render_sidebar() -> str:
 
 
 def render_news() -> None:
-    st.header("Добавление новостей")
-    manual_tab, file_tab = st.tabs(["Вручную", "Из файла"])
+    st.header("Новости")
+    my_news_tab, manual_tab, file_tab = st.tabs(
+        ["Мои новости", "Добавить вручную", "Импорт из файла"]
+    )
+    with my_news_tab:
+        render_my_news(show_header=False)
     with manual_tab:
         render_manual_news_form()
     with file_tab:
         render_news_file_import()
 
-    st.subheader("Мои добавленные новости")
-    try:
-        history = client.list_news_history()
-        if history:
-            st.dataframe(pd.DataFrame(history), use_container_width=True, hide_index=True)
-            drafts = [item for item in history if item.get("visibility") == "draft"]
-            if drafts:
-                draft_by_label = {
-                    f"{item['title']} · {item['article_id']}": item["article_id"]
-                    for item in drafts
-                }
-                selected_labels = st.multiselect(
-                    "Drafts to publish",
-                    list(draft_by_label),
-                )
-                if st.button(
-                    "Publish selected",
-                    disabled=not selected_labels,
-                    use_container_width=True,
-                ):
-                    try:
-                        result = client.publish_news_batch(
-                            [draft_by_label[label] for label in selected_labels]
-                        )
-                        refresh_account()
-                        st.success(
-                            f"Published {result['published_count']} articles "
-                            f"(job {result['job_id']})"
-                        )
-                        st.rerun()
-                    except ApiError as exc:
-                        st.error(str(exc))
-            else:
-                st.caption("No drafts available for publication.")
-        else:
-            st.info("No user-added news yet.")
-    except ApiError as exc:
-        st.error(str(exc))
-
 
 def render_manual_news_form() -> None:
+    manual_now = datetime.now(MOSCOW_TIMEZONE)
+    use_current_time = st.checkbox(
+        "Использовать текущие дату и время",
+        value=True,
+        key="manual-news-current-time",
+    )
     with st.form("add_news_form"):
-        title = st.text_input("Title")
-        content = st.text_area("Content", height=260)
+        title = st.text_input("Заголовок")
+        content = st.text_area("Текст новости", height=260)
         col_url, col_lang = st.columns([3, 1])
-        url = col_url.text_input("URL")
-        language = col_lang.text_input("Language", placeholder="ru")
-        published_at = st.text_input(
-            "Published at (ISO 8601)",
-            value=datetime.now(UTC).isoformat(),
+        url = col_url.text_input("Ссылка на источник")
+        language = col_lang.selectbox(
+            "Язык",
+            ["Русский", "Английский"],
         )
-        summary = st.text_area("Summary", height=100)
-        publish_immediately = st.checkbox("Publish immediately")
+        st.caption("Дата публикации (московское время)")
+        col_date, col_time = st.columns(2)
+        published_date = col_date.date_input(
+            "Дата",
+            value=manual_now.date(),
+            min_value=date(1900, 1, 1),
+            max_value=date(2100, 12, 31),
+            format="DD.MM.YYYY",
+            disabled=use_current_time,
+        )
+        published_time = col_time.time_input(
+            "Время",
+            value=manual_now.time().replace(second=0, microsecond=0),
+            step=60,
+            disabled=use_current_time,
+        )
+        summary = st.text_area("Краткое описание", height=100)
+        publish_immediately = st.checkbox("Опубликовать сразу")
         submitted = st.form_submit_button(
-            "Save and publish" if publish_immediately else "Save draft"
+            "Сохранить и опубликовать"
+            if publish_immediately
+            else "Сохранить черновик",
+            type="primary",
         )
 
     if submitted:
+        published_at = (
+            datetime.now(MOSCOW_TIMEZONE)
+            if use_current_time
+            else datetime.combine(
+                published_date,
+                published_time,
+                tzinfo=MOSCOW_TIMEZONE,
+            )
+        )
         payload = {
             "title": title,
             "content": content,
             "summary": summary or None,
             "url": url or None,
             "canonical_url": url or None,
-            "language": language or None,
-            "published_at": published_at,
+            "language": {"Русский": "ru", "Английский": "en"}[language],
+            "published_at": published_at.isoformat(),
             "publish_immediately": publish_immediately,
         }
         try:
             result = client.add_news(payload)
             if result.get("job_id"):
                 refresh_account()
-                st.success(
-                    f"Published: {result['article_id']} (job {result['job_id']})"
+                st.session_state["my_news_notice"] = (
+                    "Новость сохранена и отправлена на публикацию."
                 )
             else:
-                st.success(f"Draft saved: {result['article_id']}")
+                st.session_state["my_news_notice"] = "Черновик сохранён."
+            st.rerun()
         except ApiError as exc:
             st.error(str(exc))
 
@@ -337,7 +404,7 @@ def render_search() -> None:
             placeholder="Например: новости Санкт-Петербурга",
         )
         with st.expander("Дополнительные параметры"):
-            col_topk, col_lang, col_novelty = st.columns(3)
+            col_topk, col_lang, col_relevance, col_novelty = st.columns(4)
             top_k = col_topk.number_input(
                 "Количество результатов",
                 min_value=1,
@@ -347,6 +414,17 @@ def render_search() -> None:
             language_label = col_lang.selectbox(
                 "Язык",
                 ["Любой", "Русский", "Английский"],
+            )
+            min_relevance = col_relevance.number_input(
+                "Минимальная релевантность",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.5,
+                step=0.05,
+                help=(
+                    "Результаты с меньшим сходством будут исключены. "
+                    "Для текущей модели значения ниже 0.4 обычно нерелевантны."
+                ),
             )
             min_novelty = col_novelty.number_input(
                 "Минимальная новизна",
@@ -416,6 +494,7 @@ def render_search() -> None:
             "language": language,
             "published_from": published_from.isoformat() if published_from else None,
             "published_to": published_to.isoformat() if published_to else None,
+            "min_relevance": float(min_relevance),
             "min_novelty_score": float(min_novelty) if min_novelty > 0 else None,
         }
         try:
@@ -623,31 +702,190 @@ def escape_markdown(value: str) -> str:
     return value
 
 
-def render_history() -> None:
-    left, right = st.columns(2)
-    with left:
-        st.subheader("История новостей")
+def render_my_news(*, show_header: bool = True) -> None:
+    if show_header:
+        st.header("Мои новости")
+    notice = st.session_state.pop("my_news_notice", None)
+    if notice:
+        st.toast(notice, icon="✅")
+
+    try:
+        news = client.list_news_history()
+    except ApiError as exc:
+        st.error(str(exc))
+        return
+    if any(item.get("status") in {"pending", "processing"} for item in news):
+        render_processing_my_news()
+        return
+    render_my_news_content(news)
+
+
+@st.fragment(run_every=2)
+def render_processing_my_news() -> None:
+    try:
+        news = client.list_news_history()
+    except ApiError as exc:
+        st.error(str(exc))
+        return
+    render_my_news_content(news)
+    if not any(item.get("status") in {"pending", "processing"} for item in news):
+        st.rerun()
+
+
+def render_my_news_content(news: list[dict]) -> None:
+
+    if not news:
+        st.info("Вы пока не добавили ни одной новости.")
+        return
+
+    visibility_labels = {
+        "draft": "Черновик",
+        "public": "Опубликована",
+    }
+    status_labels = {
+        "not_started": "Не обработана",
+        "pending": "В очереди",
+        "processing": "Обрабатывается",
+        "processed": "Готова",
+        "error": "Ошибка",
+    }
+    novelty_labels = {
+        "significant": "Важная",
+        "minor": "Второстепенная",
+        "duplicate": "Дубликат",
+    }
+    rows = []
+    article_id_by_row: dict[int, str] = {}
+    for row_index, item in enumerate(news):
+        novelty_label = novelty_labels.get(
+            item.get("novelty_label"),
+            item.get("novelty_label") or "—",
+        )
+        if item.get("novelty_needs_review") and item.get("novelty_label"):
+            novelty_label += " · пограничная оценка"
+        rows.append(
+            {
+                "Выбрать": False,
+                "Заголовок": item.get("title"),
+                "Дата публикации": format_search_date(item.get("published_at")),
+                "Доступ": visibility_labels.get(
+                    item.get("visibility"),
+                    item.get("visibility"),
+                ),
+                "Обработка": status_labels.get(item.get("status"), item.get("status")),
+                "Тип": novelty_label,
+                "Вероятность важности": item.get("novelty_score"),
+                "Источник": item.get("url"),
+            }
+        )
+        article_id_by_row[row_index] = item["article_id"]
+
+    edited_rows = st.data_editor(
+        pd.DataFrame(rows),
+        hide_index=True,
+        width="stretch",
+        disabled=[
+            "Заголовок",
+            "Дата публикации",
+            "Доступ",
+            "Обработка",
+            "Тип",
+            "Вероятность важности",
+            "Источник",
+        ],
+        column_config={
+            "Выбрать": st.column_config.CheckboxColumn(
+                "Выбрать",
+                help="Отметьте черновики для публикации",
+                width="small",
+            ),
+            "Источник": st.column_config.LinkColumn("Источник", display_text="Открыть"),
+            "Вероятность важности": st.column_config.NumberColumn(
+                help="Вероятность от 0 до 1; значение от 0.5 считается важной новостью.",
+                format="%.3f",
+            ),
+        },
+        key="my-news-editor",
+    )
+
+    draft_row_indexes = {
+        index
+        for index, item in enumerate(news)
+        if item.get("visibility") == "draft"
+    }
+    if not draft_row_indexes:
+        st.caption("Черновиков для публикации нет.")
+        return
+
+    selected_article_ids = [
+        article_id_by_row[index]
+        for index, selected in enumerate(edited_rows["Выбрать"].tolist())
+        if selected and index in draft_row_indexes
+    ]
+    if st.button(
+        "Опубликовать выбранные",
+        disabled=not selected_article_ids,
+        type="primary",
+    ):
         try:
-            news = client.list_news_history()
-            st.dataframe(pd.DataFrame(news), use_container_width=True, hide_index=True)
+            result = client.publish_news_batch(selected_article_ids)
+            refresh_account()
+            st.session_state["my_news_notice"] = (
+                f"Отправлено на публикацию: {result['published_count']}."
+            )
+            st.rerun()
         except ApiError as exc:
             st.error(str(exc))
-    with right:
-        render_search_history()
 
 
 def render_transactions() -> None:
     st.header("Операции")
+    reason_labels = {
+        "": "Все операции",
+        "news_add": "Публикация новости",
+        "news_search": "Поиск новостей",
+        "credit_add": "Пополнение баланса",
+        "credit_withdraw": "Списание средств",
+    }
     reason = st.selectbox(
-        "Reason",
-        ["", "news_add", "news_search", "credit_add", "credit_withdraw"],
+        "Тип операции",
+        list(reason_labels),
+        format_func=reason_labels.get,
     )
     try:
         transactions = client.list_transactions(reason or None)
         if transactions:
-            st.dataframe(pd.DataFrame(transactions), use_container_width=True, hide_index=True)
+            rows = [
+                {
+                    "Дата": format_search_date(item.get("timestamp")),
+                    "Операция": reason_labels.get(
+                        item.get("reason"),
+                        item.get("reason"),
+                    ),
+                    "Новость": (
+                        f"Пакетная публикация: {item.get('item_count')} новостей"
+                        if item.get("batch_id") and item.get("item_count", 1) > 1
+                        else item.get("reference_title") or "—"
+                    ),
+                    "Источник": item.get("reference_url"),
+                    "Сумма": float(item.get("amount", 0)),
+                }
+                for item in transactions
+            ]
+            st.dataframe(
+                pd.DataFrame(rows),
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    "Сумма": st.column_config.NumberColumn(format="%.2f"),
+                    "Источник": st.column_config.LinkColumn(
+                        "Источник",
+                        display_text="Открыть",
+                    ),
+                },
+            )
         else:
-            st.info("No transactions.")
+            st.info("Операций пока нет.")
     except ApiError as exc:
         st.error(str(exc))
 
@@ -698,8 +936,6 @@ if page == "Search":
     render_search()
 elif page == "News":
     render_news()
-elif page == "History":
-    render_history()
 elif page == "Transactions":
     render_transactions()
 elif page == "Admin":
