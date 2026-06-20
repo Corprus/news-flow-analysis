@@ -17,7 +17,7 @@ AUTH_COOKIE_TTL_DAYS = int(os.getenv("AUTH_COOKIE_TTL_DAYS", "1"))
 MOSCOW_TIMEZONE = timezone(timedelta(hours=3))
 PAGE_LABELS = {
     "Search": "Поиск",
-    "News": "Новости",
+    "News": "Мои новости",
     "Transactions": "Операции",
     "Admin": "Администрирование",
 }
@@ -98,6 +98,17 @@ st.markdown(
         display: flex;
         align-items: center;
         height: 100%;
+        padding-top: 0.8rem;
+    }
+    @media (min-width: 769px) {
+        section[data-testid="stSidebar"] {
+            width: 17.25rem !important;
+            min-width: 17.25rem !important;
+            max-width: 17.25rem !important;
+        }
+        section[data-testid="stSidebar"] > div {
+            width: 17.25rem !important;
+        }
     }
     </style>
     """,
@@ -157,6 +168,16 @@ def parse_decimal(value: str) -> Decimal | None:
     except (InvalidOperation, ValueError):
         return None
     return amount if amount > 0 else None
+
+
+def format_amount(value: object) -> str:
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return str(value)
+    if amount == amount.to_integral_value():
+        return str(int(amount))
+    return format(amount.normalize(), "f")
 
 
 def render_login() -> None:
@@ -255,9 +276,9 @@ def render_sidebar() -> str:
 
 
 def render_news() -> None:
-    st.header("Новости")
+    st.header("Мои новости")
     my_news_tab, manual_tab, file_tab = st.tabs(
-        ["Мои новости", "Добавить вручную", "Импорт из файла"]
+        ["Список", "Публикация новости", "Импорт новостей"]
     )
     with my_news_tab:
         render_my_news(show_header=False)
@@ -605,14 +626,20 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
                     if item.get("novelty_label") != "duplicate"
                 ][:3]
             )
-            for item in visible_items:
-                render_search_article(item)
+            for item_index, item in enumerate(visible_items):
+                render_search_article(
+                    item,
+                    key_prefix=(
+                        f"{key_prefix}-{cluster.get('cluster_id')}-"
+                        f"{cluster_index}-{item_index}"
+                    ),
+                )
             hidden_count = len(items) - len(visible_items)
             if hidden_count > 0 and not show_all:
                 st.caption(f"Скрыто публикаций: {hidden_count}")
 
 
-def render_search_article(item: dict) -> None:
+def render_search_article(item: dict, *, key_prefix: str) -> None:
     title = html.escape(str(item.get("title") or "Без названия"))
     novelty_label = item.get("novelty_label")
     is_significant = novelty_label == "significant"
@@ -620,7 +647,7 @@ def render_search_article(item: dict) -> None:
     if item.get("score") is not None:
         details.append(f"релевантность {float(item['score']):.3f}")
     if item.get("p_significant") is not None:
-        details.append(f"значимость {float(item['p_significant']):.3f}")
+        details.append(f"важность {float(item['p_significant']):.0%}")
     metadata = html.escape(" · ".join(detail for detail in details if detail))
     title_style = "font-weight:700;color:#f0f2f6" if is_significant else (
         "font-weight:500;color:#a6adb7"
@@ -647,7 +674,7 @@ def render_search_article(item: dict) -> None:
         if is_long:
             preview = article_text[:preview_limit].rsplit(" ", 1)[0]
             article_id = str(item.get("article_id"))
-            state_key = f"article-expanded-{article_id}"
+            state_key = f"article-expanded-{key_prefix}-{article_id}"
             is_expanded = st.session_state.get(state_key, False)
             visible_text = article_text if is_expanded else preview + "…"
             st.markdown(
@@ -656,7 +683,7 @@ def render_search_article(item: dict) -> None:
             )
             if st.button(
                 "Свернуть ↑" if is_expanded else "Читать далее →",
-                key=f"read-more-{article_id}",
+                key=f"read-more-{key_prefix}-{article_id}",
                 type="tertiary",
             ):
                 st.session_state[state_key] = not is_expanded
@@ -733,15 +760,10 @@ def render_processing_my_news() -> None:
 
 
 def render_my_news_content(news: list[dict]) -> None:
-
     if not news:
         st.info("Вы пока не добавили ни одной новости.")
         return
 
-    visibility_labels = {
-        "draft": "Черновик",
-        "public": "Опубликована",
-    }
     status_labels = {
         "not_started": "Не обработана",
         "pending": "В очереди",
@@ -754,88 +776,315 @@ def render_my_news_content(news: list[dict]) -> None:
         "minor": "Второстепенная",
         "duplicate": "Дубликат",
     }
-    rows = []
-    article_id_by_row: dict[int, str] = {}
-    for row_index, item in enumerate(news):
-        novelty_label = novelty_labels.get(
-            item.get("novelty_label"),
-            item.get("novelty_label") or "—",
-        )
-        if item.get("novelty_needs_review") and item.get("novelty_label"):
-            novelty_label += " · пограничная оценка"
-        rows.append(
+    manual_label_options = {
+        None: "Автоматически",
+        **novelty_labels,
+    }
+    manual_label_values = {
+        label: value for value, label in manual_label_options.items()
+    }
+
+    drafts = [item for item in news if item.get("visibility") == "draft"]
+    published = [item for item in news if item.get("visibility") == "public"]
+    archived = [item for item in news if item.get("visibility") == "archived"]
+
+    st.subheader(f"Черновики · {len(drafts)}")
+    if drafts:
+        draft_rows = [
             {
                 "Выбрать": False,
                 "Заголовок": item.get("title"),
                 "Дата публикации": format_search_date(item.get("published_at")),
-                "Доступ": visibility_labels.get(
-                    item.get("visibility"),
-                    item.get("visibility"),
-                ),
-                "Обработка": status_labels.get(item.get("status"), item.get("status")),
-                "Тип": novelty_label,
-                "Вероятность важности": item.get("novelty_score"),
-                "Источник": item.get("url"),
+                "Источник": item.get("url") or "",
             }
+            for item in drafts
+        ]
+        edited_drafts = st.data_editor(
+            pd.DataFrame(draft_rows),
+            hide_index=True,
+            width="stretch",
+            disabled=["Заголовок", "Дата публикации", "Источник"],
+            column_config={
+                "Выбрать": st.column_config.CheckboxColumn(
+                    "Выбрать",
+                    help="Отметьте черновики для публикации или удаления",
+                    width="small",
+                ),
+                "Заголовок": st.column_config.TextColumn("Заголовок", width="large"),
+                "Дата публикации": st.column_config.TextColumn(
+                    "Дата публикации",
+                    width="small",
+                ),
+                "Источник": st.column_config.LinkColumn(
+                    "Источник",
+                    display_text="Открыть",
+                    width="small",
+                ),
+            },
+            key="my-news-drafts-editor",
         )
-        article_id_by_row[row_index] = item["article_id"]
-
-    edited_rows = st.data_editor(
-        pd.DataFrame(rows),
-        hide_index=True,
-        width="stretch",
-        disabled=[
-            "Заголовок",
-            "Дата публикации",
-            "Доступ",
-            "Обработка",
-            "Тип",
-            "Вероятность важности",
-            "Источник",
-        ],
-        column_config={
-            "Выбрать": st.column_config.CheckboxColumn(
-                "Выбрать",
-                help="Отметьте черновики для публикации",
-                width="small",
-            ),
-            "Источник": st.column_config.LinkColumn("Источник", display_text="Открыть"),
-            "Вероятность важности": st.column_config.NumberColumn(
-                help="Вероятность от 0 до 1; значение от 0.5 считается важной новостью.",
-                format="%.3f",
-            ),
-        },
-        key="my-news-editor",
-    )
-
-    draft_row_indexes = {
-        index
-        for index, item in enumerate(news)
-        if item.get("visibility") == "draft"
-    }
-    if not draft_row_indexes:
-        st.caption("Черновиков для публикации нет.")
-        return
-
-    selected_article_ids = [
-        article_id_by_row[index]
-        for index, selected in enumerate(edited_rows["Выбрать"].tolist())
-        if selected and index in draft_row_indexes
-    ]
-    if st.button(
-        "Опубликовать выбранные",
-        disabled=not selected_article_ids,
-        type="primary",
-    ):
-        try:
-            result = client.publish_news_batch(selected_article_ids)
-            refresh_account()
-            st.session_state["my_news_notice"] = (
-                f"Отправлено на публикацию: {result['published_count']}."
+        selected_article_ids = [
+            drafts[index]["article_id"]
+            for index, selected in enumerate(edited_drafts["Выбрать"].tolist())
+            if selected
+        ]
+        publish_col, delete_col = st.columns([1, 1])
+        with publish_col:
+            if st.button(
+                "Опубликовать выбранные",
+                disabled=not selected_article_ids,
+                type="primary",
+                width="stretch",
+            ):
+                try:
+                    result = client.publish_news_batch(selected_article_ids)
+                    refresh_account()
+                    st.session_state["my_news_notice"] = (
+                        f"Отправлено на публикацию: {result['published_count']}."
+                    )
+                    st.rerun()
+                except ApiError as exc:
+                    st.error(str(exc))
+        with delete_col:
+            confirm_delete = st.checkbox(
+                "Подтверждаю удаление",
+                disabled=not selected_article_ids,
             )
-            st.rerun()
-        except ApiError as exc:
-            st.error(str(exc))
+            if st.button(
+                "Удалить выбранные",
+                disabled=not selected_article_ids or not confirm_delete,
+                width="stretch",
+            ):
+                try:
+                    result = client.delete_news_drafts(selected_article_ids)
+                    st.session_state["my_news_notice"] = (
+                        f"Удалено черновиков: {result['deleted_count']}."
+                    )
+                    st.rerun()
+                except ApiError as exc:
+                    st.error(str(exc))
+    else:
+        st.caption("Черновиков нет.")
+
+    st.subheader(f"Опубликованные · {len(published)}")
+    if published:
+        published_rows = []
+        for item in published:
+            novelty_label = novelty_labels.get(
+                item.get("novelty_label"),
+                item.get("novelty_label") or "—",
+            )
+            if item.get("novelty_needs_review") and item.get("novelty_label"):
+                novelty_label += " · пограничная оценка"
+            published_rows.append(
+                {
+                    "Выбрать": False,
+                    "Заголовок": item.get("title"),
+                    "Дата публикации": format_search_date(item.get("published_at")),
+                    "Обработка": status_labels.get(item.get("status"), item.get("status")),
+                    "Тип модели": novelty_labels.get(
+                        item.get("model_novelty_label"),
+                        item.get("model_novelty_label") or "—",
+                    ),
+                    "Редакторская метка": manual_label_options.get(
+                        item.get("manual_novelty_label"),
+                        "Автоматически",
+                    ),
+                    "Итоговый тип": novelty_label,
+                    "Важность, %": (
+                        round(float(item["novelty_score"]) * 100)
+                        if item.get("novelty_score") is not None
+                        else None
+                    ),
+                    "Источник": item.get("url") or "",
+                }
+            )
+
+        edited_published = st.data_editor(
+            pd.DataFrame(published_rows),
+            hide_index=True,
+            width="stretch",
+            disabled=[
+                "Заголовок",
+                "Дата публикации",
+                "Обработка",
+                "Тип модели",
+                "Итоговый тип",
+                "Важность, %",
+                "Источник",
+            ],
+            column_config={
+                "Выбрать": st.column_config.CheckboxColumn(
+                    "Выбрать",
+                    help="Отметьте новости для повторной обработки или архивирования",
+                    width="small",
+                ),
+                "Заголовок": st.column_config.TextColumn("Заголовок", width="large"),
+                "Дата публикации": st.column_config.TextColumn(
+                    "Дата публикации",
+                    width="small",
+                ),
+                "Важность, %": st.column_config.NumberColumn(
+                    help=(
+                        "Автоматическая оценка модели: насколько вероятно, что "
+                        "новость содержит важное обновление сюжета. "
+                        "От 50% новость считается важной."
+                    ),
+                    min_value=0,
+                    max_value=100,
+                    format="%d%%",
+                    width="small",
+                ),
+                "Редакторская метка": st.column_config.SelectboxColumn(
+                    "Редакторская метка",
+                    help=(
+                        "Заменяет результат модели в поиске. "
+                        "«Автоматически» сбрасывает ручную коррекцию."
+                    ),
+                    options=list(manual_label_values),
+                    required=True,
+                    width="medium",
+                ),
+                "Источник": st.column_config.LinkColumn(
+                    "Источник",
+                    display_text="Открыть",
+                    width="small",
+                ),
+            },
+            key="my-news-published-editor",
+        )
+        selected_published_ids = [
+            published[index]["article_id"]
+            for index, selected in enumerate(edited_published["Выбрать"].tolist())
+            if selected
+        ]
+        label_updates = []
+        for index, selected_label in enumerate(
+            edited_published["Редакторская метка"].tolist()
+        ):
+            new_value = manual_label_values[selected_label]
+            if new_value != published[index].get("manual_novelty_label"):
+                label_updates.append(
+                    {
+                        "article_id": published[index]["article_id"],
+                        "label": new_value,
+                    }
+                )
+
+        save_col, reprocess_col, archive_col = st.columns([1, 1, 1])
+        with save_col:
+            if st.button(
+                "Сохранить метки",
+                disabled=not label_updates,
+                width="stretch",
+            ):
+                try:
+                    result = client.update_news_novelty_labels(label_updates)
+                    st.session_state["my_news_notice"] = (
+                        f"Сохранено редакторских меток: {result['updated_count']}."
+                    )
+                    st.rerun()
+                except ApiError as exc:
+                    st.error(str(exc))
+        with reprocess_col:
+            reprocessable_ids = [
+                published[index]["article_id"]
+                for index, selected in enumerate(
+                    edited_published["Выбрать"].tolist()
+                )
+                if selected
+                and published[index].get("status") in {"processed", "error"}
+            ]
+            if st.button(
+                "Обработать повторно",
+                disabled=not reprocessable_ids,
+                width="stretch",
+                help="Повторно выполнить кластеризацию и автоматическую разметку",
+            ):
+                try:
+                    result = client.reprocess_news(reprocessable_ids)
+                    refresh_account()
+                    st.session_state["my_news_notice"] = (
+                        f"Отправлено на повторную обработку: {result['queued_count']}."
+                    )
+                    st.rerun()
+                except ApiError as exc:
+                    st.error(str(exc))
+        with archive_col:
+            if st.button(
+                "Архивировать выбранные",
+                disabled=not selected_published_ids,
+                width="stretch",
+            ):
+                try:
+                    result = client.archive_news(selected_published_ids)
+                    st.session_state["my_news_notice"] = (
+                        f"Архивировано новостей: {result['updated_count']}."
+                    )
+                    st.rerun()
+                except ApiError as exc:
+                    st.error(str(exc))
+    else:
+        st.caption("Опубликованных новостей пока нет.")
+
+    st.subheader(f"Архивные · {len(archived)}")
+    if archived:
+        archived_rows = [
+            {
+                "Выбрать": False,
+                "Заголовок": item.get("title"),
+                "Дата публикации": format_search_date(item.get("published_at")),
+                "Тип": novelty_labels.get(
+                    item.get("novelty_label"),
+                    item.get("novelty_label") or "—",
+                ),
+                "Источник": item.get("url") or "",
+            }
+            for item in archived
+        ]
+        edited_archived = st.data_editor(
+            pd.DataFrame(archived_rows),
+            hide_index=True,
+            width="stretch",
+            disabled=["Заголовок", "Дата публикации", "Тип", "Источник"],
+            column_config={
+                "Выбрать": st.column_config.CheckboxColumn(
+                    "Выбрать",
+                    help="Отметьте новости для возврата в публикацию",
+                    width="small",
+                ),
+                "Заголовок": st.column_config.TextColumn("Заголовок", width="large"),
+                "Дата публикации": st.column_config.TextColumn(
+                    "Дата публикации",
+                    width="small",
+                ),
+                "Источник": st.column_config.LinkColumn(
+                    "Источник",
+                    display_text="Открыть",
+                    width="small",
+                ),
+            },
+            key="my-news-archived-editor",
+        )
+        selected_archived_ids = [
+            archived[index]["article_id"]
+            for index, selected in enumerate(edited_archived["Выбрать"].tolist())
+            if selected
+        ]
+        if st.button(
+            "Вернуть в публикацию",
+            disabled=not selected_archived_ids,
+        ):
+            try:
+                result = client.restore_news(selected_archived_ids)
+                st.session_state["my_news_notice"] = (
+                    f"Возвращено в публикацию: {result['updated_count']}."
+                )
+                st.rerun()
+            except ApiError as exc:
+                st.error(str(exc))
+    else:
+        st.caption("Архивных новостей нет.")
 
 
 def render_transactions() -> None:
@@ -843,6 +1092,7 @@ def render_transactions() -> None:
     reason_labels = {
         "": "Все операции",
         "news_add": "Публикация новости",
+        "news_reprocess": "Повторная обработка новости",
         "news_search": "Поиск новостей",
         "credit_add": "Пополнение баланса",
         "credit_withdraw": "Списание средств",
@@ -863,12 +1113,17 @@ def render_transactions() -> None:
                         item.get("reason"),
                     ),
                     "Новость": (
-                        f"Пакетная публикация: {item.get('item_count')} новостей"
+                        (
+                            f"Пакетная повторная обработка: "
+                            f"{item.get('item_count')} новостей"
+                            if item.get("reason") == "news_reprocess"
+                            else f"Пакетная публикация: {item.get('item_count')} новостей"
+                        )
                         if item.get("batch_id") and item.get("item_count", 1) > 1
                         else item.get("reference_title") or "—"
                     ),
-                    "Источник": item.get("reference_url"),
-                    "Сумма": float(item.get("amount", 0)),
+                    "Источник": item.get("reference_url") or "",
+                    "Сумма": format_amount(item.get("amount", 0)),
                 }
                 for item in transactions
             ]
@@ -877,11 +1132,21 @@ def render_transactions() -> None:
                 hide_index=True,
                 width="stretch",
                 column_config={
-                    "Сумма": st.column_config.NumberColumn(format="%.2f"),
+                    "Дата": st.column_config.TextColumn("Дата", width="small"),
+                    "Операция": st.column_config.TextColumn(
+                        "Операция",
+                        width="medium",
+                    ),
+                    "Новость": st.column_config.TextColumn(
+                        "Новость",
+                        width="large",
+                    ),
                     "Источник": st.column_config.LinkColumn(
                         "Источник",
                         display_text="Открыть",
+                        width="small",
                     ),
+                    "Сумма": st.column_config.TextColumn("Сумма", width="small"),
                 },
             )
         else:

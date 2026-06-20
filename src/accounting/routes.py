@@ -94,7 +94,11 @@ def get_my_transactions(
     article_ids = [
         transaction.reference_id
         for transaction in transactions
-        if transaction.reason == TransactionReason.NEWS_ADD.value
+        if transaction.reason
+        in {
+            TransactionReason.NEWS_ADD.value,
+            TransactionReason.NEWS_REPROCESS.value,
+        }
         and transaction.reference_id is not None
     ]
     articles = (

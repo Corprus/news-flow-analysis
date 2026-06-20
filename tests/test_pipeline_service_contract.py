@@ -6,7 +6,13 @@ from pydantic import ValidationError
 from api.main import NewsVectorizationJobStatus, NewsVectorizationRequest
 from final_pipeline.result import PipelineResult, PipelineVersions
 from model.significance_model import CatBoostSignificanceModel
-from news.models import ArticlePipelineEmbedding, ArticlePipelineState, ArticleStatus, NewsArticle
+from news.models import (
+    ArticlePipelineEmbedding,
+    ArticlePipelineState,
+    ArticleStatus,
+    ArticleVisibility,
+    NewsArticle,
+)
 from news.pipeline_repository import NewsPipelineRepository
 from news.routes import (
     AddNewsRequest,
@@ -82,6 +88,9 @@ def test_pipeline_storage_uses_bge_m3_vector_dimensions() -> None:
 
     assert embedding_column.type.dimensions == 1024
     assert ArticlePipelineState.__tablename__ == "article_pipeline_state"
+    assert ArticlePipelineState.__table__.c.manual_novelty_label.nullable
+    assert ArticlePipelineState.__table__.c.manual_novelty_actor_id.nullable
+    assert ArticlePipelineState.__table__.c.manual_novelty_updated_at.nullable
 
 
 def test_article_status_contract_and_required_storage_fields() -> None:
@@ -98,6 +107,11 @@ def test_article_status_contract_and_required_storage_fields() -> None:
     assert not NewsArticle.__table__.c.published_at.nullable
     assert not ArticlePipelineState.__table__.c.novelty_label.nullable
     assert not ArticlePipelineState.__table__.c.p_significant.nullable
+    assert {visibility.value for visibility in ArticleVisibility} == {
+        "draft",
+        "public",
+        "archived",
+    }
 
 
 def test_add_news_requires_content_and_timezone_aware_published_at() -> None:

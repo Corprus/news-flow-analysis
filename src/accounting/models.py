@@ -14,6 +14,7 @@ from db.database import Base
 
 class TransactionReason(StrEnum):
     NEWS_ADD = "news_add"
+    NEWS_REPROCESS = "news_reprocess"
     NEWS_SEARCH = "news_search"
     CREDIT_ADD = "credit_add"
     CREDIT_WITHDRAW = "credit_withdraw"

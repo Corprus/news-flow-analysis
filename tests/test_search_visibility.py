@@ -122,6 +122,7 @@ def test_search_returns_all_public_articles_without_publisher_scope(monkeypatch)
     assert result["items"][0]["summary"] == "Short summary"
     assert result["items"][0]["content"] == "Full article text"
     assert "left join article_pipeline_state" in normalized_sql
+    assert "coalesce(s.manual_novelty_label, s.novelty_label)" in normalized_sql
     assert len(result["clusters"]) == 2
     assert result["clusters"][0]["cluster_id"] == "cluster-1"
     assert result["clusters"][0]["representative_article_id"] == (

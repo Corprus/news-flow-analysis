@@ -114,6 +114,42 @@ class ApiClient:
             timeout=120,
         )
 
+    def delete_news_drafts(self, article_ids: list[str]) -> dict:
+        return self._request(
+            "DELETE",
+            "/v1/news",
+            json={"article_ids": article_ids},
+        )
+
+    def archive_news(self, article_ids: list[str]) -> dict:
+        return self._request(
+            "POST",
+            "/v1/news/archive",
+            json={"article_ids": article_ids},
+        )
+
+    def restore_news(self, article_ids: list[str]) -> dict:
+        return self._request(
+            "POST",
+            "/v1/news/restore",
+            json={"article_ids": article_ids},
+        )
+
+    def update_news_novelty_labels(self, updates: list[dict]) -> dict:
+        return self._request(
+            "POST",
+            "/v1/news/moderation-labels",
+            json={"updates": updates},
+        )
+
+    def reprocess_news(self, article_ids: list[str]) -> dict:
+        return self._request(
+            "POST",
+            "/v1/news/reprocess",
+            json={"article_ids": article_ids},
+            timeout=120,
+        )
+
     def list_news_history(self) -> list[dict]:
         return self._request("GET", "/v1/news/me/history")
 

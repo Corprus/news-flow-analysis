@@ -429,7 +429,8 @@ class NewsPipelineRepository:
                 a.id::text, a.title, a.status, a.language, a.novelty_score,
                 a.published_at, 1 - (e.embedding <=> %s::vector) AS score,
                 COALESCE(s.cluster_id, a.id::text) AS cluster_id,
-                s.novelty_label, s.p_significant, a.url, a.summary, a.content
+                COALESCE(s.manual_novelty_label, s.novelty_label) AS novelty_label,
+                s.p_significant, a.url, a.summary, a.content
             FROM article_pipeline_embeddings e
             JOIN news_articles a ON a.id = e.article_id
             LEFT JOIN article_pipeline_state s ON s.article_id = a.id
