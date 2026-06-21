@@ -34,12 +34,12 @@ from config import (
 )
 from formatting import (
     escape_markdown,
-    format_amount,
     format_search_date,
     format_search_result_summary,
-    parse_decimal,
 )
 from navigation import render_sidebar
+from pages.admin import render_admin
+from pages.transactions import render_transactions
 from styles import apply_styles
 
 st.set_page_config(page_title="News Flow", layout="wide")
@@ -920,99 +920,6 @@ def render_my_news_content(news: list[dict]) -> None:
         st.caption("Архивных новостей нет.")
 
 
-def render_transactions() -> None:
-    st.header("Операции")
-    reason_labels = {
-        "": "Все операции",
-        "news_add": "Публикация новости",
-        "news_reprocess": "Повторная обработка новости",
-        "news_search": "Поиск новостей",
-        "credit_add": "Пополнение баланса",
-        "credit_withdraw": "Списание средств",
-    }
-    reason = st.selectbox(
-        "Тип операции",
-        list(reason_labels),
-        format_func=reason_labels.get,
-    )
-    try:
-        transactions = client.list_transactions(reason or None)
-        if transactions:
-            rows = [
-                {
-                    "Дата": format_search_date(item.get("timestamp")),
-                    "Операция": reason_labels.get(
-                        item.get("reason"),
-                        item.get("reason"),
-                    ),
-                    "Новость": (
-                        (
-                            f"Пакетная повторная обработка: "
-                            f"{item.get('item_count')} новостей"
-                            if item.get("reason") == "news_reprocess"
-                            else f"Пакетная публикация: {item.get('item_count')} новостей"
-                        )
-                        if item.get("batch_id") and item.get("item_count", 1) > 1
-                        else item.get("reference_title") or "—"
-                    ),
-                    "Источник": item.get("reference_url") or "",
-                    "Сумма": format_amount(item.get("amount", 0)),
-                }
-                for item in transactions
-            ]
-            st.dataframe(
-                pd.DataFrame(rows),
-                hide_index=True,
-                width="stretch",
-                column_config={
-                    "Дата": st.column_config.TextColumn("Дата", width="small"),
-                    "Операция": st.column_config.TextColumn(
-                        "Операция",
-                        width="medium",
-                    ),
-                    "Новость": st.column_config.TextColumn(
-                        "Новость",
-                        width="large",
-                    ),
-                    "Источник": st.column_config.LinkColumn(
-                        "Источник",
-                        display_text="Открыть",
-                        width="small",
-                    ),
-                    "Сумма": st.column_config.TextColumn("Сумма", width="small"),
-                },
-            )
-        else:
-            st.info("Операций пока нет.")
-    except ApiError as exc:
-        st.error(str(exc))
-
-
-def render_admin() -> None:
-    st.header("Администрирование")
-    try:
-        users = client.list_users()
-    except ApiError as exc:
-        st.error(str(exc))
-        return
-
-    st.dataframe(pd.DataFrame(users), use_container_width=True, hide_index=True)
-    with st.form("credit_form"):
-        organization_id = st.text_input("Organization ID")
-        amount_raw = st.text_input("Amount", value="10.00")
-        submitted = st.form_submit_button("Add credits")
-    if submitted:
-        amount = parse_decimal(amount_raw)
-        if amount is None:
-            st.warning("Invalid amount")
-            return
-        try:
-            client.add_credit(organization_id, amount)
-            st.success("Credits added")
-        except ApiError as exc:
-            st.error(str(exc))
-
-
 if not client.token:
     render_login(client, cookie_manager)
     if not client.token:
@@ -1035,6 +942,6 @@ if page == "Search":
 elif page == "News":
     render_news()
 elif page == "Transactions":
-    render_transactions()
+    render_transactions(client)
 elif page == "Admin":
-    render_admin()
+    render_admin(client)
