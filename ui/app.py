@@ -23,7 +23,7 @@ PAGE_LABELS = {
 }
 ROLE_LABELS = {
     "user": "Пользователь",
-    "publisher": "Публикатор",
+    "publisher": "Редактор",
     "admin": "Администратор",
 }
 NEWS_TABLE_WIDTH = 1520
@@ -109,7 +109,8 @@ st.markdown(
         color: #f0f2f6;
         font-size: 1.05rem;
         font-weight: 600;
-        margin-bottom: 0.5rem;
+        line-height: 1.5rem;
+        margin: 0;
     }
     .sidebar-profile span {
         color: #8b949e;
@@ -132,12 +133,52 @@ st.markdown(
     }
     div.st-key-refresh-balance {
         display: flex;
+        justify-content: flex-end;
         align-items: center;
         height: 100%;
         padding-top: 0.8rem;
     }
-    div.st-key-import-news-file small {
+    [class*="st-key-import-news-file"]
+    [data-testid="stFileUploaderDropzoneInstructions"] {
         display: none;
+    }
+    [class*="st-key-import-news-file"]
+    [data-testid="stFileUploaderDropzone"] {
+        min-height: 2.5rem;
+        height: 2.5rem;
+        padding: 0.2rem 0.75rem;
+        align-items: center;
+    }
+    [class*="st-key-import-news-file"]
+    [data-testid="stFileUploaderDropzone"] button {
+        min-height: 2rem;
+        height: 2rem;
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+    [class*="st-key-import-news-file"]
+    [data-testid="stFileUploaderDropzone"] button p {
+        display: none;
+    }
+    [class*="st-key-import-news-file"]
+    [data-testid="stFileUploaderDropzone"] button::after {
+        content: "Выбрать файл";
+        font-size: 0.875rem;
+        margin-left: 0.4rem;
+    }
+    div.st-key-sidebar-logout button {
+        min-height: auto;
+        padding: 0.15rem 0.25rem;
+        color: #8b949e;
+        font-size: 0.8rem;
+        white-space: nowrap;
+    }
+    div.st-key-sidebar-logout {
+        display: flex;
+        justify-content: flex-start;
+        align-items: center;
+        min-height: 1.5rem;
+        margin-top: 0.75rem;
     }
     @media (min-width: 769px) {
         section[data-testid="stSidebar"] {
@@ -273,7 +314,7 @@ def render_sidebar() -> str:
                 )
             except (InvalidOperation, ValueError):
                 balance_text = str(balance.get("balance", "0"))
-            balance_col, refresh_col = st.columns([5, 1], vertical_alignment="center")
+            balance_col, refresh_col = st.columns([4, 2], vertical_alignment="center")
             with balance_col:
                 st.markdown(
                     (
@@ -293,10 +334,6 @@ def render_sidebar() -> str:
                 ):
                     refresh_account()
                     st.rerun()
-        if st.button("Выйти", use_container_width=True):
-            clear_authentication()
-            st.rerun()
-
         pages = ["Search"]
         if role in {"publisher", "admin"}:
             pages.extend(["News", "Transactions"])
@@ -318,6 +355,15 @@ def render_sidebar() -> str:
             ):
                 st.session_state["active_page"] = page_name
                 st.rerun()
+
+        if st.button(
+            "Выйти",
+            key="sidebar-logout",
+            help="Завершить сеанс",
+            type="tertiary",
+        ):
+            clear_authentication()
+            st.rerun()
 
         return active_page
 
@@ -422,17 +468,20 @@ def render_news_file_import() -> None:
 
     format_by_label = {item["label"]: item for item in formats}
     with st.form("import_news_form"):
-        label = st.selectbox("Формат", list(format_by_label))
-        selected_format = format_by_label[label]
+        file_col, format_col = st.columns([4, 1], vertical_alignment="top")
+        with format_col:
+            label = st.selectbox("Формат", list(format_by_label))
+            selected_format = format_by_label[label]
         extensions = [
             extension.lstrip(".")
             for extension in selected_format.get("file_extensions", [])
         ]
-        uploaded_file = st.file_uploader(
-            "Файл с новостями",
-            type=extensions or None,
-            key="import-news-file",
-        )
+        with file_col:
+            uploaded_file = st.file_uploader(
+                "Файл с новостями",
+                type=extensions or None,
+                key="import-news-file",
+            )
         st.caption("Не более 200 МБ на файл")
         publish_immediately = st.checkbox(
             "Опубликовать сразу",
