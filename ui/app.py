@@ -136,6 +136,9 @@ st.markdown(
         height: 100%;
         padding-top: 0.8rem;
     }
+    div.st-key-import-news-file small {
+        display: none;
+    }
     @media (min-width: 769px) {
         section[data-testid="stSidebar"] {
             width: 17.25rem !important;
@@ -425,7 +428,12 @@ def render_news_file_import() -> None:
             extension.lstrip(".")
             for extension in selected_format.get("file_extensions", [])
         ]
-        uploaded_file = st.file_uploader("Файл с новостями", type=extensions or None)
+        uploaded_file = st.file_uploader(
+            "Файл с новостями",
+            type=extensions or None,
+            key="import-news-file",
+        )
+        st.caption("Не более 200 МБ на файл")
         publish_immediately = st.checkbox(
             "Опубликовать сразу",
             key="import-publish-immediately",

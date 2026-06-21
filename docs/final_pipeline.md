@@ -90,15 +90,15 @@ python scripts/run_final_pipeline.py `
   --device cuda
 ```
 
-## Benchmark
+## Бенчмарк
 
 Для одного и того же набора из 10 000 новостей Lenta.ru сохранены три замера:
 
 | Вариант | Режим | Время обработки | Скорость |
 |---|---|---:|---:|
-| Standalone notebook/script | `full`, включая загрузку модели | 238.93 с | 41.85 новости/с |
-| Docker Compose service pipeline | `full`, модель прогрета | 226.33 с | 44.18 новости/с |
-| Docker Compose service pipeline | `incremental`, пустая история, модель прогрета | 697.71 с | 14.33 новости/с |
+| Автономный ноутбук/скрипт | `full`, включая загрузку модели | 238.93 с | 41.85 новости/с |
+| Пайплайн в Docker Compose | `full`, модель прогрета | 226.33 с | 44.18 новости/с |
+| Пайплайн в Docker Compose | `incremental`, пустая история, модель прогрета | 697.71 с | 14.33 новости/с |
 
 Горячий сервисный `full` практически совпал со standalone pipeline без загрузки
 модели: `238.93 − 13.97 = 224.96` с против `226.33` с. Следовательно, основная
@@ -124,7 +124,7 @@ python scripts/run_final_pipeline.py `
 49.47 с. Полное пользовательское время от начала импорта до статуса `done` составило
 747.47 с.
 
-Standalone benchmark:
+Автономный тест производительности (вне Docker):
 
 ```powershell
 python scripts/benchmark_final_pipeline.py `
@@ -133,7 +133,7 @@ python scripts/benchmark_final_pipeline.py `
   --device cuda
 ```
 
-Service benchmark на тех же ID:
+Тест производительности сервиса на тех же ID:
 
 ```powershell
 python scripts/benchmark_service_pipeline.py --reset-news --timeout 1800
@@ -182,7 +182,7 @@ p_significant
 `p_significant=1.0`: это seed кластера, для которого новизна внутри кластера
 гарантирована по определению.
 
-## Production-контракт результата
+## Контракт результата для промышленной эксплуатации
 
 Полный и инкрементальный режимы возвращают единый `PipelineResult`:
 
@@ -201,9 +201,8 @@ versions
 
 `predictions` содержит только строки, которые вызывающий слой должен записать:
 
-- full — все requested ID;
-- incremental — requested ID и более поздние публикации с пересчитанным novelty при
-  late arrival.
+- full — все запрошенные ID;
+- incremental — запрошенные ID и более поздние публикации с пересчитанной оценкой новизны при позднем поступлении новости.
 
 `embeddings` соответствуют только `embedding_ids`. В incremental-режиме это embeddings
 requested ID; матрица embeddings всей истории наружу не возвращается. `context_ids`

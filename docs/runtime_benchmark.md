@@ -1,4 +1,4 @@
-# Runtime service benchmark
+# Тест производительности сервисов
 
 Измерение выполнено 20 июня 2026 года на чистом demo-запуске:
 
@@ -14,9 +14,9 @@ docker compose up -d --no-build
 
 - Windows 11, Docker Desktop, WSL2;
 - NVIDIA GeForce RTX 4070, 12 GiB VRAM;
-- PyTorch `2.7.1+cu128`, CUDA runtime `12.8`;
-- embedding model: `BAAI/bge-m3`;
-- embedding batch size: `16`;
+- PyTorch `2.7.1+cu128`, среда выполнения CUDA `12.8`;
+- модель эмбеддингов: `BAAI/bge-m3`;
+- размер пачки эмбеддингов: `16`;
 - локальный Hugging Face cache смонтирован через
   `MODEL_SERVICE_HF_CACHE=E:/MLCache/huggingface`;
 - demo corpus: 250 публикаций Lenta.ru;
@@ -80,7 +80,7 @@ pipeline.
 После benchmark все 250 статей остались в статусе `processed`, semantic search
 успешно вернул пять кластеров, API и model-service остались healthy.
 
-## Semantic search
+## Семантический поиск
 
 Две прогретые search jobs завершились за:
 

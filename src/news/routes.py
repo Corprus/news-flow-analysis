@@ -344,7 +344,7 @@ async def import_news(
     if len(content) > MAX_IMPORT_FILE_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Uploaded news file exceeds the 50 MiB limit",
+            detail="Файл с новостями превышает допустимый размер 200 МБ",
         )
     try:
         articles = news_importers.parse(import_format, content)

@@ -1,45 +1,44 @@
-# Service Stack
+# Стек сервисов
 
-Docker Compose starts:
+Docker Compose запускает:
 
-- `api` — stores drafts, publishes news and creates pipeline jobs;
-- `model-service` — runs the final full or incremental pipeline;
-- `rabbitmq` — transports pipeline and semantic-search jobs;
-- `postgres` — stores articles, BGE-M3 vectors and pipeline state through `pgvector`.
+- `api` — хранит черновики, публикует новости и создаёт задания пайплайна;
+- `model-service` — выполняет финальный полный или инкрементальный пайплайн;
+- `rabbitmq` — передаёт задания пайплайна и семантического поиска;
+- `postgres` — хранит статьи, векторы BGE-M3 и состояние пайплайна с помощью `pgvector`.
 
-Docker uses separate dependency sets:
+Для Docker используются отдельные наборы зависимостей:
 
-- `requirements-api.txt` for the lightweight HTTP API;
-- `requirements-model-service.txt` for inference dependencies.
+- `requirements-api.txt` — для облегчённого HTTP API;
+- `requirements-model-service.txt` — для зависимостей инференса.
 
-The model-service uses the pinned
-`pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime` image through Google's
-`mirror.gcr.io` Docker Hub cache and requests the GPU through `gpus: all`.
-The default `PIPELINE_DEVICE=cuda` keeps BGE-M3 vectorization on the GPU.
-The API image remains CPU-only and lightweight.
+`model-service` использует зафиксированный образ
+`pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime` через зеркало Docker Hub
+`mirror.gcr.io` от Google и запрашивает GPU с помощью `gpus: all`.
+Значение `PIPELINE_DEVICE=cuda` по умолчанию оставляет векторизацию BGE-M3 на GPU.
+Образ API остаётся облегчённым и использует только CPU.
 
-The base registry can be overridden without editing the Dockerfile:
+Базовый реестр можно переопределить без изменения Dockerfile:
 
 ```text
 PYTORCH_IMAGE=dockerhub1.beget.com/pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
 ```
 
-Timeweb is another compatible fallback:
+Другой совместимый резервный вариант загрузки — Timeweb:
 
 ```text
 PYTORCH_IMAGE=dockerhub.timeweb.cloud/pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
 ```
 
-An existing host Hugging Face cache can be mounted to avoid downloading BGE-M3
-again:
+Чтобы не загружать BGE-M3 повторно, можно подключить существующий кеш Hugging Face с хоста:
 
 ```text
 MODEL_SERVICE_HF_CACHE=E:/MLCache/huggingface
 ```
 
-If this variable is omitted, Compose uses the managed `model_cache` volume.
+Если переменная не задана, Compose использует управляемый том `model_cache`.
 
-The model service loads:
+Сервис моделей загружает:
 
 ```text
 PIPELINE_MODEL_PATH=/app/data/artifacts/models/final_exp10/final_novelty_model.joblib
@@ -47,44 +46,44 @@ PIPELINE_CONFIG_PATH=/app/data/artifacts/models/final_exp10/final_pipeline_confi
 PIPELINE_DEVICE=
 ```
 
-`PIPELINE_DEVICE` may be set to `cuda` in a GPU-enabled image.
+В образе с поддержкой GPU для `PIPELINE_DEVICE` можно задать значение `cuda`.
 
-Start the stack:
+Запуск стека:
 
 ```bash
 docker compose up --build
 ```
 
-## Demo mode
+## Демо режим
 
-The API has an explicit Python entry point:
+У API есть явная точка входа Python:
 
 ```bash
 python -m api --host 0.0.0.0 --port 8000
 ```
 
-To initialize repeatable demo data and start the API:
+Чтобы инициализировать воспроизводимые демонстрационные данные и запустить API:
 
 ```bash
 python -m api --demo
 ```
 
-Demo mode recreates the application database schema before seeding data and is
-rejected when `APP_ENV` is `prod` or `production`.
+Демонстрационный режим пересоздаёт схему базы данных приложения перед загрузкой начальных данных. Запуск отклоняется, если `APP_ENV` имеет значение `prod` или
+`production`.
 
-With Docker Compose, use the corresponding environment parameters:
+При использовании Docker Compose задайте соответствующий параметр окружения:
 
 ```text
 DEMO_MODE=true
 ```
 
-Then start or recreate the stack:
+Затем запустите или пересоздайте стек:
 
 ```bash
 docker compose up --build
 ```
 
-Demo credentials default to:
+Учётные данные по умолчанию:
 
 ```text
 Demo Research:
@@ -98,33 +97,29 @@ user:      partner_user / partner12345
 admin: admin / admin12345
 ```
 
-The credentials and initial credit are configurable through
-`DEMO_USER_*`, `DEMO_ADMIN_*`, and `DEMO_INITIAL_CREDIT`.
+Учётные данные и начальный кредит настраиваются через `DEMO_USER_*`,
+`DEMO_ADMIN_*` и `DEMO_INITIAL_CREDIT`.
 
-Every API restart with `DEMO_MODE=true` recreates the application schema and
-loads the demo again. Use `DEMO_MODE=false` when the database must persist.
+Каждый перезапуск API с `DEMO_MODE=true` пересоздаёт схему приложения и повторно загружает демонстрационные данные. Если данные в базе должны сохраняться, используйте `DEMO_MODE=false`.
 
-Demo mode imports and publishes the 250-row `data/demo/lenta_demo.csv` fixture.
-The API enqueues one pipeline job for rows that are not processed yet. Search
-becomes useful after model-service finishes that job.
+Демонстрационный режим импортирует и публикует 250 строк из
+`data/demo/lenta_demo.csv`. API ставит в очередь одно задание конвейера для ещё не обработанных строк. После завершения этого задания сервисом моделей они появляются в поисковой выдаче.
 
-Run the end-to-end check with:
+Сквозная проверка:
 
 ```bash
 python scripts/demo_smoke_test.py
 ```
 
-Regenerate the deterministic fixture from the local prepared Lenta corpus with:
+Пересоздание детерминированного набора из локального подготовленного корпуса Lenta:
 
 ```bash
 python scripts/build_demo_fixture.py
 ```
 
-Measured runtime characteristics for the clean Compose startup, cold demo job,
-warm full pipeline and semantic search are recorded in
-[`runtime_benchmark.md`](runtime_benchmark.md).
+Измеренные характеристики чистого запуска Compose, холодного демонстрационного задания, прогретого полного конвейера и семантического поиска приведены в [`runtime_benchmark.md`](runtime_benchmark.md).
 
-Submit a pipeline job for existing article IDs:
+Отправка задания конвейера для существующих идентификаторов статей:
 
 ```bash
 curl -X POST http://localhost/api/v1/news-pipeline \
@@ -132,53 +127,50 @@ curl -X POST http://localhost/api/v1/news-pipeline \
   -d '{"news_ids":["ARTICLE_UUID"],"mode":"incremental"}'
 ```
 
-`mode` is `incremental` or `full`. Check status at
-`/api/v1/news-pipeline/<job_id>`.
+Поле `mode` принимает значение `incremental` или `full`. Статус доступен по адресу`/api/v1/news-pipeline/<job_id>`.
 
-## Article processing contract
+## Контракт обработки статей
 
-RabbitMQ transports only article IDs and the processing mode. `model-service` reads
-the article payload from PostgreSQL and never fetches article content from the network.
+RabbitMQ передаёт только идентификаторы статей и режим обработки. `model-service` читает содержимое статьи из PostgreSQL и никогда не загружает его из сети.
 
-Before publication, `news_articles` must contain non-empty `title` and `content`,
-plus timezone-aware `published_at`.
+Перед публикацией `news_articles` должна содержать непустые `title` и `content`,
+а также `published_at` с указанием часового пояса.
 
-Visibility and processing state are independent:
+Видимость и состояние обработки независимы:
 
 ```text
 visibility: draft | public
 processing: not_started | pending | processing | processed | error
 ```
 
-`POST /api/v1/news` creates `draft/not_started` and does not enqueue work.
-`POST /api/v1/news/{article_id}/publish` changes it to `public/pending` and creates
-the processing job.
+`POST /api/v1/news` создаёт запись `draft/not_started` и не ставит задание в очередь.
+`POST /api/v1/news/{article_id}/publish` переводит её в состояние `public/pending` и создаёт задание обработки.
 
-Job statuses remain independent:
+Статусы задания также независимы:
 
 ```text
 queued -> processing -> done
                      \-> failed
 ```
 
-`processed` is written only after the same database transaction has persisted:
+Статус `processed` записывается только после того, как в рамках той же транзакции базы данных сохранены:
 
-- the BGE-M3 embedding and its model revision;
-- `cluster_id` and assignment provenance;
-- `novelty_label`, `p_significant` and review/late-arrival flags;
-- pipeline, model and configuration versions.
+- эмбеддинг BGE-M3 и ревизия его модели;
+- `cluster_id` и происхождение назначения;
+- `novelty_label`, `p_significant`, а также признаки проверки и позднего поступления;
+- версии пайплайна, модели и конфигурации.
 
-The first article in a new cluster is stored as `novelty_label=significant` and
+Первая статья нового кластера сохраняется с `novelty_label=significant` и
 `p_significant=1.0`.
 
-## HTTP API contracts
+## Контракты HTTP API
 
-Adding an article:
+Добавление статьи:
 
 ```json
 {
-  "title": "Required title",
-  "content": "Required extracted article content",
+  "title": "Заголовок (обязательно)",
+  "content": "Текст статьи (обязательно)",
   "published_at": "2026-06-19T12:00:00+03:00",
   "url": "https://example.com/article",
   "canonical_url": "https://example.com/article",
@@ -188,18 +180,12 @@ Adding an article:
 }
 ```
 
-`published_at` must include a UTC offset. Draft creation returns `article_id`,
-`visibility=draft` and `status=not_started`. Publication returns the generic
-processing `job_id`.
+`published_at` должен содержать смещение относительно UTC. При создании черновика возвращаются `article_id`, `visibility=draft` и `status=not_started`. При публикации возвращается общий идентификатор задания обработки `job_id`.
 
-Article history exposes the completed processing fields when available:
-`cluster_id`, `novelty_label`, `novelty_score`, assignment/novelty review flags,
-`late_arrival`, `processed_at` and structured `pipeline_error`.
+История статьи после завершения обработки содержит доступные поля:
+`cluster_id`, `novelty_label`, `novelty_score`, признаки проверки назначения и новизны, `late_arrival`, `processed_at` и структурированную ошибку `pipeline_error`.
 
-`POST /api/v1/news-pipeline` accepts UUID values in `news_ids`. Its status endpoint
-returns `queued|processing|done|failed`, the original request, result and
-`created_at`/`updated_at` timestamps.
+`POST /api/v1/news-pipeline` принимает UUID в поле `news_ids`. Endpoint статуса возвращает `queued|processing|done|failed`, исходный запрос, результат и временные метки `created_at`/`updated_at`.
 
-Semantic search is global. It searches all `public/processed` articles and never
-filters by the user who submitted an article. Drafts are excluded from both search
-and clustering context.
+Семантический поиск является глобальным. Он выполняется по всем статьям в состоянии `public/processed` и не фильтрует результаты по пользователю, отправившему статью.
+Черновики исключены как из поиска, так и из контекста кластеризации.

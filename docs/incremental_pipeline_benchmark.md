@@ -1,4 +1,4 @@
-# Incremental pipeline benchmark
+# Тест производительности инкрементального конвейера
 
 Replay выполнен на `lenta_golden_candidate_pool.csv`:
 
@@ -25,7 +25,7 @@ Replay выполнен на `lenta_golden_candidate_pool.csv`:
 `False-merged incremental clusters` считается среди incremental-кластеров размером
 больше одного.
 
-## Улучшение baseline merge
+## Улучшение слияния кластеров
 
 Добавлено объединение кластеров, когда новая публикация имеет baseline-связь
 `similarity >= 0.82` сразу с несколькими кластерами. Неоднозначный attach ниже этого

@@ -19,7 +19,7 @@ notebooks/08_finetune_bge_m3_embeddings.ipynb
 3. подбор `exp_10` best-candidate attach по silver-positive сигналу;
 4. сравнение final-step моделей на выбранной кластеризации;
 5. экспорт финальной модели и config;
-6. optional ablation с fine-tuned BGE-M3.
+6. необязательное исследование с дообученной BGE-M3.
 
 ## Актуальный результат
 
@@ -102,7 +102,7 @@ title_jaccard_max
 shared_numbers_count
 ```
 
-## Fine-tuned BGE-M3
+## Дообученная BGE-M3
 
 `08_finetune_bge_m3_embeddings.ipynb` обучал BGE-M3 на русских парафразах и
 сохранял модель локально:
@@ -112,8 +112,7 @@ E:\MLCache\news-flow-analysis\models\bge_m3_ru_paraphrase_mnrl
 ```
 
 По текущей финальной конфигурации runtime использует базовый `BAAI/bge-m3`.
-Fine-tuned модель остается ablation/исследовательским результатом, а не частью
-финального inference pipeline.
+Дообученная модель остаётся результатом исследования, а не частью финального пайплайна обработки.
 
 ## Что коммитить
 
