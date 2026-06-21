@@ -39,6 +39,34 @@ class AccountingService:
         )
         return UUID(transaction.id)
 
+    def adjust_credit(
+        self,
+        organization_id: UUID,
+        actor_user_id: UUID,
+        amount: Decimal,
+    ) -> UUID:
+        if amount == 0:
+            raise ValueError("amount must not be zero")
+        if amount != amount.to_integral_value():
+            raise ValueError("amount must be a whole number")
+        if amount > 0:
+            return self.add_credit(organization_id, actor_user_id, amount)
+
+        self._ensure_organization_exists(organization_id)
+        self._ensure_user_exists(actor_user_id)
+        account = self._get_or_create_account_locked(organization_id)
+        if account.balance < -amount:
+            raise InsufficientBalanceError()
+        account.balance += amount
+        transaction = self._create_transaction(
+            organization_id,
+            actor_user_id,
+            amount,
+            TransactionReason.CREDIT_WITHDRAW,
+            None,
+        )
+        return UUID(transaction.id)
+
     def withdraw_credit(
         self,
         user_id: UUID,

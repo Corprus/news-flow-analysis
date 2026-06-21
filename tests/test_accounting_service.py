@@ -186,3 +186,53 @@ def test_batch_id_groups_related_withdrawals(session: Session) -> None:
     ]
     assert len(withdrawals) == 2
     assert {transaction.batch_id for transaction in withdrawals} == {str(batch_id)}
+
+
+def test_admin_adjustment_can_add_and_withdraw_credit(session: Session) -> None:
+    organization_id, admin_id = _create_organization_with_user(
+        session,
+        organization_name="Managed",
+        login="admin",
+    )
+    accounting = AccountingService(session)
+
+    accounting.adjust_credit(organization_id, admin_id, Decimal("15.00"))
+    accounting.adjust_credit(organization_id, admin_id, Decimal("-4"))
+
+    assert accounting.get_balance(organization_id) == Decimal("11.00")
+    transactions = accounting.get_transaction_history(organization_id)
+    assert {transaction.reason for transaction in transactions} == {
+        TransactionReason.CREDIT_ADD.value,
+        TransactionReason.CREDIT_WITHDRAW.value,
+    }
+    _assert_ledger_matches_balance(session, organization_id)
+
+
+def test_admin_adjustment_rejects_overdraft(session: Session) -> None:
+    organization_id, admin_id = _create_organization_with_user(
+        session,
+        organization_name="Managed",
+        login="admin",
+    )
+    accounting = AccountingService(session)
+
+    with pytest.raises(InsufficientBalanceError):
+        accounting.adjust_credit(organization_id, admin_id, Decimal("-1"))
+
+    assert accounting.get_balance(organization_id) == Decimal("0.00")
+    assert _transaction_count(session, organization_id) == 0
+
+
+def test_admin_adjustment_rejects_fractional_amount(session: Session) -> None:
+    organization_id, admin_id = _create_organization_with_user(
+        session,
+        organization_name="Managed",
+        login="admin",
+    )
+    accounting = AccountingService(session)
+
+    with pytest.raises(ValueError, match="whole number"):
+        accounting.adjust_credit(organization_id, admin_id, Decimal("1.5"))
+
+    assert accounting.get_balance(organization_id) == Decimal("0.00")
+    assert _transaction_count(session, organization_id) == 0

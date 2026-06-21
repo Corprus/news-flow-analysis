@@ -15,11 +15,20 @@ def render_sidebar(client: ApiClient) -> str:
     balance = st.session_state.get("balance") or {}
     with st.sidebar:
         role = str(me.get("role", "")).lower()
+        organization_name = str(me.get("organization_name", "")).strip()
+        organization_html = (
+            "<div class='sidebar-organization'>"
+            f"{html.escape(organization_name)}"
+            "</div>"
+            if organization_name
+            else ""
+        )
         st.markdown(
             (
                 "<div class='sidebar-profile'>"
                 f"{html.escape(str(me.get('login', 'Пользователь')))}"
                 f" <span>· {html.escape(ROLE_LABELS.get(role, role))}</span>"
+                f"{organization_html}"
                 "</div>"
             ),
             unsafe_allow_html=True,

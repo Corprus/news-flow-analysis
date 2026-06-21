@@ -63,13 +63,18 @@ def refresh_account(client: ApiClient) -> None:
 
 def render_login(client: ApiClient, cookie_manager: object) -> None:
     st.title("News Flow")
-    st.caption("Semantic news search with credits, user-added news, and future event grouping.")
+    st.caption(
+        "Семантический поиск новостей, публикация материалов и группировка событий."
+    )
     with st.form("login_form"):
-        login = st.text_input("Login")
-        password = st.text_input("Password", type="password")
+        login = st.text_input("Логин")
+        password = st.text_input("Пароль", type="password")
         col_login, col_signup = st.columns(2)
-        do_login = col_login.form_submit_button("Sign in", use_container_width=True)
-        do_signup = col_signup.form_submit_button("Create user", use_container_width=True)
+        do_login = col_login.form_submit_button("Войти", width="stretch")
+        do_signup = col_signup.form_submit_button(
+            "Создать пользователя",
+            width="stretch",
+        )
 
     try:
         if do_signup:

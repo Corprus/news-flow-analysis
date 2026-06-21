@@ -54,6 +54,16 @@ div[class*="st-key-read-more-"] button:hover {
     font-size: 0.9rem;
     font-weight: 400;
 }
+.sidebar-organization {
+    color: #8b949e;
+    font-size: 0.85rem;
+    font-weight: 400;
+    line-height: 1.25rem;
+    margin-top: 0.1rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .organization-balance {
     color: #8b949e;
     font-size: 0.85rem;

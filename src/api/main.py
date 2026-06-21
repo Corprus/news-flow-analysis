@@ -15,7 +15,7 @@ from messaging.rabbitmq import RabbitPublisher
 from news.routes import router as news_router
 from news.routes import search_router as news_search_router
 from settings import Settings, get_settings
-from users.routes import auth_router
+from users.routes import admin_router, auth_router, organization_router
 from users.routes import router as users_router
 
 JobStatus = Literal["queued", "processing", "done", "failed"]
@@ -88,6 +88,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="News Flow API", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(users_router)
+app.include_router(organization_router)
+app.include_router(admin_router)
 app.include_router(accounting_router)
 app.include_router(news_router)
 app.include_router(news_search_router)

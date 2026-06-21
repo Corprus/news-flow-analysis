@@ -5,14 +5,22 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from accounting.exceptions import InsufficientBalanceError
 from accounting.models import TransactionReason
 from accounting.service import AccountingService
 from news.models import NewsArticle
-from users.deps import CurrentUser, SessionDep, authenticate, ensure_admin
+from users.deps import (
+    CurrentUser,
+    SessionDep,
+    authenticate,
+    ensure_admin,
+    get_admin_audit_service,
+)
+from users.service import AdminAuditService
 
 router = APIRouter(prefix="/v1/accounting", tags=["accounting"])
 
@@ -22,6 +30,11 @@ CurrentUserDep = Annotated[CurrentUser, Depends(authenticate)]
 class AddCreditRequest(BaseModel):
     organization_id: UUID
     amount: Decimal = Field(gt=0)
+
+
+class AdjustCreditRequest(BaseModel):
+    organization_id: UUID
+    amount: Decimal
 
 
 class TransactionIdResponse(BaseModel):
@@ -56,12 +69,63 @@ def add_credit(
     request: AddCreditRequest,
     current_user: CurrentUserDep,
     accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    audit: Annotated[AdminAuditService, Depends(get_admin_audit_service)],
 ) -> TransactionIdResponse:
     ensure_admin(current_user)
     transaction_id = accounting.add_credit(
         request.organization_id,
         current_user.id,
         request.amount,
+    )
+    audit.record(
+        actor_user_id=current_user.id,
+        action="balance.adjust",
+        target_type="organization",
+        target_id=request.organization_id,
+        details={"amount": str(request.amount), "transaction_id": str(transaction_id)},
+    )
+    return TransactionIdResponse(transaction_id=transaction_id)
+
+
+@router.post(
+    "/adjustments",
+    response_model=TransactionIdResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def adjust_credit(
+    request: AdjustCreditRequest,
+    current_user: CurrentUserDep,
+    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    audit: Annotated[AdminAuditService, Depends(get_admin_audit_service)],
+) -> TransactionIdResponse:
+    ensure_admin(current_user)
+    if request.amount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Amount must not be zero",
+        )
+    if request.amount != request.amount.to_integral_value():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Amount must be a whole number",
+        )
+    try:
+        transaction_id = accounting.adjust_credit(
+            request.organization_id,
+            current_user.id,
+            request.amount,
+        )
+    except InsufficientBalanceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Insufficient organization balance",
+        ) from exc
+    audit.record(
+        actor_user_id=current_user.id,
+        action="balance.adjust",
+        target_type="organization",
+        target_id=request.organization_id,
+        details={"amount": str(request.amount), "transaction_id": str(transaction_id)},
     )
     return TransactionIdResponse(transaction_id=transaction_id)
 
