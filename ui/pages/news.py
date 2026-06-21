@@ -235,35 +235,42 @@ def confirm_draft_deletion(client: ApiClient, article_ids: list[str]) -> None:
                 st.error(str(exc))
 
 
+STATUS_LABELS = {
+    "not_started": "Не обработана",
+    "pending": "В очереди",
+    "processing": "Обрабатывается",
+    "processed": "Готова",
+    "error": "Ошибка",
+}
+NOVELTY_LABELS = {
+    "significant": "Важная",
+    "minor": "Второстепенная",
+    "duplicate": "Дубликат",
+}
+MANUAL_LABEL_OPTIONS = {
+    None: "Автоматически",
+    **NOVELTY_LABELS,
+}
+MANUAL_LABEL_VALUES = {
+    label: value for value, label in MANUAL_LABEL_OPTIONS.items()
+}
+
+
 def render_my_news_content(client: ApiClient, news: list[dict]) -> None:
     if not news:
         st.info("Вы пока не добавили ни одной новости.")
         return
 
-    status_labels = {
-        "not_started": "Не обработана",
-        "pending": "В очереди",
-        "processing": "Обрабатывается",
-        "processed": "Готова",
-        "error": "Ошибка",
-    }
-    novelty_labels = {
-        "significant": "Важная",
-        "minor": "Второстепенная",
-        "duplicate": "Дубликат",
-    }
-    manual_label_options = {
-        None: "Автоматически",
-        **novelty_labels,
-    }
-    manual_label_values = {
-        label: value for value, label in manual_label_options.items()
-    }
-
     drafts = [item for item in news if item.get("visibility") == "draft"]
     published = [item for item in news if item.get("visibility") == "public"]
     archived = [item for item in news if item.get("visibility") == "archived"]
 
+    render_drafts(client, drafts)
+    render_published(client, published)
+    render_archived(client, archived)
+
+
+def render_drafts(client: ApiClient, drafts: list[dict]) -> None:
     st.subheader(f"Черновики · {len(drafts)}")
     if drafts:
         if st.session_state.pop("reset-my-news-drafts-select-all", False):
@@ -354,6 +361,8 @@ def render_my_news_content(client: ApiClient, news: list[dict]) -> None:
     else:
         st.caption("Черновиков нет.")
 
+
+def render_published(client: ApiClient, published: list[dict]) -> None:
     st.subheader(f"Опубликованные · {len(published)}")
     if published:
         if st.session_state.pop("reset-my-news-published-select-all", False):
@@ -364,7 +373,7 @@ def render_my_news_content(client: ApiClient, news: list[dict]) -> None:
         )
         published_rows = []
         for item in published:
-            novelty_label = novelty_labels.get(
+            novelty_label = NOVELTY_LABELS.get(
                 item.get("novelty_label"),
                 item.get("novelty_label") or "—",
             )
@@ -375,8 +384,8 @@ def render_my_news_content(client: ApiClient, news: list[dict]) -> None:
                     "Выбрать": select_all_published,
                     "Заголовок": item.get("title"),
                     "Дата публикации": format_search_date(item.get("published_at")),
-                    "Обработка": status_labels.get(item.get("status"), item.get("status")),
-                    "Тип модели": novelty_labels.get(
+                    "Обработка": STATUS_LABELS.get(item.get("status"), item.get("status")),
+                    "Тип модели": NOVELTY_LABELS.get(
                         item.get("model_novelty_label"),
                         (
                             "Возможный дубликат"
@@ -384,7 +393,7 @@ def render_my_news_content(client: ApiClient, news: list[dict]) -> None:
                             else item.get("model_novelty_label") or "—"
                         ),
                     ),
-                    "Редакторская метка": manual_label_options.get(
+                    "Редакторская метка": MANUAL_LABEL_OPTIONS.get(
                         item.get("manual_novelty_label"),
                         "Автоматически",
                     ),
@@ -450,7 +459,7 @@ def render_my_news_content(client: ApiClient, news: list[dict]) -> None:
                         "Заменяет результат модели в поиске. "
                         "«Автоматически» сбрасывает ручную коррекцию."
                     ),
-                    options=list(manual_label_values),
+                    options=list(MANUAL_LABEL_VALUES),
                     required=True,
                     width=PUBLISHED_EDITOR_LABEL_COLUMN_WIDTH,
                 ),
@@ -475,7 +484,7 @@ def render_my_news_content(client: ApiClient, news: list[dict]) -> None:
         for index, selected_label in enumerate(
             edited_published["Редакторская метка"].tolist()
         ):
-            new_value = manual_label_values[selected_label]
+            new_value = MANUAL_LABEL_VALUES[selected_label]
             if new_value != published[index].get("manual_novelty_label"):
                 label_updates.append(
                     {
@@ -542,6 +551,8 @@ def render_my_news_content(client: ApiClient, news: list[dict]) -> None:
     else:
         st.caption("Опубликованных новостей пока нет.")
 
+
+def render_archived(client: ApiClient, archived: list[dict]) -> None:
     st.subheader(f"Архивные · {len(archived)}")
     if archived:
         if st.session_state.pop("reset-my-news-archived-select-all", False):
@@ -555,7 +566,7 @@ def render_my_news_content(client: ApiClient, news: list[dict]) -> None:
                 "Выбрать": select_all_archived,
                 "Заголовок": item.get("title"),
                 "Дата публикации": format_search_date(item.get("published_at")),
-                "Тип": novelty_labels.get(
+                "Тип": NOVELTY_LABELS.get(
                     item.get("novelty_label"),
                     item.get("novelty_label") or "—",
                 ),
