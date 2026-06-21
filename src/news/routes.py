@@ -656,7 +656,7 @@ async def publish_news(
 def get_my_news_history(
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],
-    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    limit: Annotated[int, Query(ge=1, le=10_000)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[NewsArticleHistoryItem]:
     articles = news.list_user_articles(current_user.id, limit, offset)

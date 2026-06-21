@@ -422,7 +422,8 @@ def render_news_file_import() -> None:
                 message += (
                     f". Отправлено на обработку: {result['published_count']}"
                 )
-            st.success(message + ".")
+            st.session_state["my_news_notice"] = message + "."
+            st.rerun()
         except ApiError as exc:
             st.error(str(exc))
 

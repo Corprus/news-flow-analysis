@@ -150,8 +150,12 @@ class ApiClient:
             timeout=120,
         )
 
-    def list_news_history(self) -> list[dict]:
-        return self._request("GET", "/v1/news/me/history")
+    def list_news_history(self, limit: int = 10_000) -> list[dict]:
+        return self._request(
+            "GET",
+            "/v1/news/me/history",
+            params={"limit": limit},
+        )
 
     def search_news(self, payload: dict) -> dict:
         return self._request("POST", "/v1/news-search", json=payload, timeout=60)
