@@ -26,6 +26,42 @@ ROLE_LABELS = {
     "publisher": "Публикатор",
     "admin": "Администратор",
 }
+NEWS_TABLE_WIDTH = 1520
+SELECT_COLUMN_WIDTH = 44
+DATE_COLUMN_WIDTH = 190
+SOURCE_COLUMN_WIDTH = 120
+DRAFT_REVIEW_COLUMN_WIDTH = 250
+DRAFT_TITLE_COLUMN_WIDTH = (
+    NEWS_TABLE_WIDTH
+    - SELECT_COLUMN_WIDTH
+    - DATE_COLUMN_WIDTH
+    - DRAFT_REVIEW_COLUMN_WIDTH
+    - SOURCE_COLUMN_WIDTH
+)
+ARCHIVE_TYPE_COLUMN_WIDTH = 160
+ARCHIVE_TITLE_COLUMN_WIDTH = (
+    NEWS_TABLE_WIDTH
+    - SELECT_COLUMN_WIDTH
+    - DATE_COLUMN_WIDTH
+    - ARCHIVE_TYPE_COLUMN_WIDTH
+    - SOURCE_COLUMN_WIDTH
+)
+PUBLISHED_STATUS_COLUMN_WIDTH = 135
+PUBLISHED_MODEL_TYPE_COLUMN_WIDTH = 160
+PUBLISHED_EDITOR_LABEL_COLUMN_WIDTH = 200
+PUBLISHED_EFFECTIVE_TYPE_COLUMN_WIDTH = 190
+PUBLISHED_IMPORTANCE_COLUMN_WIDTH = 120
+PUBLISHED_TITLE_COLUMN_WIDTH = (
+    NEWS_TABLE_WIDTH
+    - SELECT_COLUMN_WIDTH
+    - DATE_COLUMN_WIDTH
+    - PUBLISHED_STATUS_COLUMN_WIDTH
+    - PUBLISHED_MODEL_TYPE_COLUMN_WIDTH
+    - PUBLISHED_EDITOR_LABEL_COLUMN_WIDTH
+    - PUBLISHED_EFFECTIVE_TYPE_COLUMN_WIDTH
+    - PUBLISHED_IMPORTANCE_COLUMN_WIDTH
+    - SOURCE_COLUMN_WIDTH
+)
 
 st.set_page_config(page_title="News Flow", layout="wide")
 st.markdown(
@@ -770,6 +806,31 @@ def render_processing_my_news() -> None:
         st.rerun()
 
 
+@st.dialog("Безвозвратно удалить черновики?")
+def confirm_draft_deletion(article_ids: list[str]) -> None:
+    count = len(article_ids)
+    suffix = "черновик" if count == 1 else "черновика" if 2 <= count <= 4 else "черновиков"
+    st.warning(
+        f"Это безвозвратно удалит {count} {suffix}. "
+        "Отменить это действие будет нельзя."
+    )
+    cancel_col, delete_col = st.columns(2)
+    with cancel_col:
+        if st.button("Отмена", width="stretch"):
+            st.rerun()
+    with delete_col:
+        if st.button("Удалить", type="primary", width="stretch"):
+            try:
+                result = client.delete_news_drafts(article_ids)
+                st.session_state["my_news_notice"] = (
+                    f"Удалено черновиков: {result['deleted_count']}."
+                )
+                st.session_state["reset-my-news-drafts-select-all"] = True
+                st.rerun()
+            except ApiError as exc:
+                st.error(str(exc))
+
+
 def render_my_news_content(news: list[dict]) -> None:
     if not news:
         st.info("Вы пока не добавили ни одной новости.")
@@ -801,9 +862,15 @@ def render_my_news_content(news: list[dict]) -> None:
 
     st.subheader(f"Черновики · {len(drafts)}")
     if drafts:
+        if st.session_state.pop("reset-my-news-drafts-select-all", False):
+            st.session_state["my-news-drafts-select-all"] = False
+        select_all_drafts = st.checkbox(
+            "Выбрать все черновики",
+            key="my-news-drafts-select-all",
+        )
         draft_rows = [
             {
-                "Выбрать": False,
+                "Выбрать": select_all_drafts,
                 "Заголовок": item.get("title"),
                 "Дата публикации": format_search_date(item.get("published_at")),
                 "Проверка": (
@@ -818,18 +885,21 @@ def render_my_news_content(news: list[dict]) -> None:
         edited_drafts = st.data_editor(
             pd.DataFrame(draft_rows),
             hide_index=True,
-            width="stretch",
+            width=NEWS_TABLE_WIDTH,
             disabled=["Заголовок", "Дата публикации", "Проверка", "Источник"],
             column_config={
                 "Выбрать": st.column_config.CheckboxColumn(
-                    "Выбрать",
+                    "✓",
                     help="Отметьте черновики для публикации или удаления",
-                    width="small",
+                    width=SELECT_COLUMN_WIDTH,
                 ),
-                "Заголовок": st.column_config.TextColumn("Заголовок", width="large"),
+                "Заголовок": st.column_config.TextColumn(
+                    "Заголовок",
+                    width=DRAFT_TITLE_COLUMN_WIDTH,
+                ),
                 "Дата публикации": st.column_config.TextColumn(
                     "Дата публикации",
-                    width="small",
+                    width=DATE_COLUMN_WIDTH,
                 ),
                 "Проверка": st.column_config.TextColumn(
                     "Проверка",
@@ -837,22 +907,22 @@ def render_my_news_content(news: list[dict]) -> None:
                         "Предварительное совпадение по ссылке или тексту. "
                         "Окончательный тип появится после обработки."
                     ),
-                    width="medium",
+                    width=DRAFT_REVIEW_COLUMN_WIDTH,
                 ),
                 "Источник": st.column_config.LinkColumn(
                     "Источник",
                     display_text="Открыть",
-                    width="small",
+                    width=SOURCE_COLUMN_WIDTH,
                 ),
             },
-            key="my-news-drafts-editor",
+            key=f"my-news-drafts-editor-{int(select_all_drafts)}",
         )
         selected_article_ids = [
             drafts[index]["article_id"]
             for index, selected in enumerate(edited_drafts["Выбрать"].tolist())
             if selected
         ]
-        publish_col, delete_col = st.columns([1, 1])
+        publish_col, delete_col = st.columns(2)
         with publish_col:
             if st.button(
                 "Опубликовать выбранные",
@@ -866,32 +936,28 @@ def render_my_news_content(news: list[dict]) -> None:
                     st.session_state["my_news_notice"] = (
                         f"Отправлено на публикацию: {result['published_count']}."
                     )
+                    st.session_state["reset-my-news-drafts-select-all"] = True
                     st.rerun()
                 except ApiError as exc:
                     st.error(str(exc))
         with delete_col:
-            confirm_delete = st.checkbox(
-                "Подтверждаю удаление",
-                disabled=not selected_article_ids,
-            )
             if st.button(
                 "Удалить выбранные",
-                disabled=not selected_article_ids or not confirm_delete,
+                disabled=not selected_article_ids,
                 width="stretch",
             ):
-                try:
-                    result = client.delete_news_drafts(selected_article_ids)
-                    st.session_state["my_news_notice"] = (
-                        f"Удалено черновиков: {result['deleted_count']}."
-                    )
-                    st.rerun()
-                except ApiError as exc:
-                    st.error(str(exc))
+                confirm_draft_deletion(selected_article_ids)
     else:
         st.caption("Черновиков нет.")
 
     st.subheader(f"Опубликованные · {len(published)}")
     if published:
+        if st.session_state.pop("reset-my-news-published-select-all", False):
+            st.session_state["my-news-published-select-all"] = False
+        select_all_published = st.checkbox(
+            "Выбрать все опубликованные",
+            key="my-news-published-select-all",
+        )
         published_rows = []
         for item in published:
             novelty_label = novelty_labels.get(
@@ -902,7 +968,7 @@ def render_my_news_content(news: list[dict]) -> None:
                 novelty_label += " · пограничная оценка"
             published_rows.append(
                 {
-                    "Выбрать": False,
+                    "Выбрать": select_all_published,
                     "Заголовок": item.get("title"),
                     "Дата публикации": format_search_date(item.get("published_at")),
                     "Обработка": status_labels.get(item.get("status"), item.get("status")),
@@ -931,7 +997,7 @@ def render_my_news_content(news: list[dict]) -> None:
         edited_published = st.data_editor(
             pd.DataFrame(published_rows),
             hide_index=True,
-            width="stretch",
+            width=NEWS_TABLE_WIDTH,
             disabled=[
                 "Заголовок",
                 "Дата публикации",
@@ -943,14 +1009,25 @@ def render_my_news_content(news: list[dict]) -> None:
             ],
             column_config={
                 "Выбрать": st.column_config.CheckboxColumn(
-                    "Выбрать",
+                    "✓",
                     help="Отметьте новости для повторной обработки или архивирования",
-                    width="small",
+                    width=SELECT_COLUMN_WIDTH,
                 ),
-                "Заголовок": st.column_config.TextColumn("Заголовок", width="large"),
+                "Заголовок": st.column_config.TextColumn(
+                    "Заголовок",
+                    width=PUBLISHED_TITLE_COLUMN_WIDTH,
+                ),
                 "Дата публикации": st.column_config.TextColumn(
                     "Дата публикации",
-                    width="small",
+                    width=DATE_COLUMN_WIDTH,
+                ),
+                "Обработка": st.column_config.TextColumn(
+                    "Обработка",
+                    width=PUBLISHED_STATUS_COLUMN_WIDTH,
+                ),
+                "Тип модели": st.column_config.TextColumn(
+                    "Тип модели",
+                    width=PUBLISHED_MODEL_TYPE_COLUMN_WIDTH,
                 ),
                 "Важность, %": st.column_config.NumberColumn(
                     help=(
@@ -961,7 +1038,7 @@ def render_my_news_content(news: list[dict]) -> None:
                     min_value=0,
                     max_value=100,
                     format="%d%%",
-                    width="small",
+                    width=PUBLISHED_IMPORTANCE_COLUMN_WIDTH,
                 ),
                 "Редакторская метка": st.column_config.SelectboxColumn(
                     "Редакторская метка",
@@ -971,15 +1048,19 @@ def render_my_news_content(news: list[dict]) -> None:
                     ),
                     options=list(manual_label_values),
                     required=True,
-                    width="medium",
+                    width=PUBLISHED_EDITOR_LABEL_COLUMN_WIDTH,
+                ),
+                "Итоговый тип": st.column_config.TextColumn(
+                    "Итоговый тип",
+                    width=PUBLISHED_EFFECTIVE_TYPE_COLUMN_WIDTH,
                 ),
                 "Источник": st.column_config.LinkColumn(
                     "Источник",
                     display_text="Открыть",
-                    width="small",
+                    width=SOURCE_COLUMN_WIDTH,
                 ),
             },
-            key="my-news-published-editor",
+            key=f"my-news-published-editor-{int(select_all_published)}",
         )
         selected_published_ids = [
             published[index]["article_id"]
@@ -1035,6 +1116,7 @@ def render_my_news_content(news: list[dict]) -> None:
                     st.session_state["my_news_notice"] = (
                         f"Отправлено на повторную обработку: {result['queued_count']}."
                     )
+                    st.session_state["reset-my-news-published-select-all"] = True
                     st.rerun()
                 except ApiError as exc:
                     st.error(str(exc))
@@ -1049,6 +1131,7 @@ def render_my_news_content(news: list[dict]) -> None:
                     st.session_state["my_news_notice"] = (
                         f"Архивировано новостей: {result['updated_count']}."
                     )
+                    st.session_state["reset-my-news-published-select-all"] = True
                     st.rerun()
                 except ApiError as exc:
                     st.error(str(exc))
@@ -1057,9 +1140,15 @@ def render_my_news_content(news: list[dict]) -> None:
 
     st.subheader(f"Архивные · {len(archived)}")
     if archived:
+        if st.session_state.pop("reset-my-news-archived-select-all", False):
+            st.session_state["my-news-archived-select-all"] = False
+        select_all_archived = st.checkbox(
+            "Выбрать все архивные",
+            key="my-news-archived-select-all",
+        )
         archived_rows = [
             {
-                "Выбрать": False,
+                "Выбрать": select_all_archived,
                 "Заголовок": item.get("title"),
                 "Дата публикации": format_search_date(item.get("published_at")),
                 "Тип": novelty_labels.get(
@@ -1073,26 +1162,33 @@ def render_my_news_content(news: list[dict]) -> None:
         edited_archived = st.data_editor(
             pd.DataFrame(archived_rows),
             hide_index=True,
-            width="stretch",
+            width=NEWS_TABLE_WIDTH,
             disabled=["Заголовок", "Дата публикации", "Тип", "Источник"],
             column_config={
                 "Выбрать": st.column_config.CheckboxColumn(
-                    "Выбрать",
+                    "✓",
                     help="Отметьте новости для возврата в публикацию",
-                    width="small",
+                    width=SELECT_COLUMN_WIDTH,
                 ),
-                "Заголовок": st.column_config.TextColumn("Заголовок", width="large"),
+                "Заголовок": st.column_config.TextColumn(
+                    "Заголовок",
+                    width=ARCHIVE_TITLE_COLUMN_WIDTH,
+                ),
                 "Дата публикации": st.column_config.TextColumn(
                     "Дата публикации",
-                    width="small",
+                    width=DATE_COLUMN_WIDTH,
+                ),
+                "Тип": st.column_config.TextColumn(
+                    "Тип",
+                    width=ARCHIVE_TYPE_COLUMN_WIDTH,
                 ),
                 "Источник": st.column_config.LinkColumn(
                     "Источник",
                     display_text="Открыть",
-                    width="small",
+                    width=SOURCE_COLUMN_WIDTH,
                 ),
             },
-            key="my-news-archived-editor",
+            key=f"my-news-archived-editor-{int(select_all_archived)}",
         )
         selected_archived_ids = [
             archived[index]["article_id"]
@@ -1108,6 +1204,7 @@ def render_my_news_content(news: list[dict]) -> None:
                 st.session_state["my_news_notice"] = (
                     f"Возвращено в публикацию: {result['updated_count']}."
                 )
+                st.session_state["reset-my-news-archived-select-all"] = True
                 st.rerun()
             except ApiError as exc:
                 st.error(str(exc))
