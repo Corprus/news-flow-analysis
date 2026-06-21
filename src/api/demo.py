@@ -33,8 +33,6 @@ class DemoUserSpec:
 
 
 def validate_demo_settings(settings: Settings) -> None:
-    if settings.demo_drop_db and not settings.demo_mode:
-        raise RuntimeError("DEMO_DROP_DB requires DEMO_MODE=true")
     if settings.demo_mode and settings.app_env.lower() in {"prod", "production"}:
         raise RuntimeError("Demo mode is disabled in production")
 

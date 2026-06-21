@@ -319,8 +319,9 @@ def create_tables() -> None:
 
 
 def drop_tables() -> None:
-    _import_models()
-    Base.metadata.drop_all(bind=get_engine())
+    with get_engine().begin() as connection:
+        connection.execute(text("DROP SCHEMA public CASCADE"))
+        connection.execute(text("CREATE SCHEMA public"))
 
 
 def _import_models() -> None:

@@ -135,8 +135,16 @@ def get_client() -> ApiClient:
 
 
 client = get_client()
-if st.session_state.get("logout_pending"):
-    cookie_manager.delete(AUTH_COOKIE_NAME, key="delete_auth_cookie")
+if (
+    st.session_state.get("logout_pending")
+    and cookie_manager.get(AUTH_COOKIE_NAME) is not None
+):
+    try:
+        cookie_manager.delete(AUTH_COOKIE_NAME, key="delete_auth_cookie")
+    except KeyError:
+        # CookieManager may receive its asynchronous cookie snapshot between
+        # get() and delete(). The next rerun will retry while logout is pending.
+        pass
 
 
 def persist_token(token: str) -> None:
@@ -375,24 +383,26 @@ def render_news_file_import() -> None:
 
     format_by_label = {item["label"]: item for item in formats}
     with st.form("import_news_form"):
-        label = st.selectbox("Format", list(format_by_label))
+        label = st.selectbox("Формат", list(format_by_label))
         selected_format = format_by_label[label]
         extensions = [
             extension.lstrip(".")
             for extension in selected_format.get("file_extensions", [])
         ]
-        uploaded_file = st.file_uploader("News file", type=extensions or None)
+        uploaded_file = st.file_uploader("Файл с новостями", type=extensions or None)
         publish_immediately = st.checkbox(
-            "Publish immediately",
+            "Опубликовать сразу",
             key="import-publish-immediately",
         )
         submitted = st.form_submit_button(
-            "Import and publish" if publish_immediately else "Import drafts"
+            "Импортировать и опубликовать"
+            if publish_immediately
+            else "Импортировать черновики"
         )
 
     if submitted:
         if uploaded_file is None:
-            st.warning("Select a file to import.")
+            st.warning("Выберите файл для импорта.")
             return
         try:
             result = client.import_news(
@@ -401,16 +411,16 @@ def render_news_file_import() -> None:
                 uploaded_file.getvalue(),
                 publish_immediately=publish_immediately,
             )
-            message = (
-                "Import completed: "
-                f"{result['created_count']} created, "
-                f"{result['duplicate_count']} duplicates linked"
-            )
+            message = f"Импортировано новостей: {result['created_count']}"
+            if result["duplicate_count"]:
+                message += (
+                    f". Возможных дубликатов: {result['duplicate_count']} — "
+                    "они созданы отдельными записями"
+                )
             if result.get("published_count"):
                 refresh_account()
                 message += (
-                    f", {result['published_count']} published "
-                    f"(job {result['job_id']})"
+                    f". Отправлено на обработку: {result['published_count']}"
                 )
             st.success(message + ".")
         except ApiError as exc:
@@ -795,6 +805,11 @@ def render_my_news_content(news: list[dict]) -> None:
                 "Выбрать": False,
                 "Заголовок": item.get("title"),
                 "Дата публикации": format_search_date(item.get("published_at")),
+                "Проверка": (
+                    "Возможный дубликат"
+                    if item.get("possible_duplicate")
+                    else "—"
+                ),
                 "Источник": item.get("url") or "",
             }
             for item in drafts
@@ -803,7 +818,7 @@ def render_my_news_content(news: list[dict]) -> None:
             pd.DataFrame(draft_rows),
             hide_index=True,
             width="stretch",
-            disabled=["Заголовок", "Дата публикации", "Источник"],
+            disabled=["Заголовок", "Дата публикации", "Проверка", "Источник"],
             column_config={
                 "Выбрать": st.column_config.CheckboxColumn(
                     "Выбрать",
@@ -814,6 +829,14 @@ def render_my_news_content(news: list[dict]) -> None:
                 "Дата публикации": st.column_config.TextColumn(
                     "Дата публикации",
                     width="small",
+                ),
+                "Проверка": st.column_config.TextColumn(
+                    "Проверка",
+                    help=(
+                        "Предварительное совпадение по ссылке или тексту. "
+                        "Окончательный тип появится после обработки."
+                    ),
+                    width="medium",
                 ),
                 "Источник": st.column_config.LinkColumn(
                     "Источник",
@@ -884,7 +907,11 @@ def render_my_news_content(news: list[dict]) -> None:
                     "Обработка": status_labels.get(item.get("status"), item.get("status")),
                     "Тип модели": novelty_labels.get(
                         item.get("model_novelty_label"),
-                        item.get("model_novelty_label") or "—",
+                        (
+                            "Возможный дубликат"
+                            if item.get("possible_duplicate")
+                            else item.get("model_novelty_label") or "—"
+                        ),
                     ),
                     "Редакторская метка": manual_label_options.get(
                         item.get("manual_novelty_label"),
@@ -1189,7 +1216,7 @@ if "me" not in st.session_state:
     try:
         refresh_account()
     except ApiError as exc:
-        if exc.status_code == 401:
+        if exc.status_code in {401, 404}:
             clear_authentication()
             st.rerun()
         st.error(str(exc))

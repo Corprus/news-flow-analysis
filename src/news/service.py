@@ -125,6 +125,7 @@ class NewsService:
     ) -> NewsImportResult:
         article_ids: list[str] = []
         created_count = 0
+        duplicate_count = 0
         total_rows = 0
         for imported in articles:
             total_rows += 1
@@ -135,14 +136,17 @@ class NewsService:
                 user_id,
             )
             if existing_article is not None:
-                self._add_submission(existing_article.id, user_id)
-                article_ids.append(existing_article.id)
-                continue
+                duplicate_count += 1
 
             metadata = {
                 "import": {
                     "format": format_id,
                     **(imported.metadata or {}),
+                    **(
+                        {"possible_duplicate_of": existing_article.id}
+                        if existing_article is not None
+                        else {}
+                    ),
                 }
             }
             article = NewsArticle(
@@ -170,7 +174,7 @@ class NewsService:
         return NewsImportResult(
             total_rows=total_rows,
             created_count=created_count,
-            duplicate_count=total_rows - created_count,
+            duplicate_count=duplicate_count,
             article_ids=article_ids,
         )
 

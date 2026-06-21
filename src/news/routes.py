@@ -156,6 +156,7 @@ class NewsArticleHistoryItem(BaseModel):
     late_arrival: bool | None
     processed_at: datetime | None
     pipeline_error: dict | None
+    possible_duplicate: bool
     published_at: datetime
     fetched_at: datetime
     url: str | None
@@ -760,6 +761,7 @@ def _search_vectorization_payload(search_query: NewsSearchQuery) -> dict:
 
 def _article_history_item(article: NewsArticle) -> NewsArticleHistoryItem:
     pipeline_state = article.pipeline_state
+    import_metadata = article.extra_metadata.get("import") or {}
     effective_novelty_label = (
         pipeline_state.manual_novelty_label or pipeline_state.novelty_label
         if pipeline_state
@@ -791,6 +793,7 @@ def _article_history_item(article: NewsArticle) -> NewsArticleHistoryItem:
         late_arrival=pipeline_state.late_arrival if pipeline_state else None,
         processed_at=pipeline_state.processed_at if pipeline_state else None,
         pipeline_error=article.extra_metadata.get("pipeline_error"),
+        possible_duplicate=bool(import_metadata.get("possible_duplicate_of")),
         published_at=article.published_at,
         fetched_at=article.fetched_at,
         url=article.url,

@@ -21,13 +21,6 @@ def make_settings(**overrides) -> Settings:
     return Settings(**values)
 
 
-def test_drop_db_requires_demo_mode() -> None:
-    settings = make_settings(DEMO_DROP_DB=True)
-
-    with pytest.raises(RuntimeError, match="requires DEMO_MODE"):
-        validate_demo_settings(settings)
-
-
 @pytest.mark.parametrize("app_env", ["prod", "production", "PRODUCTION"])
 def test_demo_mode_is_disabled_in_production(app_env: str) -> None:
     settings = make_settings(APP_ENV=app_env, DEMO_MODE=True)

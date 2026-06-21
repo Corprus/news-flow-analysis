@@ -69,14 +69,8 @@ To initialize repeatable demo data and start the API:
 python -m api --demo
 ```
 
-To discard the current database schema before creating the demo:
-
-```bash
-python -m api --demo --drop-db
-```
-
-`--drop-db` requires `--demo`, and demo mode is rejected when `APP_ENV` is
-`prod` or `production`.
+Demo mode recreates the application database schema before seeding data and is
+rejected when `APP_ENV` is `prod` or `production`.
 
 With Docker Compose, use the corresponding environment parameters:
 
@@ -107,17 +101,8 @@ admin: admin / admin12345
 The credentials and initial credit are configurable through
 `DEMO_USER_*`, `DEMO_ADMIN_*`, and `DEMO_INITIAL_CREDIT`.
 
-To repeat the Docker demo from a clean database, remove only this Compose
-project's containers and volumes before starting it:
-
-```bash
-docker compose down -v
-docker compose up -d --no-build
-```
-
-The API container always receives `DEMO_DROP_DB=false`, so its restart cannot
-erase the database. `--demo --drop-db` remains available only for an explicit
-non-Docker local launch.
+Every API restart with `DEMO_MODE=true` recreates the application schema and
+loads the demo again. Use `DEMO_MODE=false` when the database must persist.
 
 Demo mode imports and publishes the 250-row `data/demo/lenta_demo.csv` fixture.
 The API enqueues one pipeline job for rows that are not processed yet. Search
