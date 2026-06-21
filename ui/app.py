@@ -1,33 +1,34 @@
 from __future__ import annotations
 
 import html
-from datetime import UTC, date, datetime, time, timedelta
-from decimal import Decimal, InvalidOperation
+from datetime import date, datetime, time
 
 import extra_streamlit_components as stx
 import pandas as pd
 import streamlit as st
 
-from api_client import ApiClient, ApiError
+from api_client import ApiError
+from auth import (
+    clear_authentication,
+    clear_pending_auth_cookie,
+    get_client,
+    refresh_account,
+    render_login,
+)
 from config import (
-    API_INTERNAL,
     ARCHIVE_TITLE_COLUMN_WIDTH,
     ARCHIVE_TYPE_COLUMN_WIDTH,
-    AUTH_COOKIE_NAME,
-    AUTH_COOKIE_TTL_DAYS,
     DATE_COLUMN_WIDTH,
     DRAFT_REVIEW_COLUMN_WIDTH,
     DRAFT_TITLE_COLUMN_WIDTH,
     MOSCOW_TIMEZONE,
     NEWS_TABLE_WIDTH,
-    PAGE_LABELS,
     PUBLISHED_EDITOR_LABEL_COLUMN_WIDTH,
     PUBLISHED_EFFECTIVE_TYPE_COLUMN_WIDTH,
     PUBLISHED_IMPORTANCE_COLUMN_WIDTH,
     PUBLISHED_MODEL_TYPE_COLUMN_WIDTH,
     PUBLISHED_STATUS_COLUMN_WIDTH,
     PUBLISHED_TITLE_COLUMN_WIDTH,
-    ROLE_LABELS,
     SELECT_COLUMN_WIDTH,
     SOURCE_COLUMN_WIDTH,
 )
@@ -38,164 +39,14 @@ from formatting import (
     format_search_result_summary,
     parse_decimal,
 )
+from navigation import render_sidebar
 from styles import apply_styles
 
 st.set_page_config(page_title="News Flow", layout="wide")
 apply_styles()
 cookie_manager = stx.CookieManager(key="auth_cookie_manager")
-
-
-def get_client() -> ApiClient:
-    logout_pending = st.session_state.get("logout_pending", False)
-    cookie_token = None if logout_pending else cookie_manager.get(AUTH_COOKIE_NAME)
-    if "client" not in st.session_state:
-        st.session_state.client = ApiClient(
-            API_INTERNAL,
-            token=cookie_token,
-        )
-    elif logout_pending:
-        st.session_state.client.logout()
-    elif not st.session_state.client.token and cookie_token:
-        # The cookie component is asynchronous: immediately after F5 its first
-        # render can return no cookies and trigger another run once they load.
-        st.session_state.client.set_token(cookie_token)
-    return st.session_state.client
-
-
-client = get_client()
-if (
-    st.session_state.get("logout_pending")
-    and cookie_manager.get(AUTH_COOKIE_NAME) is not None
-):
-    try:
-        cookie_manager.delete(AUTH_COOKIE_NAME, key="delete_auth_cookie")
-    except KeyError:
-        # CookieManager may receive its asynchronous cookie snapshot between
-        # get() and delete(). The next rerun will retry while logout is pending.
-        pass
-
-
-def persist_token(token: str) -> None:
-    st.session_state.pop("logout_pending", None)
-    client.set_token(token)
-    cookie_manager.set(
-        AUTH_COOKIE_NAME,
-        token,
-        expires_at=datetime.now(UTC) + timedelta(days=AUTH_COOKIE_TTL_DAYS),
-        key="set_auth_cookie",
-    )
-
-
-def clear_authentication() -> None:
-    client.logout()
-    st.session_state["logout_pending"] = True
-    for key in ("me", "balance", "active_page"):
-        st.session_state.pop(key, None)
-
-
-def refresh_account() -> None:
-    st.session_state["me"] = client.get_me()
-    st.session_state["balance"] = client.get_balance()
-
-
-def render_login() -> None:
-    st.title("News Flow")
-    st.caption("Semantic news search with credits, user-added news, and future event grouping.")
-    with st.form("login_form"):
-        login = st.text_input("Login")
-        password = st.text_input("Password", type="password")
-        col_login, col_signup = st.columns(2)
-        do_login = col_login.form_submit_button("Sign in", use_container_width=True)
-        do_signup = col_signup.form_submit_button("Create user", use_container_width=True)
-
-    try:
-        if do_signup:
-            client.create_user(login, password)
-            persist_token(client.login(login, password))
-            refresh_account()
-        if do_login:
-            persist_token(client.login(login, password))
-            refresh_account()
-    except ApiError as exc:
-        st.error(str(exc))
-
-
-def render_sidebar() -> str:
-    me = st.session_state.get("me") or {}
-    balance = st.session_state.get("balance") or {}
-    with st.sidebar:
-        role = str(me.get("role", "")).lower()
-        st.markdown(
-            (
-                "<div class='sidebar-profile'>"
-                f"{html.escape(str(me.get('login', 'Пользователь')))}"
-                f" <span>· {html.escape(ROLE_LABELS.get(role, role))}</span>"
-                "</div>"
-            ),
-            unsafe_allow_html=True,
-        )
-        if role in {"publisher", "admin"}:
-            try:
-                balance_value = Decimal(str(balance.get("balance", "0")))
-                balance_text = (
-                    str(int(balance_value))
-                    if balance_value == balance_value.to_integral_value()
-                    else format(balance_value.normalize(), "f")
-                )
-            except (InvalidOperation, ValueError):
-                balance_text = str(balance.get("balance", "0"))
-            balance_col, refresh_col = st.columns([4, 2], vertical_alignment="center")
-            with balance_col:
-                st.markdown(
-                    (
-                        "<div class='organization-balance'>"
-                        "Баланс организации · "
-                        f"<strong>{balance_text}</strong>"
-                        "</div>"
-                    ),
-                    unsafe_allow_html=True,
-                )
-            with refresh_col:
-                if st.button(
-                    "↻",
-                    key="refresh-balance",
-                    help="Обновить баланс",
-                    type="tertiary",
-                ):
-                    refresh_account()
-                    st.rerun()
-        pages = ["Search"]
-        if role in {"publisher", "admin"}:
-            pages.extend(["News", "Transactions"])
-        if role == "admin":
-            pages.append("Admin")
-
-        active_page = st.session_state.get("active_page", pages[0])
-        if active_page not in pages:
-            active_page = pages[0]
-            st.session_state["active_page"] = active_page
-
-        st.markdown("### Меню")
-        for page_name in pages:
-            if st.button(
-                PAGE_LABELS[page_name],
-                key=f"nav_{page_name.lower()}",
-                type="primary" if page_name == active_page else "secondary",
-                use_container_width=True,
-            ):
-                st.session_state["active_page"] = page_name
-                st.rerun()
-
-        if st.button(
-            "Выйти",
-            key="sidebar-logout",
-            help="Завершить сеанс",
-            type="tertiary",
-        ):
-            clear_authentication()
-            st.rerun()
-
-        return active_page
+client = get_client(cookie_manager)
+clear_pending_auth_cookie(cookie_manager)
 
 
 def render_news() -> None:
@@ -1163,21 +1014,21 @@ def render_admin() -> None:
 
 
 if not client.token:
-    render_login()
+    render_login(client, cookie_manager)
     if not client.token:
         st.stop()
 
 if "me" not in st.session_state:
     try:
-        refresh_account()
+        refresh_account(client)
     except ApiError as exc:
         if exc.status_code in {401, 404}:
-            clear_authentication()
+            clear_authentication(client)
             st.rerun()
         st.error(str(exc))
         st.stop()
 
-page = render_sidebar()
+page = render_sidebar(client)
 
 if page == "Search":
     render_search()
