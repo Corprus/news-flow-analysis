@@ -24,6 +24,16 @@ Incremental pipeline:
 python scripts/benchmark_incremental_pipeline.py --help
 ```
 
+Aggregate throughput of several service workers on an existing corpus:
+
+```powershell
+python scripts/benchmark_parallel_service_pipeline.py --workers 4 --limit 1000
+```
+
+For more than one worker the script submits one non-overlapping `full` job per
+worker. This measures aggregate throughput; clustering is independent inside
+each partition.
+
 ## Проверка артефактов
 
 ```bash

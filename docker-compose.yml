@@ -121,6 +121,55 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
+    deploy:
+      replicas: ${MODEL_SERVICE_GPU_REPLICAS:-1}
+    restart: unless-stopped
+
+  model-service-cpu:
+    image: news-flow-model-service:cpu
+    build:
+      context: .
+      dockerfile: docker/model-service.cpu.Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-news_flow}
+      POSTGRES_USER: ${POSTGRES_USER:-news_flow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-news_flow}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
+      NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
+      PIPELINE_MODEL_PATH: /app/data/artifacts/models/final_exp10/final_novelty_model.joblib
+      PIPELINE_CONFIG_PATH: /app/data/artifacts/models/final_exp10/final_pipeline_config.json
+      PIPELINE_DEVICE: cpu
+      HF_HOME: ${MODEL_SERVICE_HF_HOME:-/app/.cache/huggingface}
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+      HF_TOKEN: ${HF_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    expose:
+      - "8000"
+    volumes:
+      - ./src:/app/src
+      - ./data/artifacts/models/final_exp10:/app/data/artifacts/models/final_exp10:ro
+      - ${MODEL_SERVICE_HF_CACHE:-model_cache}:/app/.cache/huggingface
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()\""]
+      interval: 30s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    deploy:
+      replicas: ${MODEL_SERVICE_CPU_REPLICAS:-0}
     restart: unless-stopped
 
   ui:
