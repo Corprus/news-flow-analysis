@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import html
-import os
-from datetime import UTC, date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
 import extra_streamlit_components as stx
@@ -10,190 +9,39 @@ import pandas as pd
 import streamlit as st
 
 from api_client import ApiClient, ApiError
-
-API_INTERNAL = os.getenv("API_BASE_URL", "http://nginx/api")
-AUTH_COOKIE_NAME = "news_flow_access_token"
-AUTH_COOKIE_TTL_DAYS = int(os.getenv("AUTH_COOKIE_TTL_DAYS", "1"))
-MOSCOW_TIMEZONE = timezone(timedelta(hours=3))
-PAGE_LABELS = {
-    "Search": "Поиск",
-    "News": "Мои новости",
-    "Transactions": "Операции",
-    "Admin": "Администрирование",
-}
-ROLE_LABELS = {
-    "user": "Пользователь",
-    "publisher": "Редактор",
-    "admin": "Администратор",
-}
-NEWS_TABLE_WIDTH = 1520
-SELECT_COLUMN_WIDTH = 44
-DATE_COLUMN_WIDTH = 190
-SOURCE_COLUMN_WIDTH = 120
-DRAFT_REVIEW_COLUMN_WIDTH = 250
-DRAFT_TITLE_COLUMN_WIDTH = (
-    NEWS_TABLE_WIDTH
-    - SELECT_COLUMN_WIDTH
-    - DATE_COLUMN_WIDTH
-    - DRAFT_REVIEW_COLUMN_WIDTH
-    - SOURCE_COLUMN_WIDTH
+from config import (
+    API_INTERNAL,
+    ARCHIVE_TITLE_COLUMN_WIDTH,
+    ARCHIVE_TYPE_COLUMN_WIDTH,
+    AUTH_COOKIE_NAME,
+    AUTH_COOKIE_TTL_DAYS,
+    DATE_COLUMN_WIDTH,
+    DRAFT_REVIEW_COLUMN_WIDTH,
+    DRAFT_TITLE_COLUMN_WIDTH,
+    MOSCOW_TIMEZONE,
+    NEWS_TABLE_WIDTH,
+    PAGE_LABELS,
+    PUBLISHED_EDITOR_LABEL_COLUMN_WIDTH,
+    PUBLISHED_EFFECTIVE_TYPE_COLUMN_WIDTH,
+    PUBLISHED_IMPORTANCE_COLUMN_WIDTH,
+    PUBLISHED_MODEL_TYPE_COLUMN_WIDTH,
+    PUBLISHED_STATUS_COLUMN_WIDTH,
+    PUBLISHED_TITLE_COLUMN_WIDTH,
+    ROLE_LABELS,
+    SELECT_COLUMN_WIDTH,
+    SOURCE_COLUMN_WIDTH,
 )
-ARCHIVE_TYPE_COLUMN_WIDTH = 160
-ARCHIVE_TITLE_COLUMN_WIDTH = (
-    NEWS_TABLE_WIDTH
-    - SELECT_COLUMN_WIDTH
-    - DATE_COLUMN_WIDTH
-    - ARCHIVE_TYPE_COLUMN_WIDTH
-    - SOURCE_COLUMN_WIDTH
+from formatting import (
+    escape_markdown,
+    format_amount,
+    format_search_date,
+    format_search_result_summary,
+    parse_decimal,
 )
-PUBLISHED_STATUS_COLUMN_WIDTH = 135
-PUBLISHED_MODEL_TYPE_COLUMN_WIDTH = 160
-PUBLISHED_EDITOR_LABEL_COLUMN_WIDTH = 200
-PUBLISHED_EFFECTIVE_TYPE_COLUMN_WIDTH = 190
-PUBLISHED_IMPORTANCE_COLUMN_WIDTH = 120
-PUBLISHED_TITLE_COLUMN_WIDTH = (
-    NEWS_TABLE_WIDTH
-    - SELECT_COLUMN_WIDTH
-    - DATE_COLUMN_WIDTH
-    - PUBLISHED_STATUS_COLUMN_WIDTH
-    - PUBLISHED_MODEL_TYPE_COLUMN_WIDTH
-    - PUBLISHED_EDITOR_LABEL_COLUMN_WIDTH
-    - PUBLISHED_EFFECTIVE_TYPE_COLUMN_WIDTH
-    - PUBLISHED_IMPORTANCE_COLUMN_WIDTH
-    - SOURCE_COLUMN_WIDTH
-)
+from styles import apply_styles
 
 st.set_page_config(page_title="News Flow", layout="wide")
-st.markdown(
-    """
-    <style>
-    div[class*="st-key-cluster-expander-"] details > summary p,
-    div[class*="st-key-search-expander-"] details > summary p {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        width: 100%;
-        gap: 1rem;
-    }
-    div[class*="st-key-cluster-expander-"] details > summary p strong,
-    div[class*="st-key-search-expander-"] details > summary p strong {
-        font-weight: 600;
-    }
-    div[class*="st-key-cluster-expander-"] details > summary p,
-    div[class*="st-key-search-expander-"] details > summary p {
-        color: #8b949e;
-        font-size: 0.9em;
-    }
-    div[class*="st-key-cluster-expander-"] details > summary p strong,
-    div[class*="st-key-search-expander-"] details > summary p strong {
-        color: #f0f2f6;
-        font-size: 1.1em;
-    }
-    div[class*="st-key-cluster-expander-"] details > summary p a,
-    div[class*="st-key-search-expander-"] details > summary p a {
-        color: inherit;
-        text-decoration: none;
-    }
-    div[class*="st-key-read-more-"] button {
-        color: #58a6ff;
-        padding: 0;
-        min-height: auto;
-        border: 0;
-        background: transparent;
-    }
-    div[class*="st-key-read-more-"] button:hover {
-        color: #79c0ff;
-        background: transparent;
-    }
-    .sidebar-profile {
-        color: #f0f2f6;
-        font-size: 1.05rem;
-        font-weight: 600;
-        line-height: 1.5rem;
-        margin: 0;
-    }
-    .sidebar-profile span {
-        color: #8b949e;
-        font-size: 0.9rem;
-        font-weight: 400;
-    }
-    .organization-balance {
-        color: #8b949e;
-        font-size: 0.85rem;
-        white-space: nowrap;
-    }
-    .organization-balance strong {
-        color: #d7dbe0;
-        font-size: 0.95rem;
-        font-weight: 600;
-    }
-    div.st-key-refresh-balance button {
-        padding: 0.15rem 0.45rem;
-        min-height: auto;
-    }
-    div.st-key-refresh-balance {
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
-        height: 100%;
-        padding-top: 0.8rem;
-    }
-    [class*="st-key-import-news-file"]
-    [data-testid="stFileUploaderDropzoneInstructions"] {
-        display: none;
-    }
-    [class*="st-key-import-news-file"]
-    [data-testid="stFileUploaderDropzone"] {
-        min-height: 2.5rem;
-        height: 2.5rem;
-        padding: 0.2rem 0.75rem;
-        align-items: center;
-    }
-    [class*="st-key-import-news-file"]
-    [data-testid="stFileUploaderDropzone"] button {
-        min-height: 2rem;
-        height: 2rem;
-        padding-top: 0;
-        padding-bottom: 0;
-    }
-    [class*="st-key-import-news-file"]
-    [data-testid="stFileUploaderDropzone"] button p {
-        display: none;
-    }
-    [class*="st-key-import-news-file"]
-    [data-testid="stFileUploaderDropzone"] button::after {
-        content: "Выбрать файл";
-        font-size: 0.875rem;
-        margin-left: 0.4rem;
-    }
-    div.st-key-sidebar-logout button {
-        min-height: auto;
-        padding: 0.15rem 0.25rem;
-        color: #8b949e;
-        font-size: 0.8rem;
-        white-space: nowrap;
-    }
-    div.st-key-sidebar-logout {
-        display: flex;
-        justify-content: flex-start;
-        align-items: center;
-        min-height: 1.5rem;
-        margin-top: 0.75rem;
-    }
-    @media (min-width: 769px) {
-        section[data-testid="stSidebar"] {
-            width: 17.25rem !important;
-            min-width: 17.25rem !important;
-            max-width: 17.25rem !important;
-        }
-        section[data-testid="stSidebar"] > div {
-            width: 17.25rem !important;
-        }
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+apply_styles()
 cookie_manager = stx.CookieManager(key="auth_cookie_manager")
 
 
@@ -248,24 +96,6 @@ def clear_authentication() -> None:
 def refresh_account() -> None:
     st.session_state["me"] = client.get_me()
     st.session_state["balance"] = client.get_balance()
-
-
-def parse_decimal(value: str) -> Decimal | None:
-    try:
-        amount = Decimal(value.strip())
-    except (InvalidOperation, ValueError):
-        return None
-    return amount if amount > 0 else None
-
-
-def format_amount(value: object) -> str:
-    try:
-        amount = Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return str(value)
-    if amount == amount.to_integral_value():
-        return str(int(amount))
-    return format(amount.normalize(), "f")
 
 
 def render_login() -> None:
@@ -801,36 +631,6 @@ def render_search_article(item: dict, *, key_prefix: str) -> None:
     url = item.get("url")
     if isinstance(url, str) and url.startswith(("http://", "https://")):
         st.markdown(f"[Открыть источник]({url})")
-
-
-def format_search_result_summary(result: dict) -> str:
-    clusters = result.get("clusters") or []
-    if not clusters:
-        return ""
-    publication_count = sum(
-        int(cluster.get("article_count", len(cluster.get("items", []))))
-        for cluster in clusters
-    )
-    return (
-        f'[🗂](# "Количество сюжетов") {len(clusters)}'
-        f' · [📰](# "Количество публикаций") {publication_count}'
-    )
-
-
-def format_search_date(value: str | None, *, date_only: bool = False) -> str:
-    if not value:
-        return ""
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed.strftime("%d.%m.%Y" if date_only else "%d.%m.%Y %H:%M")
-    except (TypeError, ValueError):
-        return str(value)
-
-
-def escape_markdown(value: str) -> str:
-    for character in ("\\", "*", "_", "`", "[", "]"):
-        value = value.replace(character, f"\\{character}")
-    return value
 
 
 def render_my_news(*, show_header: bool = True) -> None:
