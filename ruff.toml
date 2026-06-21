@@ -9,6 +9,9 @@ extend-exclude = [
   "experiments",
 ]
 
+[format]
+preview = true
+
 [lint]
 select = [
   "E",

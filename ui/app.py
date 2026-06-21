@@ -138,47 +138,8 @@ st.markdown(
         height: 100%;
         padding-top: 0.8rem;
     }
-    [class*="st-key-import-news-file"]
-    [data-testid="stFileUploaderDropzoneInstructions"] {
+    div.st-key-import-news-file small {
         display: none;
-    }
-    [class*="st-key-import-news-file"]
-    [data-testid="stFileUploaderDropzone"] {
-        min-height: 2.5rem;
-        height: 2.5rem;
-        padding: 0.2rem 0.75rem;
-        align-items: center;
-    }
-    [class*="st-key-import-news-file"]
-    [data-testid="stFileUploaderDropzone"] button {
-        min-height: 2rem;
-        height: 2rem;
-        padding-top: 0;
-        padding-bottom: 0;
-    }
-    [class*="st-key-import-news-file"]
-    [data-testid="stFileUploaderDropzone"] button p {
-        display: none;
-    }
-    [class*="st-key-import-news-file"]
-    [data-testid="stFileUploaderDropzone"] button::after {
-        content: "Выбрать файл";
-        font-size: 0.875rem;
-        margin-left: 0.4rem;
-    }
-    div.st-key-sidebar-logout button {
-        min-height: auto;
-        padding: 0.15rem 0.25rem;
-        color: #8b949e;
-        font-size: 0.8rem;
-        white-space: nowrap;
-    }
-    div.st-key-sidebar-logout {
-        display: flex;
-        justify-content: flex-start;
-        align-items: center;
-        min-height: 1.5rem;
-        margin-top: 0.75rem;
     }
     @media (min-width: 769px) {
         section[data-testid="stSidebar"] {
@@ -476,12 +437,11 @@ def render_news_file_import() -> None:
             extension.lstrip(".")
             for extension in selected_format.get("file_extensions", [])
         ]
-        with file_col:
-            uploaded_file = st.file_uploader(
-                "Файл с новостями",
-                type=extensions or None,
-                key="import-news-file",
-            )
+        uploaded_file = st.file_uploader(
+            "Файл с новостями",
+            type=extensions or None,
+            key="import-news-file",
+        )
         st.caption("Не более 200 МБ на файл")
         publish_immediately = st.checkbox(
             "Опубликовать сразу",

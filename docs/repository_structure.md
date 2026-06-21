@@ -8,33 +8,32 @@
 ```text
 src/
   api/             внешний FastAPI API
-  model_service/   RabbitMQ consumer, векторизация и semantic search
-  news/            новости, поисковые запросы и работа с embeddings
+  model_service/   RabbitMQ консюмер, векторизация и семантический поиск
+  news/            новости, поисковые запросы и работа с мбеддингами
   users/           пользователи и bearer-аутентификация
   accounting/      баланс и журнал операций
   db/              PostgreSQL, pgvector и модели хранения
-  messaging/       RabbitMQ publisher/consumer
-  services/        загрузка и вызов embedding-модели
-  model/           экспериментальная clustering/novelty логика
-  final_pipeline/  финальный offline/inference pipeline
+  messaging/       издатель и консюмер сообщений RabbitMQ
+  services/        загрузка и вызов модели эмбеддингов
+  model/           экспериментальная логика кластеризации и оценки новизны
+  final_pipeline/  финальный пайплайн
 ```
 
-Сервисный контур использует финальный BGE-M3 novelty pipeline. Детали runtime-контракта
-описаны в основном README.
+Сервисный контур использует финальный пайплайн оценки новизны на BGE-M3. Детали рабочего контракта описаны в основном README.
 
 ## Эксперименты
 
 Ноутбуки находятся в `notebooks/`:
 
-- `01_train_embeddings.ipynb` — ранний эксперимент по дообучению embeddings;
+- `01_train_embeddings.ipynb` — ранний эксперимент по дообучению эмбеддингов;
 - `02_lenta_event_grouping.ipynb` — первичная событийная группировка;
 - `03_data_analysis_and_dataset_preparation.ipynb` — EDA и подготовка данных;
 - `04_evaluate_annotations_and_predictions.ipynb` — оценка разметки и предсказаний;
-- `05_semantic_baseline_model.ipynb` — baseline clustering и novelty classifier;
-- `06_model_improvement_experiments_v3.ipynb` — выбор финального pipeline;
+- `05_semantic_baseline_model.ipynb` — базовая кластеризация и классификатор новизны;
+- `06_model_improvement_experiments_v3.ipynb` — выбор финального конвейера;
 - `07_bronze_annotation_export.ipynb` — подготовка bronze-разметки;
 - `08_finetune_bge_m3_embeddings.ipynb` — ablation с дообучением BGE-M3.
-- `09_search_and_dedup_benchmark.ipynb` — search benchmark и дедупликация Top-10.
+- `09_search_and_dedup_benchmark.ipynb` — тест поиска и дедупликация Top-10.
 
 ## Инфраструктура
 
@@ -47,8 +46,8 @@ ui/                      Streamlit-интерфейс
 
 ## Скрипты
 
-`scripts/` содержит запуск и benchmark финального BGE-M3 pipeline, а также проверку
-runtime model artifacts.
+`scripts/` содержит запуск и тест производительности финального конвейера BGE-M3,
+а также проверку рабочих артефактов модели.
 
 Локальная справка: [`scripts/README.md`](../scripts/README.md).
 
@@ -57,13 +56,13 @@ runtime model artifacts.
 ```text
 data/raw/          исходные датасеты
 data/prepared/     подготовленные выборки
-data/artifacts/    модели, embeddings, разметка и benchmark outputs
-data/predictions/  результаты inference и экспериментов
+data/artifacts/    модели, эмбеддинги, разметка и результаты тестов производительности
+data/predictions/  результаты инференса и экспериментов
 models/            локальные сервисные модели
 ```
 
-Крупные датасеты, caches, checkpoints и predictions обычно исключены из Git. Исключение —
-небольшие runtime-конфиги и явно зафиксированные финальные артефакты, необходимые для
+Крупные датасеты, кеши, контрольные точки и предсказания обычно исключены из Git. Исключение —
+небольшие рабочие конфигурации и явно зафиксированные финальные артефакты, необходимые для
 воспроизводимого запуска.
 
 Подробности: [`data/README.md`](../data/README.md) и

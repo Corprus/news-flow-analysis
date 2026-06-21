@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 MAX_IMPORT_ROWS = 10_000
-MAX_IMPORT_FILE_BYTES = 128 * 1024 * 1024
+MAX_IMPORT_FILE_BYTES = 200 * 1024 * 1024
 
 
 class NewsImportError(ValueError):
