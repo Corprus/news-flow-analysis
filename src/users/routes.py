@@ -26,10 +26,10 @@ from users.exceptions import (
 from users.models import AdminAuditLog, Organization, User, UserRole
 from users.service import AdminAuditService, AuthService, OrganizationService, UserService
 
-router = APIRouter(prefix="/v1/users", tags=["users"])
-auth_router = APIRouter(prefix="/v1/auth", tags=["auth"])
-organization_router = APIRouter(prefix="/v1/organizations", tags=["organizations"])
-admin_router = APIRouter(prefix="/v1/admin", tags=["admin"])
+router = APIRouter(prefix="/users", tags=["users"])
+auth_router = APIRouter(prefix="/auth", tags=["auth"])
+organization_router = APIRouter(prefix="/organizations", tags=["organizations"])
+admin_router = APIRouter(prefix="/admin", tags=["admin"])
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]

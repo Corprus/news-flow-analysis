@@ -76,7 +76,7 @@ class ApiClient:
     def login(self, login: str, password: str) -> str:
         response = self.request(
             "POST",
-            "/v1/auth/login",
+            "/auth/login",
             json={"login": login, "password": password},
         )
         return str(response["access_token"])
@@ -148,7 +148,7 @@ def wait_for_job(
     started = time.perf_counter()
     deadline = started + timeout
     while time.perf_counter() < deadline:
-        job = client.request("GET", f"/v1/news-pipeline/{job_id}")
+        job = client.request("GET", f"/news-pipeline/{job_id}")
         if job["status"] in {"done", "failed"}:
             return job, time.perf_counter() - started
         time.sleep(0.5)
@@ -184,10 +184,10 @@ def main() -> None:
 
         admin_token = client.login("admin", "admin12345")
         publisher_token = client.login("demo", "demo12345")
-        publisher = client.request("GET", "/v1/users/me", token=publisher_token)
+        publisher = client.request("GET", "/users/me", token=publisher_token)
         client.request(
             "POST",
-            "/v1/accounting/credits",
+            "/accounting/credits",
             token=admin_token,
             json={
                 "organization_id": publisher["organization_id"],
@@ -200,7 +200,7 @@ def main() -> None:
         with fixture_path.open("rb") as fixture:
             imported = client.request(
                 "POST",
-                "/v1/news/import",
+                "/news/import",
                 token=publisher_token,
                 data={
                     "format": "lenta",

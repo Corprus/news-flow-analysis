@@ -110,7 +110,7 @@ def main() -> None:
         created = request_json(
             session,
             "POST",
-            f"{base_url}/v1/news-pipeline",
+            f"{base_url}/news-pipeline",
             timeout=30,
             json={"news_ids": partition, "mode": "full"},
         )
@@ -124,7 +124,7 @@ def main() -> None:
             job = request_json(
                 session,
                 "GET",
-                f"{base_url}/v1/news-pipeline/{job_id}",
+                f"{base_url}/news-pipeline/{job_id}",
                 timeout=30,
             )
             if job["status"] in {"done", "failed"}:

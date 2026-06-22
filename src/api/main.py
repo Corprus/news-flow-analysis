@@ -101,7 +101,7 @@ async def health(settings: Annotated[Settings, Depends(get_settings)]) -> dict[s
 
 
 @app.post(
-    "/v1/news-pipeline",
+    "/news-pipeline",
     response_model=NewsVectorizationJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
@@ -123,7 +123,7 @@ async def create_news_vectorization_job(
     return NewsVectorizationJobResponse(job_id=UUID(job_id), status="queued")
 
 
-@app.get("/v1/news-pipeline/{job_id}", response_model=NewsVectorizationJobStatus)
+@app.get("/news-pipeline/{job_id}", response_model=NewsVectorizationJobStatus)
 async def get_news_vectorization_job(
     job_id: UUID,
     repository: Annotated[NewsPipelineJobRepository, Depends(get_repository)],
@@ -143,7 +143,7 @@ async def get_news_vectorization_job(
 
 
 app.add_api_route(
-    "/v1/news-vectorization",
+    "/news-vectorization",
     create_news_vectorization_job,
     methods=["POST"],
     response_model=NewsVectorizationJobResponse,
@@ -152,7 +152,7 @@ app.add_api_route(
     include_in_schema=False,
 )
 app.add_api_route(
-    "/v1/news-vectorization/{job_id}",
+    "/news-vectorization/{job_id}",
     get_news_vectorization_job,
     methods=["GET"],
     response_model=NewsVectorizationJobStatus,

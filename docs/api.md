@@ -9,8 +9,8 @@ OpenAPI-контракт.
 ## Аутентификация и роли
 
 ```text
-POST /api/v1/auth/login
-GET  /api/v1/users/me
+POST /api/auth/login
+GET  /api/users/me
 ```
 
 API использует bearer token. Основные роли:
@@ -22,12 +22,12 @@ API использует bearer token. Основные роли:
 ## Создание и импорт публикаций
 
 ```text
-POST /api/v1/news
-GET  /api/v1/news/import-formats
-POST /api/v1/news/import
+POST /api/news
+GET  /api/news/import-formats
+POST /api/news/import
 ```
 
-`POST /api/v1/news` создаёт черновик. Поле `publish_immediately=true` позволяет
+`POST /api/news` создаёт черновик. Поле `publish_immediately=true` позволяет
 сразу опубликовать его и поставить задачу обработки.
 
 Импорт выполняется multipart-запросом с полями:
@@ -43,14 +43,14 @@ POST /api/v1/news/import
 ## Жизненный цикл статей
 
 ```text
-POST   /api/v1/news/{article_id}/publish
-POST   /api/v1/news/publish
-DELETE /api/v1/news
-POST   /api/v1/news/archive
-POST   /api/v1/news/restore
-POST   /api/v1/news/reprocess
-POST   /api/v1/news/moderation-labels
-GET    /api/v1/news/me/history
+POST   /api/news/{article_id}/publish
+POST   /api/news/publish
+DELETE /api/news
+POST   /api/news/archive
+POST   /api/news/restore
+POST   /api/news/reprocess
+POST   /api/news/moderation-labels
+GET    /api/news/me/history
 ```
 
 Черновики не участвуют в поиске и кластеризации. Публикация списывает стоимость
@@ -62,8 +62,8 @@ GET    /api/v1/news/me/history
 ## Задачи пайплайна
 
 ```text
-POST /api/v1/news-pipeline
-GET  /api/v1/news-pipeline/{job_id}
+POST /api/news-pipeline
+GET  /api/news-pipeline/{job_id}
 ```
 
 Запрос:
@@ -81,7 +81,7 @@ GET  /api/v1/news-pipeline/{job_id}
 ## Семантический поиск
 
 ```text
-POST /api/v1/news-search
+POST /api/news-search
 ```
 
 Поиск асинхронный и выполняется по всем статьям в состоянии
@@ -94,10 +94,10 @@ POST /api/v1/news-search
 ## Учёт операций
 
 ```text
-GET  /api/v1/accounting/me/balance
-GET  /api/v1/accounting/me/transactions
-POST /api/v1/accounting/credits
-GET  /api/v1/accounting/admin/transactions
+GET  /api/accounting/me/balance
+GET  /api/accounting/me/transactions
+POST /api/accounting/credits
+GET  /api/accounting/admin/transactions
 ```
 
 Стоимость публикации задаётся `NEWS_ADD_COST`. Администратор управляет

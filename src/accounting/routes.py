@@ -23,7 +23,7 @@ from users.deps import (
 from users.models import Organization, User
 from users.service import AdminAuditService
 
-router = APIRouter(prefix="/v1/accounting", tags=["accounting"])
+router = APIRouter(prefix="/accounting", tags=["accounting"])
 
 CurrentUserDep = Annotated[CurrentUser, Depends(authenticate)]
 

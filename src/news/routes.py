@@ -31,8 +31,8 @@ from news.service import NewsSearchFilters, NewsService
 from settings import Settings, get_settings
 from users.deps import CurrentUser, SessionDep, authenticate, ensure_publisher
 
-router = APIRouter(prefix="/v1/news", tags=["news"])
-search_router = APIRouter(prefix="/v1/news-search", tags=["news-search"])
+router = APIRouter(prefix="/news", tags=["news"])
+search_router = APIRouter(prefix="/news-search", tags=["news-search"])
 
 CurrentUserDep = Annotated[CurrentUser, Depends(authenticate)]
 

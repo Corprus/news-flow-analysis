@@ -81,7 +81,7 @@ class ApiClient:
     def login(self, login: str, password: str) -> str:
         data = self._request(
             "POST",
-            "/v1/auth/login",
+            "/auth/login",
             json={"login": login, "password": password},
         )
         return data["access_token"]
@@ -89,16 +89,16 @@ class ApiClient:
     def create_user(self, login: str, password: str) -> dict:
         return self._request(
             "POST",
-            "/v1/users",
+            "/users",
             json={"login": login, "password": password},
         )
 
     def get_me(self) -> dict:
-        return self._request("GET", "/v1/users/me")
+        return self._request("GET", "/users/me")
 
     def list_users(self, role: str | None = None) -> list[dict]:
         params = {"role": role} if role else None
-        return self._request("GET", "/v1/users", params=params)
+        return self._request("GET", "/users", params=params)
 
     def create_admin_user(
         self,
@@ -109,7 +109,7 @@ class ApiClient:
     ) -> dict:
         return self._request(
             "POST",
-            "/v1/admin/users",
+            "/admin/users",
             json={
                 "login": login,
                 "password": password,
@@ -121,7 +121,7 @@ class ApiClient:
     def update_user_role(self, user_id: str, role: str) -> dict:
         return self._request(
             "PATCH",
-            f"/v1/users/{user_id}/role",
+            f"/users/{user_id}/role",
             json={"role": role},
         )
 
@@ -135,7 +135,7 @@ class ApiClient:
     ) -> dict:
         return self._request(
             "PATCH",
-            f"/v1/users/{user_id}",
+            f"/users/{user_id}",
             json={
                 "login": login,
                 "role": role,
@@ -144,27 +144,27 @@ class ApiClient:
         )
 
     def delete_user(self, user_id: str) -> None:
-        self._request("DELETE", f"/v1/users/{user_id}")
+        self._request("DELETE", f"/users/{user_id}")
 
     def list_organizations(self) -> list[dict]:
-        return self._request("GET", "/v1/organizations")
+        return self._request("GET", "/organizations")
 
     def create_organization(self, name: str) -> dict:
-        return self._request("POST", "/v1/organizations", json={"name": name})
+        return self._request("POST", "/organizations", json={"name": name})
 
     def update_organization(self, organization_id: str, name: str) -> dict:
         return self._request(
             "PATCH",
-            f"/v1/organizations/{organization_id}",
+            f"/organizations/{organization_id}",
             json={"name": name},
         )
 
     def list_admin_audit(self, action: str | None = None) -> list[dict]:
         params = {"action": action, "limit": 500} if action else {"limit": 500}
-        return self._request("GET", "/v1/admin/audit", params=params)
+        return self._request("GET", "/admin/audit", params=params)
 
     def get_balance(self) -> dict:
-        return self._request("GET", "/v1/accounting/me/balance")
+        return self._request("GET", "/accounting/me/balance")
 
     def list_transactions(
         self,
@@ -176,31 +176,31 @@ class ApiClient:
         if reason:
             params["reason"] = reason
         path = (
-            "/v1/accounting/admin/transactions"
+            "/accounting/admin/transactions"
             if admin
-            else "/v1/accounting/me/transactions"
+            else "/accounting/me/transactions"
         )
         return self._request("GET", path, params=params)
 
     def add_credit(self, organization_id: str, amount: Decimal) -> dict:
         return self._request(
             "POST",
-            "/v1/accounting/credits",
+            "/accounting/credits",
             json={"organization_id": organization_id, "amount": str(amount)},
         )
 
     def adjust_credit(self, organization_id: str, amount: Decimal) -> dict:
         return self._request(
             "POST",
-            "/v1/accounting/adjustments",
+            "/accounting/adjustments",
             json={"organization_id": organization_id, "amount": str(amount)},
         )
 
     def add_news(self, payload: dict) -> dict:
-        return self._request("POST", "/v1/news", json=payload, timeout=60)
+        return self._request("POST", "/news", json=payload, timeout=60)
 
     def list_news_import_formats(self) -> list[dict]:
-        return self._request("GET", "/v1/news/import-formats")
+        return self._request("GET", "/news/import-formats")
 
     def import_news(
         self,
@@ -212,7 +212,7 @@ class ApiClient:
     ) -> dict:
         return self._request(
             "POST",
-            "/v1/news/import",
+            "/news/import",
             data={
                 "format": format_id,
                 "publish_immediately": str(publish_immediately).lower(),
@@ -222,12 +222,12 @@ class ApiClient:
         )
 
     def publish_news(self, article_id: str) -> dict:
-        return self._request("POST", f"/v1/news/{article_id}/publish", timeout=60)
+        return self._request("POST", f"/news/{article_id}/publish", timeout=60)
 
     def publish_news_batch(self, article_ids: list[str]) -> dict:
         return self._request(
             "POST",
-            "/v1/news/publish",
+            "/news/publish",
             json={"article_ids": article_ids},
             timeout=120,
         )
@@ -235,35 +235,35 @@ class ApiClient:
     def delete_news_drafts(self, article_ids: list[str]) -> dict:
         return self._request(
             "DELETE",
-            "/v1/news",
+            "/news",
             json={"article_ids": article_ids},
         )
 
     def archive_news(self, article_ids: list[str]) -> dict:
         return self._request(
             "POST",
-            "/v1/news/archive",
+            "/news/archive",
             json={"article_ids": article_ids},
         )
 
     def restore_news(self, article_ids: list[str]) -> dict:
         return self._request(
             "POST",
-            "/v1/news/restore",
+            "/news/restore",
             json={"article_ids": article_ids},
         )
 
     def update_news_novelty_labels(self, updates: list[dict]) -> dict:
         return self._request(
             "POST",
-            "/v1/news/moderation-labels",
+            "/news/moderation-labels",
             json={"updates": updates},
         )
 
     def reprocess_news(self, article_ids: list[str]) -> dict:
         return self._request(
             "POST",
-            "/v1/news/reprocess",
+            "/news/reprocess",
             json={"article_ids": article_ids},
             timeout=120,
         )
@@ -271,12 +271,12 @@ class ApiClient:
     def list_news_history(self, limit: int = 10_000) -> list[dict]:
         return self._request(
             "GET",
-            "/v1/news/me/history",
+            "/news/me/history",
             params={"limit": limit},
         )
 
     def search_news(self, payload: dict) -> dict:
-        return self._request("POST", "/v1/news-search", json=payload, timeout=60)
+        return self._request("POST", "/news-search", json=payload, timeout=60)
 
     def list_search_history(self) -> list[dict]:
-        return self._request("GET", "/v1/news-search/history")
+        return self._request("GET", "/news-search/history")

@@ -50,7 +50,7 @@ class DemoClient:
     def login(self, login: str, password: str) -> str:
         response = self.request(
             "POST",
-            "/v1/auth/login",
+            "/auth/login",
             json={"login": login, "password": password},
         )
         return str(response["access_token"])
@@ -64,7 +64,7 @@ def wait_for_search(
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        history = client.request("GET", "/v1/news-search/history", token=token)
+        history = client.request("GET", "/news-search/history", token=token)
         query = next(
             (item for item in history if item["query_id"] == query_id),
             None,
@@ -86,10 +86,10 @@ def main() -> None:
     partner_token = client.login("partner_user", "partner12345")
     admin_token = client.login("admin", "admin12345")
 
-    demo = client.request("GET", "/v1/users/me", token=demo_token)
-    analyst = client.request("GET", "/v1/users/me", token=analyst_token)
-    partner = client.request("GET", "/v1/users/me", token=partner_token)
-    users = client.request("GET", "/v1/users", token=admin_token)
+    demo = client.request("GET", "/users/me", token=demo_token)
+    analyst = client.request("GET", "/users/me", token=analyst_token)
+    partner = client.request("GET", "/users/me", token=partner_token)
+    users = client.request("GET", "/users", token=admin_token)
 
     if demo["organization_id"] != analyst["organization_id"]:
         raise RuntimeError("demo and analyst must belong to the same organization")
@@ -100,7 +100,7 @@ def main() -> None:
 
     operations = client.request(
         "GET",
-        "/v1/accounting/me/transactions",
+        "/accounting/me/transactions",
         token=demo_token,
     )
     batched_publications = [
@@ -124,7 +124,7 @@ def main() -> None:
 
     created = client.request(
         "POST",
-        "/v1/news-search",
+        "/news-search",
         token=partner_token,
         json={
             "query_text": args.query,
