@@ -37,6 +37,16 @@ class NewsPipelineRepository:
     def __init__(self, database_url: str) -> None:
         self._database_url = database_url
 
+    async def count_processed_articles(self) -> int:
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT COUNT(*) FROM news_articles WHERE status = %s",
+                    (ArticleStatus.PROCESSED.value,),
+                )
+                row = await cursor.fetchone()
+        return int(row[0]) if row is not None else 0
+
     async def load_articles(self, news_ids: list[str]) -> pd.DataFrame:
         if not news_ids:
             return pd.DataFrame()

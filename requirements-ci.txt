@@ -1,5 +1,5 @@
-# Minimal dependencies for GitHub Actions unit tests.
-# Heavy ML dependencies from requirements.txt are intentionally excluded.
+# Минимальные зависимости для модульных тестов в GitHub Actions.
+# Тяжёлые ML-зависимости из requirements.txt намеренно исключены.
 fastapi==0.137.2
 python-multipart==0.0.32
 pydantic==2.13.4
@@ -9,8 +9,9 @@ SQLAlchemy==2.0.51
 psycopg[binary]==3.3.4
 pytest==9.0.3
 httpx==0.28.1
+prometheus-client==0.22.1
 
-# Lightweight data/ML stack required by final pipeline unit tests.
+# Облегчённый стек обработки данных и ML для модульных тестов финального пайплайна.
 numpy==2.2.6
 pandas==3.0.3
 scikit-learn==1.9.0

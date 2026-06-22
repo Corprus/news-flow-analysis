@@ -43,13 +43,16 @@ if "me" not in st.session_state:
 
 page = render_sidebar(client)
 
-if page == "Search":
-    render_search(client)
-elif page == "DateNews":
-    render_date_news(client)
-elif page == "News":
-    render_news(client)
-elif page == "Transactions":
-    render_transactions(client)
-elif page == "Admin":
-    render_admin(client)
+try:
+    if page == "Search":
+        render_search(client)
+    elif page == "DateNews":
+        render_date_news(client)
+    elif page == "News":
+        render_news(client)
+    elif page == "Transactions":
+        render_transactions(client)
+    elif page == "Admin":
+        render_admin(client)
+except ApiError as exc:
+    st.error(str(exc))

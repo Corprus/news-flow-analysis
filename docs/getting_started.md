@@ -7,7 +7,7 @@ Compose с GPU-воркером.
 
 - Docker Desktop или Docker Engine с Compose;
 - NVIDIA GPU и NVIDIA Container Toolkit для GPU-режима;
-- свободные порты `80` и `15672`;
+- свободные порты `80`, `3000`, `9090` и `15672`;
 - несколько гигабайт диска для образов и модели BGE-M3.
 
 CPU-вариант описан в [развёртывании](deployment.md).
@@ -44,6 +44,8 @@ docker compose ps
 - OpenAPI: <http://localhost/api/docs>
 - API health: <http://localhost/api/health>
 - RabbitMQ management: <http://localhost:15672/>
+- Grafana: <http://localhost:3000/>
+- Prometheus: <http://localhost:9090/>
 
 ## Демонстрационные учётные записи
 
@@ -80,4 +82,5 @@ RabbitMQ и управляемый кеш модели.
 - [Архитектура](architecture.md)
 - [HTTP API](api.md)
 - [Развёртывание](deployment.md)
+- [Мониторинг](monitoring.md)
 - [ML-пайплайн](ml_pipeline.md)

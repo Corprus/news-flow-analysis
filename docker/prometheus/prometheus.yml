@@ -1,0 +1,30 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["prometheus:9090"]
+
+  - job_name: metrics-exporter
+    static_configs:
+      - targets: ["metrics-exporter:9101"]
+
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+
+  - job_name: model-service-gpu
+    metrics_path: /metrics
+    dns_sd_configs:
+      - names: ["model-service"]
+        type: A
+        port: 8000
+
+  - job_name: model-service-cpu
+    metrics_path: /metrics
+    dns_sd_configs:
+      - names: ["model-service-cpu"]
+        type: A
+        port: 8000

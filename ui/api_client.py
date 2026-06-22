@@ -29,6 +29,7 @@ ERROR_TRANSLATIONS = {
     "Insufficient organization balance": (
         "Недостаточно средств на балансе организации"
     ),
+    "Insufficient credits": "Недостаточно средств для публикации новостей",
     "Authorization bearer token is required": "Требуется токен авторизации",
     "Invalid access token": "Недействительный токен авторизации",
     "User account is no longer available": "Учётная запись пользователя недоступна",

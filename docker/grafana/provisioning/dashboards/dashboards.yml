@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: News Flow
+    orgId: 1
+    folder: Semantic News Novelty
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
