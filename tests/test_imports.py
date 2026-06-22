@@ -6,14 +6,25 @@ def test_fastapi_apps_are_importable() -> None:
     assert model_service_app.title == "Semantic News Novelty Model Service"
 
 
+def _collect_route_paths(routes: list[object]) -> set[str]:
+    paths: set[str] = set()
+
+    for route in routes:
+        path = getattr(route, "path", None)
+        if isinstance(path, str):
+            paths.add(path)
+
+        nested_routes = getattr(route, "routes", None)
+        if nested_routes is not None:
+            paths |= _collect_route_paths(list(nested_routes))
+
+    return paths
+
+
 def test_api_routes_do_not_have_version_prefix() -> None:
     from api.main import app
 
-    paths = {
-        path
-        for route in app.routes
-        if isinstance(path := getattr(route, "path", None), str)
-    }
+    paths = _collect_route_paths(list(app.routes))
 
     assert not any(path.startswith("/v1") for path in paths)
     assert {
