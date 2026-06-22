@@ -34,7 +34,7 @@ def render_search(client: ApiClient) -> None:
                 "Минимальная релевантность",
                 min_value=0.0,
                 max_value=1.0,
-                value=0.5,
+                value=0.4,
                 step=0.05,
                 help=(
                     "Результаты с меньшим сходством будут исключены. "

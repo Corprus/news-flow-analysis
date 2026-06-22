@@ -29,7 +29,7 @@ class NewsSearchFilters:
     published_from: datetime | None = None
     published_to: datetime | None = None
     min_novelty_score: float | None = None
-    min_relevance: float = 0.5
+    min_relevance: float = 0.4
 
     def to_payload(self) -> dict[str, str]:
         payload: dict[str, str] = {}
