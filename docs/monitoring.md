@@ -50,11 +50,11 @@ docker compose up --build -d
 
 - `cadvisor`;
 - `rabbitmq`;
-- `model-service`;
+- `model-service-gpu` или `model-service-cpu`, в зависимости от режима;
 - `prometheus`.
 
-Target `model-service-cpu` будет недоступен, если CPU-реплики отключены. Это
-ожидаемо и не мешает сбору метрик GPU-воркера.
+Prometheus использует DNS service discovery и автоматически обнаруживает
+запущенные реплики воркеров.
 
 ## Ограничения MVP
 
