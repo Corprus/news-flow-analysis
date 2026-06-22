@@ -36,11 +36,18 @@ def format_search_result_summary(result: dict) -> str:
     )
 
 
-def format_search_date(value: str | None, *, date_only: bool = False) -> str:
+def format_search_date(
+    value: str | None,
+    *,
+    date_only: bool = False,
+    hide_midnight: bool = False,
+) -> str:
     if not value:
         return ""
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if hide_midnight and parsed.time().replace(tzinfo=None) == datetime.min.time():
+            date_only = True
         return parsed.strftime("%d.%m.%Y" if date_only else "%d.%m.%Y %H:%M")
     except (TypeError, ValueError):
         return str(value)

@@ -275,6 +275,43 @@ class ApiClient:
             params={"limit": limit},
         )
 
+    def list_news_feed(
+        self,
+        *,
+        published_from: str,
+        published_to: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        return self._request(
+            "GET",
+            "/news/feed",
+            params={
+                "published_from": published_from,
+                "published_to": published_to,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+
+    def get_adjacent_news_dates(
+        self,
+        *,
+        published_from: str,
+        published_to: str,
+    ) -> dict:
+        return self._request(
+            "GET",
+            "/news/feed/adjacent-dates",
+            params={
+                "published_from": published_from,
+                "published_to": published_to,
+            },
+        )
+
+    def get_latest_news_date(self) -> dict:
+        return self._request("GET", "/news/feed/latest-date")
+
     def search_news(self, payload: dict) -> dict:
         return self._request("POST", "/news-search", json=payload, timeout=60)
 

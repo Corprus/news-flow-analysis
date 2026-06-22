@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import os
-from datetime import timedelta, timezone
+from datetime import date, timedelta, timezone
 
 API_INTERNAL = os.getenv("API_BASE_URL", "http://nginx/api")
 AUTH_COOKIE_NAME = "semantic_news_novelty_access_token"
 AUTH_COOKIE_TTL_DAYS = int(os.getenv("AUTH_COOKIE_TTL_DAYS", "1"))
 MOSCOW_TIMEZONE = timezone(timedelta(hours=3))
+MIN_NEWS_DATE = date(1900, 1, 1)
 
 PAGE_LABELS = {
     "Search": "Поиск",
+    "DateNews": "Новости по дате",
     "News": "Мои новости",
     "Transactions": "Операции",
     "Admin": "Администрирование",

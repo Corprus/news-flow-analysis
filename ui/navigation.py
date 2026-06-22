@@ -7,7 +7,7 @@ import streamlit as st
 
 from api_client import ApiClient
 from auth import clear_authentication, refresh_account
-from config import PAGE_LABELS, ROLE_LABELS
+from config import MIN_NEWS_DATE, PAGE_LABELS, ROLE_LABELS
 
 
 def render_sidebar(client: ApiClient) -> str:
@@ -63,7 +63,7 @@ def render_sidebar(client: ApiClient) -> str:
                 ):
                     refresh_account(client)
                     st.rerun()
-        pages = ["Search"]
+        pages = ["Search", "DateNews"]
         if role in {"publisher", "admin"}:
             pages.extend(["News", "Transactions"])
         if role == "admin":
@@ -84,6 +84,27 @@ def render_sidebar(client: ApiClient) -> str:
             ):
                 st.session_state["active_page"] = page_name
                 st.rerun()
+
+        st.markdown("### Новости по дате")
+        st.date_input(
+            "Выберите день",
+            value=st.session_state.get("date_news_selected_date"),
+            min_value=MIN_NEWS_DATE,
+            format="DD.MM.YYYY",
+            key="sidebar_news_date",
+        )
+        if st.button(
+            "Показать новости",
+            key="show-news-by-date",
+            disabled=st.session_state.get("sidebar_news_date") is None,
+            use_container_width=True,
+        ):
+            st.session_state["date_news_selected_date"] = st.session_state[
+                "sidebar_news_date"
+            ]
+            st.session_state["date_news_page"] = 0
+            st.session_state["active_page"] = "DateNews"
+            st.rerun()
 
         if st.button(
             "Выйти",

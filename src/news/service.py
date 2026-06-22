@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from news.importers import ImportedNews
@@ -520,6 +520,62 @@ class NewsService:
             .offset(offset)
         )
         return list(self._session.execute(statement).scalars().all())
+
+    def list_public_articles_by_period(
+        self,
+        *,
+        published_from: datetime,
+        published_to: datetime,
+    ) -> tuple[list[NewsArticle], int]:
+        filters = (
+            NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
+            NewsArticle.status == ArticleStatus.PROCESSED.value,
+            NewsArticle.published_at >= published_from,
+            NewsArticle.published_at < published_to,
+        )
+        total = self._session.execute(
+            select(func.count()).select_from(NewsArticle).where(*filters)
+        ).scalar_one()
+        statement = (
+            select(NewsArticle)
+            .options(selectinload(NewsArticle.pipeline_state))
+            .where(*filters)
+            .order_by(NewsArticle.published_at.desc(), NewsArticle.id.desc())
+        )
+        articles = list(self._session.execute(statement).scalars().all())
+        return articles, total
+
+    def get_adjacent_public_article_dates(
+        self,
+        *,
+        published_from: datetime,
+        published_to: datetime,
+    ) -> tuple[datetime | None, datetime | None]:
+        filters = (
+            NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
+            NewsArticle.status == ArticleStatus.PROCESSED.value,
+        )
+        previous_date = self._session.execute(
+            select(func.max(NewsArticle.published_at)).where(
+                *filters,
+                NewsArticle.published_at < published_from,
+            )
+        ).scalar_one_or_none()
+        next_date = self._session.execute(
+            select(func.min(NewsArticle.published_at)).where(
+                *filters,
+                NewsArticle.published_at >= published_to,
+            )
+        ).scalar_one_or_none()
+        return previous_date, next_date
+
+    def get_latest_public_article_date(self) -> datetime | None:
+        return self._session.execute(
+            select(func.max(NewsArticle.published_at)).where(
+                NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
+                NewsArticle.status == ArticleStatus.PROCESSED.value,
+            )
+        ).scalar_one_or_none()
 
     def list_search_queries(
         self,

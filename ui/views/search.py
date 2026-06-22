@@ -7,7 +7,7 @@ import streamlit as st
 
 from api_client import ApiClient, ApiError
 from auth import refresh_account
-from config import MOSCOW_TIMEZONE
+from config import MIN_NEWS_DATE, MOSCOW_TIMEZONE
 from formatting import escape_markdown, format_search_date, format_search_result_summary
 
 
@@ -56,6 +56,7 @@ def render_search(client: ApiClient) -> None:
                 published_from_date = st.date_input(
                     "Дата начала",
                     value=None,
+                    min_value=MIN_NEWS_DATE,
                     format="DD.MM.YYYY",
                 )
                 published_from_time = st.time_input(
@@ -67,6 +68,7 @@ def render_search(client: ApiClient) -> None:
                 published_to_date = st.date_input(
                     "Дата окончания",
                     value=None,
+                    min_value=MIN_NEWS_DATE,
                     format="DD.MM.YYYY",
                 )
                 published_to_time = st.time_input(
@@ -77,6 +79,15 @@ def render_search(client: ApiClient) -> None:
         submitted = st.form_submit_button("Найти", type="primary")
 
     if submitted:
+        query_text = query_text.strip()
+        if not query_text:
+            st.warning(
+                "Введите текст запроса. Для просмотра новостей по дате "
+                "используйте календарь слева."
+            )
+            render_search_history(client)
+            return
+
         published_from = (
             datetime.combine(
                 published_from_date,
@@ -191,12 +202,15 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
         if significant_count:
             label += f' · [⭐](# "Количество важных публикаций") {significant_count}'
         label += f' · [📰](# "Общее количество публикаций") {article_count}'
-        cluster_date = format_search_date(cluster.get("published_from"))
+        cluster_date = format_search_date(
+            cluster.get("published_from"),
+            hide_midnight=True,
+        )
         if cluster_date:
             label = f"**{label}** {cluster_date}"
         with st.expander(
             label,
-            expanded=cluster_index == 0,
+            expanded=False,
             key=f"cluster-expander-{key_prefix}-{cluster_index}",
         ):
             items = cluster.get("items", [])
@@ -233,7 +247,12 @@ def render_search_article(item: dict, *, key_prefix: str) -> None:
     title = html.escape(str(item.get("title") or "Без названия"))
     novelty_label = item.get("novelty_label")
     is_significant = novelty_label == "significant"
-    details = [format_search_date(item.get("published_at"))]
+    details = [
+        format_search_date(
+            item.get("published_at"),
+            hide_midnight=True,
+        )
+    ]
     if item.get("score") is not None:
         details.append(f"релевантность {float(item['score']):.3f}")
     if item.get("p_significant") is not None:

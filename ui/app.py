@@ -14,6 +14,7 @@ from auth import (
 from navigation import render_sidebar
 from styles import apply_styles
 from views.admin import render_admin
+from views.date_news import render_date_news
 from views.news import render_news
 from views.search import render_search
 from views.transactions import render_transactions
@@ -44,6 +45,8 @@ page = render_sidebar(client)
 
 if page == "Search":
     render_search(client)
+elif page == "DateNews":
+    render_date_news(client)
 elif page == "News":
     render_news(client)
 elif page == "Transactions":
