@@ -9,7 +9,11 @@ def test_fastapi_apps_are_importable() -> None:
 def test_api_routes_do_not_have_version_prefix() -> None:
     from api.main import app
 
-    paths = {route.path for route in app.routes}
+    paths = {
+        path
+        for route in app.routes
+        if isinstance(path := getattr(route, "path", None), str)
+    }
 
     assert not any(path.startswith("/v1") for path in paths)
     assert {
