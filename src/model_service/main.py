@@ -7,11 +7,12 @@ from time import monotonic
 from typing import Any
 
 from fastapi import FastAPI, Request
-from prometheus_client import make_asgi_app
+from prometheus_client import REGISTRY, make_asgi_app
 
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from final_pipeline import FinalPipelineConfig, IncrementalNewsNoveltyPipeline, load_pipeline
 from messaging.rabbitmq import RabbitConsumer
+from model_service.gpu_metrics import NvidiaGpuCollector
 from model_service.metrics import (
     PIPELINE_ARTICLES_PROCESSED,
     PIPELINE_JOB_DURATION,
@@ -186,6 +187,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+REGISTRY.register(NvidiaGpuCollector())
 app.mount("/metrics", make_asgi_app())
 
 

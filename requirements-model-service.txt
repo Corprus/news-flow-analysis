@@ -14,3 +14,4 @@ catboost==1.2.10
 joblib==1.5.3
 tqdm==4.67.3
 prometheus-client==0.22.1
+nvidia-ml-py==13.610.43
