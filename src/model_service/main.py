@@ -3,13 +3,22 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from fastapi import FastAPI, Request
+from prometheus_client import make_asgi_app
 
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from final_pipeline import FinalPipelineConfig, IncrementalNewsNoveltyPipeline, load_pipeline
 from messaging.rabbitmq import RabbitConsumer
+from model_service.metrics import (
+    PIPELINE_ARTICLES_PROCESSED,
+    PIPELINE_JOB_DURATION,
+    PIPELINE_JOBS,
+    PIPELINE_JOBS_IN_PROGRESS,
+    PROCESSED_ARTICLES,
+)
 from news.pipeline_repository import NewsPipelineRepository
 from settings import get_settings
 
@@ -25,14 +34,16 @@ async def handle_message(app: FastAPI, message: dict[str, Any]) -> None:
 async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
     job_id = str(message["job_id"])
     payload = message["payload"]
+    mode = str(payload.get("mode", "incremental"))
+    started_at = monotonic()
     jobs: NewsPipelineJobRepository = app.state.jobs
     repository: NewsPipelineRepository = app.state.pipeline_repository
     news_ids: list[str] = []
+    PIPELINE_JOBS_IN_PROGRESS.labels(mode=mode).inc()
     try:
         news_ids = list(dict.fromkeys(str(value) for value in payload["news_ids"]))
         if not news_ids:
             raise ValueError("news_ids must contain at least one article ID")
-        mode = str(payload.get("mode", "incremental"))
         if mode not in {"full", "incremental"}:
             raise ValueError(f"Unsupported pipeline mode: {mode}")
         await jobs.mark_processing(job_id, payload)
@@ -64,11 +75,18 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
                 "versions": vars(result.versions),
             },
         )
+        PIPELINE_ARTICLES_PROCESSED.labels(mode=mode).inc(len(result.requested_ids))
+        PIPELINE_JOBS.labels(mode=mode, status="done").inc()
+        PROCESSED_ARTICLES.set(await repository.count_processed_articles())
     except Exception as exc:
         error = str(exc)
         await jobs.mark_failed(job_id, error)
         if news_ids:
             await repository.mark_articles_error(news_ids, error)
+        PIPELINE_JOBS.labels(mode=mode, status="failed").inc()
+    finally:
+        PIPELINE_JOB_DURATION.labels(mode=mode).observe(monotonic() - started_at)
+        PIPELINE_JOBS_IN_PROGRESS.labels(mode=mode).dec()
 
 
 async def _handle_search_job(app: FastAPI, message: dict[str, Any]) -> None:
@@ -124,6 +142,7 @@ async def lifespan(app: FastAPI):
     app.state.config = config
     app.state.full_pipeline = full_pipeline
     app.state.incremental_pipeline = incremental_pipeline
+    PROCESSED_ARTICLES.set(await repository.count_processed_articles())
 
     async def handler(message: dict[str, Any]) -> None:
         await handle_message(app, message)
@@ -140,6 +159,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.mount("/metrics", make_asgi_app())
 
 
 @app.get("/health")
