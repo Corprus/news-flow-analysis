@@ -218,6 +218,7 @@ artifacts/
 .hf-download-test/
 .pip-tmp/
 .tmp/
+/_tmp/
 token.local
 *.npy
 *.npz
