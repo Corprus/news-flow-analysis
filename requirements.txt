@@ -1,4 +1,4 @@
-# Service
+# Сервис
 fastapi==0.137.2
 python-multipart==0.0.32
 uvicorn[standard]==0.49.0
@@ -6,12 +6,12 @@ pydantic==2.13.4
 pydantic-settings==2.14.2
 aio-pika==9.6.2
 
-# Database
+# БД
 SQLAlchemy==2.0.51
 alembic==1.18.4
 psycopg[binary]==3.3.4
 
-# Data processing and ML
+# Процессинг данных
 numpy==2.2.6
 pandas==3.0.3
 scipy==1.17.1
