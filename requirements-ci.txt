@@ -1,16 +1,18 @@
 # Minimal dependencies for GitHub Actions unit tests.
 # Heavy ML dependencies from requirements.txt are intentionally excluded.
-fastapi
-python-multipart
-pydantic-settings
-aio-pika
-SQLAlchemy
-psycopg[binary]
-pytest
-httpx
+fastapi==0.137.2
+python-multipart==0.0.32
+pydantic==2.13.4
+pydantic-settings==2.14.2
+aio-pika==9.6.2
+SQLAlchemy==2.0.51
+psycopg[binary]==3.3.4
+pytest==9.0.3
+httpx==0.28.1
 
 # Lightweight data/ML stack required by final pipeline unit tests.
-numpy
-pandas
-scikit-learn
-tqdm
+numpy==2.2.6
+pandas==3.0.3
+scikit-learn==1.9.0
+joblib==1.5.3
+tqdm==4.67.3
