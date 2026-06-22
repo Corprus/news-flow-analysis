@@ -86,32 +86,13 @@ div.st-key-refresh-balance {
     padding-top: 0.8rem;
 }
 [class*="st-key-import-news-file"]
-[data-testid="stFileUploaderDropzoneInstructions"] {
-    display: none;
-}
-[class*="st-key-import-news-file"]
-[data-testid="stFileUploaderDropzone"] {
-    min-height: 2.5rem;
-    height: 2.5rem;
-    padding: 0.2rem 0.75rem;
-    align-items: center;
-}
-[class*="st-key-import-news-file"]
-[data-testid="stFileUploaderDropzone"] button {
-    min-height: 2rem;
-    height: 2rem;
-    padding-top: 0;
-    padding-bottom: 0;
-}
-[class*="st-key-import-news-file"]
 [data-testid="stFileUploaderDropzone"] button p {
-    display: none;
+    font-size: 0;
 }
 [class*="st-key-import-news-file"]
-[data-testid="stFileUploaderDropzone"] button::after {
+[data-testid="stFileUploaderDropzone"] button p::after {
     content: "Выбрать файл";
     font-size: 0.875rem;
-    margin-left: 0.4rem;
 }
 div.st-key-sidebar-logout button {
     min-height: auto;
