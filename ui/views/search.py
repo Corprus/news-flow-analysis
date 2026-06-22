@@ -210,7 +210,7 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
             label = f"**{label}** {cluster_date}"
         with st.expander(
             label,
-            expanded=cluster_index == 0,
+            expanded=False,
             key=f"cluster-expander-{key_prefix}-{cluster_index}",
         ):
             items = cluster.get("items", [])
