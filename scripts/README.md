@@ -41,6 +41,10 @@ python scripts/build_demo_fixture.py
 python scripts/build_lenta_import_sample.py
 ```
 
+`build_demo_fixture.py` выбирает последние 250 валидных публикаций из полного
+архива Lenta.ru, сохраняя исходные даты. Для стандартного архива v1.1 это
+публикации за 13–14 декабря 2019 года.
+
 ## Проверка артефактов
 
 ```powershell

@@ -36,6 +36,15 @@ services:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
+    command:
+      - python
+      - -m
+      - api
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
     environment:
       APP_ENV: ${APP_ENV:-local}
       DEMO_MODE: ${DEMO_MODE:-false}
@@ -176,6 +185,14 @@ services:
     build:
       context: .
       dockerfile: ui/Dockerfile
+    command:
+      - streamlit
+      - run
+      - app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.runOnSave=true
+      - --server.fileWatcherType=poll
     environment:
       API_BASE_URL: http://nginx/api
     depends_on:

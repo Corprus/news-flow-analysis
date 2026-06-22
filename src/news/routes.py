@@ -27,6 +27,7 @@ from news.models import (
     NewsSearchQuery,
     SearchQueryStatus,
 )
+from news.search_results import group_search_items
 from news.service import NewsSearchFilters, NewsService
 from settings import Settings, get_settings
 from users.deps import CurrentUser, SessionDep, authenticate, ensure_publisher
@@ -160,6 +161,20 @@ class NewsArticleHistoryItem(BaseModel):
     published_at: datetime
     fetched_at: datetime
     url: str | None
+
+
+class NewsFeedResponse(BaseModel):
+    clusters: list[dict]
+    items: list[dict]
+    total: int
+    total_clusters: int
+    limit: int
+    offset: int
+
+
+class AdjacentNewsDatesResponse(BaseModel):
+    previous_date: datetime | None
+    next_date: datetime | None
 
 
 class NewsSearchRequest(BaseModel):
@@ -661,6 +676,106 @@ def get_my_news_history(
 ) -> list[NewsArticleHistoryItem]:
     articles = news.list_user_articles(current_user.id, limit, offset)
     return [_article_history_item(article) for article in articles]
+
+
+@router.get("/feed", response_model=NewsFeedResponse)
+def get_news_feed(
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+    published_from: datetime,
+    published_to: datetime,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> NewsFeedResponse:
+    del current_user
+    for value in (published_from, published_to):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="published date filters must include timezone information",
+            )
+    if published_to <= published_from:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="published_to must be later than published_from",
+        )
+
+    articles, total = news.list_public_articles_by_period(
+        published_from=published_from,
+        published_to=published_to,
+    )
+    items = []
+    for rank, article in enumerate(articles, start=1):
+        pipeline_state = article.pipeline_state
+        novelty_label = (
+            pipeline_state.manual_novelty_label or pipeline_state.novelty_label
+            if pipeline_state
+            else None
+        )
+        items.append(
+            {
+                "article_id": article.id,
+                "title": article.title,
+                "status": article.status,
+                "language": article.language,
+                "novelty_score": article.novelty_score,
+                "published_at": article.published_at.isoformat(),
+                "rank": rank,
+                "cluster_id": (
+                    pipeline_state.cluster_id if pipeline_state else article.id
+                ),
+                "novelty_label": novelty_label,
+                "p_significant": (
+                    pipeline_state.p_significant if pipeline_state else None
+                ),
+                "url": article.url,
+                "summary": article.summary,
+                "content": article.content,
+            }
+        )
+    all_clusters = group_search_items(items, top_k=len(items))
+    clusters = all_clusters[offset : offset + limit]
+    selected_cluster_ids = {cluster["cluster_id"] for cluster in clusters}
+    selected_items = [
+        item for item in items if item["cluster_id"] in selected_cluster_ids
+    ]
+    return NewsFeedResponse(
+        clusters=clusters,
+        items=selected_items,
+        total=total,
+        total_clusters=len(all_clusters),
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/feed/adjacent-dates", response_model=AdjacentNewsDatesResponse)
+def get_adjacent_news_dates(
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+    published_from: datetime,
+    published_to: datetime,
+) -> AdjacentNewsDatesResponse:
+    del current_user
+    for value in (published_from, published_to):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="published date filters must include timezone information",
+            )
+    if published_to <= published_from:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="published_to must be later than published_from",
+        )
+    previous_date, next_date = news.get_adjacent_public_article_dates(
+        published_from=published_from,
+        published_to=published_to,
+    )
+    return AdjacentNewsDatesResponse(
+        previous_date=previous_date,
+        next_date=next_date,
+    )
 
 
 @search_router.post("", response_model=NewsSearchResponse, status_code=status.HTTP_202_ACCEPTED)
