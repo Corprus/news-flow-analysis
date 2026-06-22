@@ -1,44 +1,51 @@
 # Скрипты
 
-Скрипты обслуживают финальный BGE-M3 clustering/novelty pipeline.
+Скрипты запускают offline pipeline, smoke tests и измерения производительности.
 
-## Запуск pipeline
+## Инференс
 
-```bash
+```powershell
 python scripts/run_final_pipeline.py --help
 ```
 
-Скрипт запускает финальный pipeline над входным набором новостей и сохраняет результаты.
+Запускает финальный clustering/novelty pipeline и сохраняет predictions.
 
-## Benchmark
-
-Полный pipeline:
-
-```bash
-python scripts/benchmark_final_pipeline.py --help
-```
-
-Incremental pipeline:
-
-```bash
-python scripts/benchmark_incremental_pipeline.py --help
-```
-
-Aggregate throughput of several service workers on an existing corpus:
+## Проверка стека
 
 ```powershell
-python scripts/benchmark_parallel_service_pipeline.py --workers 4 --limit 1000
+python scripts/demo_smoke_test.py
 ```
 
-For more than one worker the script submits one non-overlapping `full` job per
-worker. This measures aggregate throughput; clustering is independent inside
-each partition.
+Проверяет демонстрационных пользователей, обработку публикаций и поиск.
+
+## Бенчмарки
+
+```powershell
+python scripts/benchmark_final_pipeline.py --help
+python scripts/benchmark_service_pipeline.py --help
+python scripts/benchmark_existing_service_pipeline.py --help
+python scripts/benchmark_incremental_pipeline.py --help
+python scripts/benchmark_parallel_service_pipeline.py --help
+```
+
+`benchmark_parallel_service_pipeline.py` создаёт независимый `full` job для
+каждой части корпуса. Это измеряет суммарный throughput workers, но не сохраняет
+глобальную кластеризацию между частями.
+
+Методика и актуальные результаты: [бенчмарки](../docs/benchmarks.md).
+
+## Подготовка demo
+
+```powershell
+python scripts/build_demo_fixture.py
+python scripts/build_lenta_import_sample.py
+```
 
 ## Проверка артефактов
 
-```bash
+```powershell
 python scripts/inspect_model_artifacts.py --help
 ```
 
-Скрипт проверяет runtime-модель и конфигурацию из
+Проверяет модель и конфигурацию из
 `data/artifacts/models/final_exp10/`.
