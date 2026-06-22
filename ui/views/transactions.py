@@ -23,7 +23,8 @@ def render_transactions(client: ApiClient) -> None:
         format_func=reason_labels.get,
     )
     try:
-        transactions = client.list_transactions(reason or None)
+        is_admin = (st.session_state.get("me") or {}).get("role") == "admin"
+        transactions = client.list_transactions(reason or None, admin=is_admin)
         if transactions:
             rows = [
                 {
@@ -44,6 +45,14 @@ def render_transactions(client: ApiClient) -> None:
                     ),
                     "Источник": item.get("reference_url") or "",
                     "Сумма": format_amount(item.get("amount", 0)),
+                    **(
+                        {
+                            "Организация": item.get("organization_name") or "—",
+                            "Пользователь": item.get("actor_login") or "—",
+                        }
+                        if is_admin
+                        else {}
+                    ),
                 }
                 for item in transactions
             ]

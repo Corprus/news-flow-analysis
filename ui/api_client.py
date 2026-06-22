@@ -166,9 +166,21 @@ class ApiClient:
     def get_balance(self) -> dict:
         return self._request("GET", "/v1/accounting/me/balance")
 
-    def list_transactions(self, reason: str | None = None) -> list[dict]:
-        params = {"reason": reason} if reason else None
-        return self._request("GET", "/v1/accounting/me/transactions", params=params)
+    def list_transactions(
+        self,
+        reason: str | None = None,
+        *,
+        admin: bool = False,
+    ) -> list[dict]:
+        params = {"limit": 500 if admin else 100}
+        if reason:
+            params["reason"] = reason
+        path = (
+            "/v1/accounting/admin/transactions"
+            if admin
+            else "/v1/accounting/me/transactions"
+        )
+        return self._request("GET", path, params=params)
 
     def add_credit(self, organization_id: str, amount: Decimal) -> dict:
         return self._request(

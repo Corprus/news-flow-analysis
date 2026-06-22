@@ -101,16 +101,16 @@ class AccountingService:
 
     def get_transaction_history(
         self,
-        organization_id: UUID,
+        organization_id: UUID | None,
         limit: int | None = 50,
         offset: int = 0,
         reason: TransactionReason | None = None,
     ) -> list[Transaction]:
-        statement = (
-            select(Transaction)
-            .where(Transaction.organization_id == str(organization_id))
-            .order_by(Transaction.timestamp.desc())
-        )
+        statement = select(Transaction).order_by(Transaction.timestamp.desc())
+        if organization_id is not None:
+            statement = statement.where(
+                Transaction.organization_id == str(organization_id)
+            )
         if reason is not None:
             statement = statement.where(Transaction.reason == reason.value)
         if limit is not None:

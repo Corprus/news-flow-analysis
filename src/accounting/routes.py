@@ -20,6 +20,7 @@ from users.deps import (
     ensure_admin,
     get_admin_audit_service,
 )
+from users.models import Organization, User
 from users.service import AdminAuditService
 
 router = APIRouter(prefix="/v1/accounting", tags=["accounting"])
@@ -50,6 +51,8 @@ class TransactionResponse(BaseModel):
     id: UUID
     organization_id: UUID
     actor_user_id: UUID | None
+    actor_login: str | None = None
+    organization_name: str | None = None
     timestamp: datetime
     amount: str
     reason: str
@@ -150,8 +153,47 @@ def get_my_transactions(
     offset: Annotated[int, Query(ge=0)] = 0,
     reason: TransactionReason | None = None,
 ) -> list[TransactionResponse]:
+    return _get_transactions(
+        session=session,
+        accounting=accounting,
+        organization_id=current_user.organization_id,
+        limit=limit,
+        offset=offset,
+        reason=reason,
+    )
+
+
+@router.get("/admin/transactions", response_model=list[TransactionResponse])
+def get_admin_transactions(
+    current_user: CurrentUserDep,
+    session: SessionDep,
+    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    reason: TransactionReason | None = None,
+) -> list[TransactionResponse]:
+    ensure_admin(current_user)
+    return _get_transactions(
+        session=session,
+        accounting=accounting,
+        organization_id=None,
+        limit=limit,
+        offset=offset,
+        reason=reason,
+    )
+
+
+def _get_transactions(
+    *,
+    session,
+    accounting: AccountingService,
+    organization_id: UUID | None,
+    limit: int,
+    offset: int,
+    reason: TransactionReason | None,
+) -> list[TransactionResponse]:
     transactions = accounting.get_transaction_history(
-        current_user.organization_id,
+        organization_id,
         limit=None,
         reason=reason,
     )
@@ -173,6 +215,28 @@ def get_my_transactions(
         else []
     )
     article_by_id = {article.id: article for article in articles}
+    actor_ids = {
+        transaction.actor_user_id
+        for transaction in transactions
+        if transaction.actor_user_id is not None
+    }
+    actors = (
+        session.execute(select(User).where(User.id.in_(actor_ids))).scalars()
+        if actor_ids
+        else []
+    )
+    actor_login_by_id = {actor.id: actor.login for actor in actors}
+    organization_ids = {transaction.organization_id for transaction in transactions}
+    organizations = (
+        session.execute(
+            select(Organization).where(Organization.id.in_(organization_ids))
+        ).scalars()
+        if organization_ids
+        else []
+    )
+    organization_name_by_id = {
+        organization.id: organization.name for organization in organizations
+    }
     grouped: dict[str, list] = {}
     group_order: list[str] = []
     for transaction in transactions:
@@ -186,6 +250,8 @@ def get_my_transactions(
         _to_response_group(
             grouped[group_key],
             article_by_id,
+            actor_login_by_id,
+            organization_name_by_id,
         )
         for group_key in group_order[offset : offset + limit]
     ]
@@ -195,11 +261,15 @@ def get_my_transactions(
 def _to_response(
     transaction,
     article: NewsArticle | None = None,
+    actor_login: str | None = None,
+    organization_name: str | None = None,
 ) -> TransactionResponse:
     return TransactionResponse(
         id=UUID(transaction.id),
         organization_id=UUID(transaction.organization_id),
         actor_user_id=UUID(transaction.actor_user_id) if transaction.actor_user_id else None,
+        actor_login=actor_login,
+        organization_name=organization_name,
         timestamp=transaction.timestamp,
         amount=str(transaction.amount),
         reason=transaction.reason,
@@ -213,15 +283,24 @@ def _to_response(
 def _to_response_group(
     transactions: list,
     article_by_id: dict[str, NewsArticle],
+    actor_login_by_id: dict[str, str],
+    organization_name_by_id: dict[str, str],
 ) -> TransactionResponse:
     first = transactions[0]
     if first.batch_id is None or len(transactions) == 1:
-        return _to_response(first, article_by_id.get(first.reference_id))
+        return _to_response(
+            first,
+            article_by_id.get(first.reference_id),
+            actor_login_by_id.get(first.actor_user_id),
+            organization_name_by_id.get(first.organization_id),
+        )
 
     return TransactionResponse(
         id=UUID(first.batch_id),
         organization_id=UUID(first.organization_id),
         actor_user_id=UUID(first.actor_user_id) if first.actor_user_id else None,
+        actor_login=actor_login_by_id.get(first.actor_user_id),
+        organization_name=organization_name_by_id.get(first.organization_id),
         timestamp=max(transaction.timestamp for transaction in transactions),
         amount=str(sum(transaction.amount for transaction in transactions)),
         reason=first.reason,
