@@ -21,6 +21,16 @@ PIPELINE_JOBS_IN_PROGRESS = Gauge(
     "Number of pipeline jobs currently being processed.",
     ("mode",),
 )
+PIPELINE_LAST_JOB_DURATION = Gauge(
+    "news_flow_pipeline_last_job_duration_seconds",
+    "Duration of the last completed pipeline job in seconds.",
+    ("mode", "status"),
+)
+PIPELINE_LAST_JOB_THROUGHPUT = Gauge(
+    "news_flow_pipeline_last_job_throughput",
+    "Average throughput of the last successful pipeline job in news per second.",
+    ("mode",),
+)
 PROCESSED_ARTICLES = Gauge(
     "news_flow_processed_articles",
     "Current number of news articles with processed status in PostgreSQL.",

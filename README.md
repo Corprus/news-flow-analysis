@@ -98,7 +98,7 @@ Docker Compose поднимает:
 - `model-service` — BGE-M3, кластеризация и оценка новизны;
 - `rabbitmq` — очередь асинхронных задач;
 - `postgres` — PostgreSQL 16 с pgvector.
-- `prometheus`, `grafana`, `cadvisor` — метрики и дашборд нагрузки.
+- `prometheus`, `grafana`, `metrics-exporter` — метрики и дашборд нагрузки.
 
 Публикации хранятся в PostgreSQL. API передаёт через RabbitMQ только ID и режим
 обработки, а `model-service` читает данные, выполняет pipeline и сохраняет

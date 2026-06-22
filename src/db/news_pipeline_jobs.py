@@ -102,3 +102,26 @@ class NewsPipelineJobRepository:
             "created_at": row[4],
             "updated_at": row[5],
         }
+
+    async def get_latest_completed(self) -> dict[str, Any] | None:
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    SELECT status, request, result, created_at, updated_at
+                    FROM news_pipeline_jobs
+                    WHERE status IN ('done', 'failed')
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """
+                )
+                row = await cursor.fetchone()
+        if row is None:
+            return None
+        return {
+            "status": row[0],
+            "request": row[1],
+            "result": row[2],
+            "created_at": row[3],
+            "updated_at": row[4],
+        }

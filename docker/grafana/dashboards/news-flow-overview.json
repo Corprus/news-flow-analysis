@@ -224,12 +224,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (mode) (rate(news_flow_pipeline_articles_processed_total[5m]))",
+          "expr": "max by (mode) (news_flow_pipeline_last_job_throughput)",
           "legendFormat": "{{mode}}",
           "refId": "A"
         }
       ],
-      "title": "Processing speed, news/s",
+      "title": "Last job speed, news/s",
       "type": "timeseries"
     },
     {
@@ -374,8 +374,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (container_label_com_docker_compose_service) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_service!=\"\"}[5m]))",
-          "legendFormat": "{{container_label_com_docker_compose_service}}",
+          "expr": "sum by (service) (news_flow_container_cpu_cores)",
+          "legendFormat": "{{service}}",
           "refId": "A"
         }
       ],
@@ -462,8 +462,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (container_label_com_docker_compose_service) (container_memory_working_set_bytes{container_label_com_docker_compose_service!=\"\"})",
-          "legendFormat": "{{container_label_com_docker_compose_service}}",
+          "expr": "sum by (service) (news_flow_container_memory_bytes)",
+          "legendFormat": "{{service}}",
           "refId": "A"
         }
       ],
@@ -642,12 +642,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, mode) (rate(news_flow_pipeline_job_duration_seconds_bucket[15m])))",
-          "legendFormat": "p95 {{mode}}",
+          "expr": "max by (mode, status) (news_flow_pipeline_last_job_duration_seconds)",
+          "legendFormat": "{{mode}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "Pipeline job duration",
+      "title": "Last pipeline job duration",
       "type": "timeseries"
     }
   ],
@@ -655,7 +655,7 @@
   "refresh": "15s",
   "schemaVersion": 41,
   "tags": [
-    "news-flow",
+    "semantic-news-novelty",
     "mvp"
   ],
   "templating": {
@@ -667,7 +667,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "News Flow MVP",
-  "uid": "news-flow-mvp",
+  "title": "Semantic News Novelty — мониторинг",
+  "uid": "semantic-news-novelty-monitoring",
   "version": 1
 }

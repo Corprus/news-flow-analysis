@@ -65,17 +65,14 @@ services:
       - prometheus
     restart: unless-stopped
 
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.52.1
-    privileged: true
-    command:
-      - --docker_only=true
-      - --housekeeping_interval=10s
+  metrics-exporter:
+    build:
+      context: .
+      dockerfile: docker/metrics-exporter.Dockerfile
     volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker:/var/lib/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    expose:
+      - "9101"
     restart: unless-stopped
 
   api:

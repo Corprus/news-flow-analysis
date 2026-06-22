@@ -17,6 +17,8 @@ from model_service.metrics import (
     PIPELINE_JOB_DURATION,
     PIPELINE_JOBS,
     PIPELINE_JOBS_IN_PROGRESS,
+    PIPELINE_LAST_JOB_DURATION,
+    PIPELINE_LAST_JOB_THROUGHPUT,
     PROCESSED_ARTICLES,
 )
 from news.pipeline_repository import NewsPipelineRepository
@@ -39,6 +41,7 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
     jobs: NewsPipelineJobRepository = app.state.jobs
     repository: NewsPipelineRepository = app.state.pipeline_repository
     news_ids: list[str] = []
+    status = "failed"
     PIPELINE_JOBS_IN_PROGRESS.labels(mode=mode).inc()
     try:
         news_ids = list(dict.fromkeys(str(value) for value in payload["news_ids"]))
@@ -78,6 +81,7 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
         PIPELINE_ARTICLES_PROCESSED.labels(mode=mode).inc(len(result.requested_ids))
         PIPELINE_JOBS.labels(mode=mode, status="done").inc()
         PROCESSED_ARTICLES.set(await repository.count_processed_articles())
+        status = "done"
     except Exception as exc:
         error = str(exc)
         await jobs.mark_failed(job_id, error)
@@ -85,7 +89,13 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
             await repository.mark_articles_error(news_ids, error)
         PIPELINE_JOBS.labels(mode=mode, status="failed").inc()
     finally:
-        PIPELINE_JOB_DURATION.labels(mode=mode).observe(monotonic() - started_at)
+        duration = monotonic() - started_at
+        PIPELINE_JOB_DURATION.labels(mode=mode).observe(duration)
+        PIPELINE_LAST_JOB_DURATION.labels(mode=mode, status=status).set(duration)
+        if status == "done":
+            PIPELINE_LAST_JOB_THROUGHPUT.labels(mode=mode).set(
+                len(news_ids) / duration
+            )
         PIPELINE_JOBS_IN_PROGRESS.labels(mode=mode).dec()
 
 
@@ -143,6 +153,23 @@ async def lifespan(app: FastAPI):
     app.state.full_pipeline = full_pipeline
     app.state.incremental_pipeline = incremental_pipeline
     PROCESSED_ARTICLES.set(await repository.count_processed_articles())
+    latest_job = await jobs.get_latest_completed()
+    if latest_job is not None:
+        mode = str(latest_job["request"].get("mode", "incremental"))
+        status = str(latest_job["status"])
+        duration = (
+            latest_job["updated_at"] - latest_job["created_at"]
+        ).total_seconds()
+        PIPELINE_LAST_JOB_DURATION.labels(mode=mode, status=status).set(duration)
+        if status == "done" and duration > 0:
+            result = latest_job.get("result") or {}
+            article_ids = result.get("requested_ids") or latest_job["request"].get(
+                "news_ids",
+                [],
+            )
+            PIPELINE_LAST_JOB_THROUGHPUT.labels(mode=mode).set(
+                len(article_ids) / duration
+            )
 
     async def handler(message: dict[str, Any]) -> None:
         await handle_message(app, message)
