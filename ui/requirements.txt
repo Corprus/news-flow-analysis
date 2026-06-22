@@ -1,3 +1,4 @@
 streamlit
+extra-streamlit-components
 requests
 pandas

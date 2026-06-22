@@ -10,6 +10,10 @@ class UserNotFoundError(UserManagementError):
     pass
 
 
+class LastAdministratorError(UserManagementError):
+    pass
+
+
 class InvalidCredentialsError(UserManagementError):
     pass
 

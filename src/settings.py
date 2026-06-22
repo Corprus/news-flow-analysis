@@ -8,6 +8,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_env: str = Field(default="local", alias="APP_ENV")
+    demo_mode: bool = Field(default=False, alias="DEMO_MODE")
+    demo_user_login: str = Field(default="demo", alias="DEMO_USER_LOGIN")
+    demo_user_password: str = Field(default="demo12345", alias="DEMO_USER_PASSWORD")
+    demo_admin_login: str = Field(default="admin", alias="DEMO_ADMIN_LOGIN")
+    demo_admin_password: str = Field(default="admin12345", alias="DEMO_ADMIN_PASSWORD")
+    demo_initial_credit: Decimal = Field(
+        default=Decimal("100.00"),
+        ge=0,
+        alias="DEMO_INITIAL_CREDIT",
+    )
+    demo_news_path: str = Field(
+        default="data/demo/lenta_demo.csv",
+        alias="DEMO_NEWS_PATH",
+    )
     postgres_host: str = Field(default="postgres", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
     postgres_db: str = Field(default="news_flow", alias="POSTGRES_DB")
@@ -35,25 +49,19 @@ class Settings(BaseSettings):
         default=60 * 24,
         alias="ACCESS_TOKEN_TTL_MINUTES",
     )
-    news_add_cost: Decimal = Field(default=Decimal("1.00"), alias="NEWS_ADD_COST")
-    news_search_cost: Decimal = Field(default=Decimal("1.00"), alias="NEWS_SEARCH_COST")
-    use_local_model: bool = Field(default=False, alias="USE_LOCAL_MODEL")
-    local_model_source: str = Field(
-        default="models/news-flow-ru-vectorization-mpnet/final",
-        alias="LOCAL_MODEL_SOURCE",
+    news_add_cost: Decimal = Field(default=Decimal("1.00"), ge=0, alias="NEWS_ADD_COST")
+    news_search_cost: Decimal = Field(default=Decimal("0.00"), ge=0, alias="NEWS_SEARCH_COST")
+    pipeline_model_path: str = Field(
+        default="data/artifacts/models/final_exp10/final_novelty_model.joblib",
+        alias="PIPELINE_MODEL_PATH",
     )
-    remote_model_source: str = Field(
-        default="configs/model_registry/latest_model.json",
-        alias="REMOTE_MODEL_SOURCE",
+    pipeline_config_path: str = Field(
+        default="data/artifacts/models/final_exp10/final_pipeline_config.json",
+        alias="PIPELINE_CONFIG_PATH",
     )
+    pipeline_device: str | None = Field(default=None, alias="PIPELINE_DEVICE")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
-    @property
-    def model_source(self) -> str:
-        if self.use_local_model:
-            return self.local_model_source
-        return self.remote_model_source
 
     @property
     def database_url(self) -> str:

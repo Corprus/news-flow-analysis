@@ -1,45 +1,17 @@
 # Артефакты моделей
 
-В проекте используются два независимых набора model artifacts.
+В рабочем режиме используется один набор артефактов модели финального конвейера
+кластеризации и оценки новизны.
 
-## Сервисная embedding-модель
+## Финальный конвейер кластеризации и оценки новизны
 
-FastAPI model-service использует дообученную sentence-transformers модель:
+Автономный пайплайн инференса использует:
 
-```text
-Korprus/news-flow-ru-vectorization-mpnet
-```
-
-Базовая модель — `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`,
-датасет — `merionum/ru_paraphraser`, loss — `MultipleNegativesRankingLoss`.
-
-Зафиксированная Hugging Face ревизия хранится в:
-
-```text
-configs/model_registry/latest_model.json
-```
-
-Локальный путь:
-
-```text
-models/news-flow-ru-vectorization-mpnet/final
-```
-
-Модель создаётся `scripts/train_embeddings.py`, публикуется через
-`scripts/publish_model.py` и скачивается через `scripts/download_model.py`.
-
-MPNet retrieval-метрики относятся только к качеству поиска парафразов. Они не являются
-оценкой финальной кластеризации или novelty detection.
-
-## Финальный clustering/novelty pipeline
-
-Offline/inference pipeline использует:
-
-- embedding-модель `BAAI/bge-m3`, загружаемую через `sentence-transformers`;
-- сохранённый wrapper novelty classifier;
+- модель эмбеддингов `BAAI/bge-m3`, загружаемую через `sentence-transformers`;
+- сохранённую обёртку классификатора новизны;
 - JSON-конфигурацию кластеризации.
 
-Runtime-файлы:
+Файлы модели:
 
 ```text
 data/artifacts/models/final_exp10/final_novelty_model.joblib
@@ -50,22 +22,20 @@ data/artifacts/models/final_exp10/final_pipeline_config.json
 актуальные метрики находятся в [`final_pipeline.md`](final_pipeline.md) и
 [`model_improvement.md`](model_improvement.md).
 
-Дообученная на русских парафразах BGE-M3 проверялась как ablation, но не вошла в
-финальный runtime, поскольку уступила базовой `BAAI/bge-m3` в downstream-оценке.
+Дообученная на русских парафразах BGE-M3 проверялась, но не вошла в финальную рабочую конфигурацию, поскольку уступила базовой `BAAI/bge-m3` в оценке на последующих задачах.
 
 ## Что не хранить в Git
 
-Как правило, не коммитируются:
+Не заливаются:
 
-- полные checkpoints transformer-моделей;
-- Hugging Face caches;
-- embedding caches `.npz`;
-- FAISS-индексы;
+- полные чекпойнты transformer-моделей;
+- кеши Hugging Face;
+- кеши эмбеддингов `.npz`;
 - большие подготовленные датасеты;
-- predictions и временные training outputs.
+- предсказания и временные вывод обучения модели.
 
-Допустимо хранить небольшие runtime-артефакты и metadata, если они нужны для
+Допустимо хранить небольшие рабочие артефакты и метаданные, если они нужны для
 воспроизводимого запуска и явно включены в проект.
 
-Для production-поставки предпочтительны Hugging Face Hub или объектное хранилище с
-зафиксированной ревизией и checksum.
+Для промышленной поставки предпочтительны Hugging Face Hub или объектное хранилище с
+зафиксированной ревизией и контрольной суммой.

@@ -1,6 +1,7 @@
 # Minimal dependencies for GitHub Actions unit tests.
 # Heavy ML dependencies from requirements.txt are intentionally excluded.
 fastapi
+python-multipart
 pydantic-settings
 aio-pika
 SQLAlchemy

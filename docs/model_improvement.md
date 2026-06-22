@@ -1,7 +1,7 @@
 # Улучшение модели Semantic News Novelty
 
 Документ описывает актуальную структуру экспериментов по улучшению модели и то,
-как результаты этих экспериментов связаны с финальным inference pipeline.
+как результаты этих экспериментов связаны с финальным пайплайном инференса.
 
 ## Ключевые ноутбуки
 
@@ -14,12 +14,12 @@ notebooks/08_finetune_bge_m3_embeddings.ipynb
 Главный ноутбук для выбора финального решения - `06_model_improvement_experiments_v3.ipynb`.
 Он фиксирует цепочку экспериментов:
 
-1. воспроизведение baseline `exp_00b`;
-2. выбор кластеризации без переобучения novelty-модели;
-3. подбор `exp_10` best-candidate attach по silver-positive сигналу;
+1. воспроизведение бейзлайна `exp_00b`;
+2. выбор кластеризации без переобучения модели новизны;
+3. подбор присоединения к лучшему кандидату `exp_10` по silver-positive сигналу;
 4. сравнение final-step моделей на выбранной кластеризации;
-5. экспорт финальной модели и config;
-6. optional ablation с fine-tuned BGE-M3.
+5. экспорт финальной модели и конфигурации;
+6. необязательное исследование с дообученной BGE-M3.
 
 ## Актуальный результат
 
@@ -29,11 +29,22 @@ notebooks/08_finetune_bge_m3_embeddings.ipynb
 exp_10a_current_model_on_exp10_clustering
 ```
 
-Это текущая сохраненная CatBoost/fallback модель, примененная к новой выбранной
+Это текущая сохраненная CatBoost-модель, примененная к новой выбранной
 `exp_10` кластеризации. По актуальной таблице экспериментов она дала лучший
 `significant_f1` среди `exp_10*`.
 
-Финальные runtime-артефакты:
+После фиксации рантайм-правила «первая публикация кластера → `significant`» итоговая оценка на
+87 строках golden-разметки новизны:
+
+- precision: `0.8471`;
+- recall: `0.9863`;
+- F1: `0.9114`.
+
+Эти метрики одинаковы для `exp_00b` и `exp_10` при одной модели новизны, потому что
+изменение кластеризации не поменяло метки на размеченном подмножестве. Измеренный
+прирост `exp_10` относится к кластеризации: попарный F1 вырос с `0.7697` до `0.9017`.
+
+Финальные рантайм-артефакты:
 
 ```text
 data/artifacts/models/final_exp10/final_novelty_model.joblib
@@ -48,29 +59,30 @@ exp10_src2_sim0.75_days7_m0.03_tj0.15_num1
 
 ## Структура кода
 
-Экспериментальная и runtime-логика вынесена из ноутбуков в `src/model/` и
+Экспериментальная и рантайм-логика вынесена из ноутбуков в `src/model/` и
 `src/final_pipeline/`.
 
 ```text
 src/model/
-  config.py                 # пути и конфиги экспериментов/моделей
-  data.py                   # загрузка, нормализация схем, сохранение prediction CSV
-  embeddings.py             # SentenceTransformer encoder и id-aware embedding cache
-  legacy_clustering.py      # строгая baseline graph clustering
-  attach_clustering.py      # exp_10 attach clustering и silver-positive sweep
-  features.py               # previous-only признаки для novelty model
+  config.py                 # пути и конфигурации экспериментов/моделей
+  data.py                   # загрузка, нормализация схем, сохранение CSV с предсказаниями
+  embeddings.py             # энкодер SentenceTransformer и кеш эмбеддингов с учётом ID
+  legacy_clustering.py      # строгая бейзлайн-кластеризация на графе
+  attach_clustering.py      # кластеризация exp_10 с присоединением и перебор silver-positive
+  features.py               # признаки только по предыдущим публикациям для модели новизны
   classifier_training.py    # CatBoost / MLP / LogisticRegression training helpers
-  significance_model.py     # общий wrapper novelty-модели с fallback
-  evaluation.py             # метрики кластеризации и novelty labels
-  experiment_tracking.py    # сохранение prediction CSV и таблицы экспериментов
+  significance_model.py     # обёртка модели новизны и правило для первой публикации кластера
+  evaluation.py             # метрики кластеризации и метки новизны
+  experiment_tracking.py    # сохранение CSV с предсказаниями и таблицы экспериментов
 
 src/final_pipeline/
-  config.py                 # config финального inference pipeline
-  pipeline.py               # production-like orchestration
+  config.py                 # конфигурация финального пайплайна инференса
+  pipeline.py               # оркестрация, близкая к промышленной
 ```
 
-`src/final_pipeline/` использует реализацию из `src/model/`, чтобы notebook и
-runtime не расходились по clustering, feature engineering и fallback logic.
+`src/final_pipeline/` использует реализацию из `src/model/`, чтобы ноутбук и
+рантайм не расходились по кластеризации, построению признаков и правилу
+«первая публикация кластера → `significant`».
 
 ## Контракт признаков
 
@@ -78,7 +90,7 @@ runtime не расходились по clustering, feature engineering и fall
 `model.features.LEGACY_SIGNIFICANCE_FEATURE_COLUMNS`.
 
 Важно: старый experimental-набор с именами вроде `prev_count` и `max_prev_sim`
-не является runtime-контрактом финальной модели. Для финального pipeline
+не является рантайм-контрактом финальной модели. Для финального пайплайна
 используются признаки вроде:
 
 ```text
@@ -90,7 +102,7 @@ title_jaccard_max
 shared_numbers_count
 ```
 
-## Fine-tuned BGE-M3
+## Дообученная BGE-M3
 
 `08_finetune_bge_m3_embeddings.ipynb` обучал BGE-M3 на русских парафразах и
 сохранял модель локально:
@@ -99,9 +111,8 @@ shared_numbers_count
 E:\MLCache\news-flow-analysis\models\bge_m3_ru_paraphrase_mnrl
 ```
 
-По текущей финальной конфигурации runtime использует базовый `BAAI/bge-m3`.
-Fine-tuned модель остается ablation/исследовательским результатом, а не частью
-финального inference pipeline.
+По текущей финальной конфигурации рантайм использует базовый `BAAI/bge-m3`.
+Дообученная модель остаётся результатом исследования, а не частью финального пайплайна обработки.
 
 ## Что коммитить
 
@@ -130,11 +141,11 @@ notebooks/catboost_info/
 src/final_pipeline_old/
 ```
 
-Эти файлы являются generated outputs, локальными cache или старым кодом.
+Эти файлы являются сгенерированными результатами, локальными кешами или старым кодом.
 
 ## Проверка работоспособности
 
-Быстрый запуск финального pipeline:
+Быстрый запуск финального пайплайна:
 
 ```powershell
 python scripts/run_final_pipeline.py `
@@ -146,9 +157,9 @@ python scripts/run_final_pipeline.py `
 ```
 
 `--model` и `--config` можно не указывать: по умолчанию подхватываются
-финальные `exp_10a` artifacts из `data/artifacts/models/final_exp10/`.
+финальные артефакты `exp_10a` из `data/artifacts/models/final_exp10/`.
 
-Быстрый benchmark:
+Быстрый бенчмарк:
 
 ```powershell
 python scripts/benchmark_final_pipeline.py `
@@ -159,7 +170,7 @@ python scripts/benchmark_final_pipeline.py `
 
 ## Следующий этап
 
-После фиксации финального pipeline дальнейшая работа логично делится на два
+После фиксации финального пайплайна дальнейшая работа логично делится на два
 потока:
 
 1. косметическая чистка ноутбуков и текстовых выводов;
@@ -167,9 +178,9 @@ python scripts/benchmark_final_pipeline.py `
 
 Для сервиса важно использовать `load_pipeline(project_root=...)` из
 `src/final_pipeline/pipeline.py`: он автоматически загружает выбранную `10a`
-модель и сохраненный config кластеризации.
+модель и сохранённую конфигурацию кластеризации.
 
 ## Связанные документы
 
-- [Финальный pipeline](final_pipeline.md)
+- [Финальный пайплайн](final_pipeline.md)
 - [Основной README](../README.md)

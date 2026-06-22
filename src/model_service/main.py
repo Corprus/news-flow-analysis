@@ -1,119 +1,149 @@
+from __future__ import annotations
+
+import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 
-from db.news_vectorization_jobs import NewsVectorizationJobRepository
+from db.news_pipeline_jobs import NewsPipelineJobRepository
+from final_pipeline import FinalPipelineConfig, IncrementalNewsNoveltyPipeline, load_pipeline
 from messaging.rabbitmq import RabbitConsumer
-from news.vectorization_repository import NewsVectorizationRepository
-from services.news_vectorizer import NewsVectorizer
+from news.pipeline_repository import NewsPipelineRepository
 from settings import get_settings
 
 
-async def handle_news_vectorization_job(app: FastAPI, message: dict[str, Any]) -> None:
-    if message.get("type") != "news_vectorization":
-        return
+async def handle_message(app: FastAPI, message: dict[str, Any]) -> None:
+    message_type = message.get("type")
+    if message_type == "news_pipeline":
+        await _handle_pipeline_job(app, message)
+    elif message_type == "news_search":
+        await _handle_search_job(app, message)
 
-    job_id = message["job_id"]
+
+async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
+    job_id = str(message["job_id"])
     payload = message["payload"]
-    repository: NewsVectorizationJobRepository = app.state.repository
-    news_repository: NewsVectorizationRepository = app.state.news_repository
-    vectorizer: NewsVectorizer = app.state.model
-
-    target_type = payload.get("target_type")
-
+    jobs: NewsPipelineJobRepository = app.state.jobs
+    repository: NewsPipelineRepository = app.state.pipeline_repository
+    news_ids: list[str] = []
     try:
-        await repository.mark_processing(job_id, payload)
-        if target_type == "news_article":
-            await news_repository.mark_article_processing(payload["article_id"])
-        elif target_type == "news_search_query":
-            await news_repository.mark_search_processing(payload["query_id"])
-
-        result = await vectorizer.vectorize_text(text=payload["text"])
-
-        if target_type == "news_article":
-            await _handle_article_vectorization(news_repository, payload, result)
-        elif target_type == "news_search_query":
-            search_result = await _handle_search_query(news_repository, payload, result)
-            result = {**result, "search_result": search_result}
-
-        await repository.mark_done(job_id, _job_result(result))
+        news_ids = list(dict.fromkeys(str(value) for value in payload["news_ids"]))
+        if not news_ids:
+            raise ValueError("news_ids must contain at least one article ID")
+        mode = str(payload.get("mode", "incremental"))
+        if mode not in {"full", "incremental"}:
+            raise ValueError(f"Unsupported pipeline mode: {mode}")
+        await jobs.mark_processing(job_id, payload)
+        requested = await repository.load_articles(news_ids)
+        await repository.mark_articles_processing(news_ids)
+        if mode == "full":
+            result = await asyncio.to_thread(app.state.full_pipeline.run, requested)
+        else:
+            history, history_embeddings = await repository.load_history(
+                exclude_news_ids=news_ids,
+                embedding_model=app.state.config.embedding_model_name,
+                embedding_model_revision=app.state.config.embedding_model_revision,
+            )
+            result = await asyncio.to_thread(
+                app.state.incremental_pipeline.process,
+                historical_news_df=history,
+                historical_embeddings=history_embeddings,
+                new_news_df=requested,
+            )
+        await repository.save_result(result)
+        await jobs.mark_done(
+            job_id,
+            {
+                "mode": result.mode,
+                "requested_ids": result.requested_ids,
+                "updated_ids": result.updated_ids,
+                "context_count": len(result.context_ids),
+                "diagnostics": result.diagnostics,
+                "versions": vars(result.versions),
+            },
+        )
     except Exception as exc:
         error = str(exc)
-        await repository.mark_failed(job_id, error)
-        if target_type == "news_article" and payload.get("article_id"):
-            await news_repository.mark_article_failed(payload["article_id"], error)
-        if target_type == "news_search_query" and payload.get("query_id"):
-            await news_repository.mark_search_failed(payload["query_id"], error)
+        await jobs.mark_failed(job_id, error)
+        if news_ids:
+            await repository.mark_articles_error(news_ids, error)
 
 
-async def _handle_article_vectorization(
-    repository: NewsVectorizationRepository,
-    payload: dict[str, Any],
-    vectorization_result: dict[str, Any],
-) -> None:
-    article_id = payload["article_id"]
-    await repository.save_article_embedding(
-        article_id=article_id,
-        embedding=vectorization_result["embedding"],
-        model_name=vectorization_result["model_source"],
-        model_revision=vectorization_result["resolved_model_source"],
-    )
-
-
-async def _handle_search_query(
-    repository: NewsVectorizationRepository,
-    payload: dict[str, Any],
-    vectorization_result: dict[str, Any],
-) -> dict[str, Any]:
-    query_id = payload["query_id"]
-    return await repository.complete_search_query(
-        query_id=query_id,
-        query_embedding=vectorization_result["embedding"],
-        filters=payload.get("filters") or {},
-        top_k=int(payload.get("top_k") or 20),
-    )
-
-
-def _job_result(vectorization_result: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in vectorization_result.items() if key != "embedding"}
+async def _handle_search_job(app: FastAPI, message: dict[str, Any]) -> None:
+    job_id = str(message["job_id"])
+    payload = message["payload"]
+    query_id = str(payload["query_id"])
+    jobs: NewsPipelineJobRepository = app.state.jobs
+    repository: NewsPipelineRepository = app.state.pipeline_repository
+    try:
+        await jobs.mark_processing(job_id, payload)
+        await repository.mark_search_processing(query_id)
+        embedding = await asyncio.to_thread(
+            app.state.full_pipeline.encoder.encode_texts,
+            [str(payload["text"])],
+        )
+        result = await repository.complete_search_query(
+            query_id=query_id,
+            query_embedding=embedding[0].tolist(),
+            filters=payload.get("filters") or {},
+            top_k=int(payload.get("top_k") or 20),
+            model_name=app.state.config.embedding_model_name,
+            model_revision=app.state.config.embedding_model_revision,
+        )
+        await jobs.mark_done(job_id, {"search_result": result})
+    except Exception as exc:
+        error = str(exc)
+        await jobs.mark_failed(job_id, error)
+        await repository.mark_search_failed(query_id, error)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    repository = NewsVectorizationJobRepository(settings.database_url)
-    news_repository = NewsVectorizationRepository(settings.database_url)
-    model = NewsVectorizer(settings.model_source)
+    jobs = NewsPipelineJobRepository(settings.database_url)
+    repository = NewsPipelineRepository(settings.database_url)
+    config = FinalPipelineConfig.from_json(Path(settings.pipeline_config_path))
+    full_pipeline = await asyncio.to_thread(
+        load_pipeline,
+        model_path=settings.pipeline_model_path,
+        config=config,
+        device=settings.pipeline_device,
+        project_root=Path.cwd(),
+    )
+    incremental_pipeline = IncrementalNewsNoveltyPipeline(
+        encoder=full_pipeline.encoder,
+        novelty_model=full_pipeline.novelty_model,
+        final_config=config,
+    )
 
-    await repository.initialize()
-    await model.load()
-
-    app.state.repository = repository
-    app.state.news_repository = news_repository
-    app.state.model = model
+    await jobs.initialize()
+    app.state.jobs = jobs
+    app.state.pipeline_repository = repository
+    app.state.config = config
+    app.state.full_pipeline = full_pipeline
+    app.state.incremental_pipeline = incremental_pipeline
 
     async def handler(message: dict[str, Any]) -> None:
-        await handle_news_vectorization_job(app, message)
+        await handle_message(app, message)
 
     consumer = RabbitConsumer(settings.rabbitmq_url, settings.news_vectorization_queue, handler)
     await consumer.start()
     app.state.consumer = consumer
-
     yield
     await consumer.close()
 
 
-app = FastAPI(title="News Flow Model Service", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="News Flow Model Service", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/health")
 async def health(request: Request) -> dict[str, str]:
-    model: NewsVectorizer = request.app.state.model
+    config: FinalPipelineConfig = request.app.state.config
     return {
         "status": "ok",
         "service": "model-service",
-        "model_loaded": str(model.is_loaded).lower(),
-        "model_source": model.model_source,
-        "resolved_model_source": model.resolved_model_source,
+        "pipeline_version": config.pipeline_version,
+        "embedding_model": config.embedding_model_name,
     }

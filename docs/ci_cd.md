@@ -1,23 +1,24 @@
 # CI/CD
 
-GitHub Actions workflow: `.github/workflows/ci.yml`.
+Сценарий GitHub Actions находится в `.github/workflows/ci.yml`.
 
-It runs on pushes and pull requests to `main`/`master`:
+Он запускается при отправке изменений и создании запроса на слияние в `main`/`master`:
 
-- installs Python 3.11 dependencies from `requirements-dev.txt`;
-- runs `ruff check .`;
-- runs `pytest`;
-- validates Docker Compose config without building images;
-- blocks PR merge when configured as a required status check in GitHub branch protection.
+- устанавливает зависимости Python 3.11 из `requirements-dev.txt`;
+- выполняет `ruff check .`;
+- выполняет `pytest`;
+- проверяет конфигурацию Docker Compose без сборки образов;
+- блокирует запрос на слияние, если проверка настроена как обязательная в правилах защиты ветки GitHub.
 
-Docker image build is present but disabled by default. Run the workflow manually with
-`build_images=true` to build the API and model-service images without starting containers.
-This job is intentionally manual because the ML dependencies are large.
+Сборка Docker-образов предусмотрена, но по умолчанию отключена. Запустите сценарий
+вручную с `build_images=true`, чтобы собрать образы API и `model-service` без запуска
+контейнеров. Задание сделано ручным намеренно, поскольку ML-зависимости имеют большой
+размер.
 
-To require tests before merge in GitHub:
+Чтобы сделать прохождение тестов обязательным перед слиянием в GitHub:
 
-1. Open repository settings.
-2. Go to `Rules` or `Branches`.
-3. Add a rule for the protected branch.
-4. Enable required status checks.
-5. Select `Ruff`, `Tests`, and `Docker Compose Config`.
+1. Откройте настройки репозитория.
+2. Перейдите в раздел `Rules` или `Branches`.
+3. Добавьте правило для защищаемой ветки.
+4. Включите обязательные проверки статуса.
+5. Выберите `Ruff`, `Tests` и `Docker Compose Config`.

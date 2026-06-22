@@ -14,6 +14,7 @@ from db.database import Base
 
 class TransactionReason(StrEnum):
     NEWS_ADD = "news_add"
+    NEWS_REPROCESS = "news_reprocess"
     NEWS_SEARCH = "news_search"
     CREDIT_ADD = "credit_add"
     CREDIT_WITHDRAW = "credit_withdraw"
@@ -22,9 +23,9 @@ class TransactionReason(StrEnum):
 class Account(Base):
     __tablename__ = "accounts"
 
-    user_id: Mapped[str] = mapped_column(
+    organization_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
         primary_key=True,
     )
     balance: Mapped[Decimal] = mapped_column(
@@ -48,11 +49,17 @@ class Transaction(Base):
         primary_key=True,
         default=lambda: str(uuid4()),
     )
-    user_id: Mapped[str] = mapped_column(
+    organization_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
+    )
+    actor_user_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
     )
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -62,5 +69,10 @@ class Transaction(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     reason: Mapped[str] = mapped_column(String(64), nullable=False)
     reference_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
+    batch_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        index=True,
+        nullable=True,
+    )
 
     __table_args__ = (Index("ix_transactions_timestamp", "timestamp"),)

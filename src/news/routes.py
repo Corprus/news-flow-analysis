@@ -1,22 +1,35 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
 from fastapi.exceptions import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from accounting.exceptions import InsufficientBalanceError, UserAccountNotFoundError
 from accounting.models import TransactionReason
 from accounting.service import AccountingService
-from db.news_vectorization_jobs import NewsVectorizationJobRepository
+from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
-from news.models import NewsArticle, NewsSearchQuery
+from news.importers import (
+    MAX_IMPORT_FILE_BYTES,
+    NewsImportError,
+    news_importers,
+)
+from news.models import (
+    ArticleOrigin,
+    ArticleStatus,
+    ArticleVisibility,
+    NewsArticle,
+    NewsSearchQuery,
+    SearchQueryStatus,
+)
 from news.service import NewsSearchFilters, NewsService
 from settings import Settings, get_settings
-from users.deps import CurrentUser, SessionDep, authenticate
+from users.deps import CurrentUser, SessionDep, authenticate, ensure_publisher
 
 router = APIRouter(prefix="/v1/news", tags=["news"])
 search_router = APIRouter(prefix="/v1/news-search", tags=["news-search"])
@@ -25,55 +38,173 @@ CurrentUserDep = Annotated[CurrentUser, Depends(authenticate)]
 
 
 class AddNewsRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
     title: str = Field(min_length=1, max_length=1024)
     content: str = Field(min_length=1)
     url: str | None = Field(default=None, max_length=2048)
     canonical_url: str | None = Field(default=None, max_length=2048)
     summary: str | None = None
     language: str | None = Field(default=None, max_length=16)
-    published_at: datetime | None = None
+    topic: str | None = Field(default=None, max_length=256)
+    published_at: datetime
+    publish_immediately: bool = False
+
+    @field_validator("published_at")
+    @classmethod
+    def require_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("published_at must include timezone information")
+        return value
 
 
 class NewsArticleResponse(BaseModel):
     article_id: UUID
-    status: str
-    vectorization_job_id: UUID
+    visibility: ArticleVisibility
+    status: ArticleStatus
+    job_id: UUID | None = None
+
+
+class NewsImportFormatResponse(BaseModel):
+    id: str
+    label: str
+    file_extensions: list[str]
+    media_types: list[str]
+
+
+class NewsImportResponse(BaseModel):
+    format: str
+    total_rows: int
+    created_count: int
+    duplicate_count: int
+    article_ids: list[UUID]
+    published_count: int
+    job_id: UUID | None = None
+
+
+class PublishNewsBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    article_ids: list[UUID] = Field(min_length=1, max_length=10_000)
+
+
+class PublishNewsBatchResponse(BaseModel):
+    article_ids: list[UUID]
+    published_count: int
+    status: Literal[ArticleStatus.PENDING]
+    job_id: UUID
+
+
+class DeleteNewsBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    article_ids: list[UUID] = Field(min_length=1, max_length=10_000)
+
+
+class DeleteNewsBatchResponse(BaseModel):
+    deleted_count: int
+
+
+class ChangeNewsVisibilityResponse(BaseModel):
+    updated_count: int
+
+
+class NoveltyLabelUpdate(BaseModel):
+    article_id: UUID
+    label: Literal["significant", "minor", "duplicate"] | None
+
+
+class UpdateNoveltyLabelsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    updates: list[NoveltyLabelUpdate] = Field(min_length=1, max_length=10_000)
+
+
+class UpdateNoveltyLabelsResponse(BaseModel):
+    updated_count: int
+
+
+class ReprocessNewsResponse(BaseModel):
+    article_ids: list[UUID]
+    queued_count: int
+    status: Literal[ArticleStatus.PENDING]
+    job_id: UUID
+
+
+class NewsArticlePublishResponse(BaseModel):
+    article_id: UUID
+    visibility: Literal[ArticleVisibility.PUBLIC]
+    status: Literal[ArticleStatus.PENDING]
+    job_id: UUID
 
 
 class NewsArticleHistoryItem(BaseModel):
     article_id: UUID
     title: str
-    status: str
-    origin: str
+    visibility: ArticleVisibility
+    status: ArticleStatus
+    origin: ArticleOrigin
     language: str | None
     novelty_score: float | None
-    published_at: datetime | None
+    cluster_id: str | None
+    novelty_label: Literal["significant", "minor", "duplicate"] | None
+    model_novelty_label: Literal["significant", "minor", "duplicate"] | None
+    manual_novelty_label: Literal["significant", "minor", "duplicate"] | None
+    manual_novelty_updated_at: datetime | None
+    assignment_needs_review: bool | None
+    novelty_needs_review: bool | None
+    late_arrival: bool | None
+    processed_at: datetime | None
+    pipeline_error: dict | None
+    possible_duplicate: bool
+    published_at: datetime
     fetched_at: datetime
     url: str | None
 
 
 class NewsSearchRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
     query_text: str = Field(min_length=1)
     top_k: int = Field(default=20, ge=1, le=100)
     language: str | None = Field(default=None, max_length=16)
     source_id: UUID | None = None
     published_from: datetime | None = None
     published_to: datetime | None = None
-    submitted_by_user_id: UUID | None = None
     min_novelty_score: float | None = Field(default=None, ge=0, le=1)
+    min_relevance: float = Field(default=0.5, ge=0, le=1)
+
+    @field_validator("published_from", "published_to")
+    @classmethod
+    def require_filter_timezone(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("published date filters must include timezone information")
+        return value
+
+    @field_validator("published_to")
+    @classmethod
+    def require_valid_date_range(
+        cls,
+        value: datetime | None,
+        info,
+    ) -> datetime | None:
+        published_from = info.data.get("published_from")
+        if value is not None and published_from is not None and value < published_from:
+            raise ValueError("published_to must not be earlier than published_from")
+        return value
 
 
 class NewsSearchResponse(BaseModel):
     query_id: UUID
-    status: str
-    vectorization_job_id: UUID
+    status: SearchQueryStatus
+    job_id: UUID
 
 
 class NewsSearchHistoryItem(BaseModel):
     query_id: UUID
     query_text: str
-    status: str
-    filters: dict
+    status: SearchQueryStatus
+    filters: dict[str, str]
     top_k: int
     result: dict | None
     error: str | None
@@ -93,13 +224,13 @@ def get_publisher(request: Request) -> RabbitPublisher:
     return request.app.state.publisher
 
 
-def get_job_repository(request: Request) -> NewsVectorizationJobRepository:
+def get_job_repository(request: Request) -> NewsPipelineJobRepository:
     return request.app.state.repository
 
 
 async def enqueue_vectorization_job(
     *,
-    repository: NewsVectorizationJobRepository,
+    repository: NewsPipelineJobRepository,
     publisher: RabbitPublisher,
     payload: dict,
 ) -> UUID:
@@ -108,14 +239,18 @@ async def enqueue_vectorization_job(
     await publisher.publish(
         {
             "job_id": str(job_id),
-            "type": "news_vectorization",
+            "type": (
+                "news_search"
+                if payload.get("target_type") == "news_search_query"
+                else "news_pipeline"
+            ),
             "payload": payload,
         }
     )
     return job_id
 
 
-@router.post("", response_model=NewsArticleResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post("", response_model=NewsArticleResponse, status_code=status.HTTP_201_CREATED)
 async def add_news(
     request: AddNewsRequest,
     current_user: CurrentUserDep,
@@ -123,24 +258,385 @@ async def add_news(
     accounting: Annotated[AccountingService, Depends(get_accounting_service)],
     settings: Annotated[Settings, Depends(get_settings)],
     publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
-    repository: Annotated[NewsVectorizationJobRepository, Depends(get_job_repository)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
 ) -> NewsArticleResponse:
-    article = news.add_user_article(
-        user_id=current_user.id,
-        title=request.title,
-        content=request.content,
-        url=request.url,
-        canonical_url=request.canonical_url,
-        summary=request.summary,
-        language=request.language,
-        published_at=request.published_at,
+    ensure_publisher(current_user)
+    try:
+        article = news.add_user_article(
+            user_id=current_user.id,
+            title=request.title,
+            content=request.content,
+            url=request.url,
+            canonical_url=request.canonical_url,
+            summary=request.summary,
+            language=request.language,
+            topic=request.topic,
+            published_at=request.published_at,
+        )
+        published: list[NewsArticle] = []
+        if request.publish_immediately:
+            published = news.publish_user_articles(
+                [UUID(article.id)],
+                current_user.id,
+                allow_already_public=True,
+            )
+            _withdraw_for_articles_or_raise(
+                accounting=accounting,
+                user_id=current_user.id,
+                amount_per_article=settings.news_add_cost,
+                articles=published,
+                batch_id=uuid4() if len(published) > 1 else None,
+            )
+        news.commit()
+    except ValueError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception:
+        news.rollback()
+        raise
+    job_id = await _enqueue_articles_if_any(
+        repository=repository,
+        publisher=publisher,
+        articles=published,
     )
+    return NewsArticleResponse(
+        article_id=UUID(article.id),
+        visibility=article.visibility,
+        status=article.status,
+        job_id=job_id,
+    )
+
+
+@router.get("/import-formats", response_model=list[NewsImportFormatResponse])
+def get_news_import_formats(
+    current_user: CurrentUserDep,
+) -> list[NewsImportFormatResponse]:
+    ensure_publisher(current_user)
+    return [
+        NewsImportFormatResponse(
+            id=item.id,
+            label=item.label,
+            file_extensions=list(item.file_extensions),
+            media_types=list(item.media_types),
+        )
+        for item in news_importers.list_formats()
+    ]
+
+
+@router.post(
+    "/import",
+    response_model=NewsImportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_news(
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+    file: Annotated[UploadFile, File()],
+    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
+    import_format: Annotated[str, Form(alias="format")],
+    publish_immediately: Annotated[bool, Form()] = False,
+) -> NewsImportResponse:
+    ensure_publisher(current_user)
+    content = await file.read(MAX_IMPORT_FILE_BYTES + 1)
+    if len(content) > MAX_IMPORT_FILE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Файл с новостями превышает допустимый размер 200 МБ",
+        )
+    try:
+        articles = news_importers.parse(import_format, content)
+    except NewsImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    try:
+        result = news.import_user_articles(
+            user_id=current_user.id,
+            format_id=import_format,
+            articles=articles,
+        )
+        published: list[NewsArticle] = []
+        if publish_immediately:
+            published = news.publish_user_articles(
+                [UUID(article_id) for article_id in result.article_ids],
+                current_user.id,
+                allow_already_public=True,
+            )
+            _withdraw_for_articles_or_raise(
+                accounting=accounting,
+                user_id=current_user.id,
+                amount_per_article=settings.news_add_cost,
+                articles=published,
+            )
+        news.commit()
+    except ValueError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception:
+        news.rollback()
+        raise
+    job_id = await _enqueue_articles_if_any(
+        repository=repository,
+        publisher=publisher,
+        articles=published,
+    )
+    return NewsImportResponse(
+        format=import_format,
+        total_rows=result.total_rows,
+        created_count=result.created_count,
+        duplicate_count=result.duplicate_count,
+        article_ids=[UUID(article_id) for article_id in result.article_ids],
+        published_count=len(published),
+        job_id=job_id,
+    )
+
+
+@router.post(
+    "/publish",
+    response_model=PublishNewsBatchResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def publish_news_batch(
+    request: PublishNewsBatchRequest,
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
+) -> PublishNewsBatchResponse:
+    ensure_publisher(current_user)
+    try:
+        articles = news.publish_user_articles(
+            request.article_ids,
+            current_user.id,
+            allow_already_public=False,
+        )
+        _withdraw_for_articles_or_raise(
+            accounting=accounting,
+            user_id=current_user.id,
+            amount_per_article=settings.news_add_cost,
+            articles=articles,
+            batch_id=uuid4() if len(articles) > 1 else None,
+        )
+        news.commit()
+    except LookupError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception:
+        news.rollback()
+        raise
+    job_id = await _enqueue_articles_if_any(
+        repository=repository,
+        publisher=publisher,
+        articles=articles,
+    )
+    assert job_id is not None
+    return PublishNewsBatchResponse(
+        article_ids=[UUID(article.id) for article in articles],
+        published_count=len(articles),
+        status=ArticleStatus.PENDING,
+        job_id=job_id,
+    )
+
+
+@router.delete(
+    "",
+    response_model=DeleteNewsBatchResponse,
+)
+def delete_news_drafts(
+    request: DeleteNewsBatchRequest,
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+) -> DeleteNewsBatchResponse:
+    ensure_publisher(current_user)
+    try:
+        deleted_count = news.delete_user_drafts(
+            request.article_ids,
+            current_user.id,
+        )
+        news.commit()
+    except LookupError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception:
+        news.rollback()
+        raise
+    return DeleteNewsBatchResponse(deleted_count=deleted_count)
+
+
+@router.post(
+    "/archive",
+    response_model=ChangeNewsVisibilityResponse,
+)
+def archive_news(
+    request: DeleteNewsBatchRequest,
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+) -> ChangeNewsVisibilityResponse:
+    ensure_publisher(current_user)
+    return _change_news_visibility(
+        news.archive_user_articles,
+        request.article_ids,
+        current_user.id,
+        news,
+    )
+
+
+@router.post(
+    "/restore",
+    response_model=ChangeNewsVisibilityResponse,
+)
+def restore_news(
+    request: DeleteNewsBatchRequest,
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+) -> ChangeNewsVisibilityResponse:
+    ensure_publisher(current_user)
+    return _change_news_visibility(
+        news.restore_user_articles,
+        request.article_ids,
+        current_user.id,
+        news,
+    )
+
+
+@router.post(
+    "/moderation-labels",
+    response_model=UpdateNoveltyLabelsResponse,
+)
+def update_novelty_labels(
+    request: UpdateNoveltyLabelsRequest,
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+) -> UpdateNoveltyLabelsResponse:
+    ensure_publisher(current_user)
+    labels = {item.article_id: item.label for item in request.updates}
+    try:
+        updated_count = news.set_user_article_novelty_labels(labels, current_user.id)
+        news.commit()
+    except LookupError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception:
+        news.rollback()
+        raise
+    return UpdateNoveltyLabelsResponse(updated_count=updated_count)
+
+
+@router.post(
+    "/reprocess",
+    response_model=ReprocessNewsResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def reprocess_news(
+    request: DeleteNewsBatchRequest,
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
+) -> ReprocessNewsResponse:
+    ensure_publisher(current_user)
+    try:
+        articles = news.prepare_user_articles_for_reprocessing(
+            request.article_ids,
+            current_user.id,
+        )
+        _withdraw_for_articles_or_raise(
+            accounting=accounting,
+            user_id=current_user.id,
+            amount_per_article=settings.news_add_cost,
+            articles=articles,
+            reason=TransactionReason.NEWS_REPROCESS,
+            batch_id=uuid4() if len(articles) > 1 else None,
+        )
+        news.commit()
+    except LookupError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception:
+        news.rollback()
+        raise
+    job_id = await _enqueue_articles_if_any(
+        repository=repository,
+        publisher=publisher,
+        articles=articles,
+    )
+    assert job_id is not None
+    return ReprocessNewsResponse(
+        article_ids=[UUID(article.id) for article in articles],
+        queued_count=len(articles),
+        status=ArticleStatus.PENDING,
+        job_id=job_id,
+    )
+
+
+def _change_news_visibility(
+    operation,
+    article_ids: list[UUID],
+    user_id: UUID,
+    news: NewsService,
+) -> ChangeNewsVisibilityResponse:
+    try:
+        updated_count = operation(article_ids, user_id)
+        news.commit()
+    except LookupError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        news.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception:
+        news.rollback()
+        raise
+    return ChangeNewsVisibilityResponse(updated_count=updated_count)
+
+
+@router.post(
+    "/{article_id}/publish",
+    response_model=NewsArticlePublishResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def publish_news(
+    article_id: UUID,
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
+) -> NewsArticlePublishResponse:
+    ensure_publisher(current_user)
+    try:
+        article = news.publish_user_article(article_id, current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if article is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
     _withdraw_or_raise(
         accounting=accounting,
         user_id=current_user.id,
         amount=settings.news_add_cost,
         reason=TransactionReason.NEWS_ADD,
-        reference_id=UUID(article.id),
+        reference_id=article_id,
     )
     news.commit()
     job_id = await enqueue_vectorization_job(
@@ -148,10 +644,11 @@ async def add_news(
         publisher=publisher,
         payload=_article_vectorization_payload(article),
     )
-    return NewsArticleResponse(
-        article_id=UUID(article.id),
-        status=article.status,
-        vectorization_job_id=job_id,
+    return NewsArticlePublishResponse(
+        article_id=article_id,
+        visibility=ArticleVisibility.PUBLIC,
+        status=ArticleStatus.PENDING,
+        job_id=job_id,
     )
 
 
@@ -159,7 +656,7 @@ async def add_news(
 def get_my_news_history(
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],
-    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    limit: Annotated[int, Query(ge=1, le=10_000)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[NewsArticleHistoryItem]:
     articles = news.list_user_articles(current_user.id, limit, offset)
@@ -174,15 +671,15 @@ async def create_news_search(
     accounting: Annotated[AccountingService, Depends(get_accounting_service)],
     settings: Annotated[Settings, Depends(get_settings)],
     publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
-    repository: Annotated[NewsVectorizationJobRepository, Depends(get_job_repository)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
 ) -> NewsSearchResponse:
     filters = NewsSearchFilters(
         language=request.language,
         source_id=request.source_id,
         published_from=request.published_from,
         published_to=request.published_to,
-        submitted_by_user_id=request.submitted_by_user_id,
         min_novelty_score=request.min_novelty_score,
+        min_relevance=request.min_relevance,
     )
     search_query = news.create_search_query(
         user_id=current_user.id,
@@ -206,7 +703,7 @@ async def create_news_search(
     return NewsSearchResponse(
         query_id=UUID(search_query.id),
         status=search_query.status,
-        vectorization_job_id=job_id,
+        job_id=job_id,
     )
 
 
@@ -225,12 +722,31 @@ def get_my_search_history(
 
 def _article_vectorization_payload(article: NewsArticle) -> dict:
     return {
-        "target_type": "news_article",
-        "article_id": article.id,
-        "text": article.content or article.summary or article.title,
-        "title": article.title,
-        "language": article.language,
+        "news_ids": [article.id],
+        "mode": "incremental",
     }
+
+
+def _articles_vectorization_payload(articles: Iterable[NewsArticle]) -> dict:
+    return {
+        "news_ids": [article.id for article in articles],
+        "mode": "incremental",
+    }
+
+
+async def _enqueue_articles_if_any(
+    *,
+    repository: NewsPipelineJobRepository,
+    publisher: RabbitPublisher,
+    articles: list[NewsArticle],
+) -> UUID | None:
+    if not articles:
+        return None
+    return await enqueue_vectorization_job(
+        repository=repository,
+        publisher=publisher,
+        payload=_articles_vectorization_payload(articles),
+    )
 
 
 def _search_vectorization_payload(search_query: NewsSearchQuery) -> dict:
@@ -244,13 +760,40 @@ def _search_vectorization_payload(search_query: NewsSearchQuery) -> dict:
 
 
 def _article_history_item(article: NewsArticle) -> NewsArticleHistoryItem:
+    pipeline_state = article.pipeline_state
+    import_metadata = article.extra_metadata.get("import") or {}
+    effective_novelty_label = (
+        pipeline_state.manual_novelty_label or pipeline_state.novelty_label
+        if pipeline_state
+        else None
+    )
     return NewsArticleHistoryItem(
         article_id=UUID(article.id),
         title=article.title,
+        visibility=article.visibility,
         status=article.status,
         origin=article.origin,
         language=article.language,
         novelty_score=article.novelty_score,
+        cluster_id=pipeline_state.cluster_id if pipeline_state else None,
+        novelty_label=effective_novelty_label,
+        model_novelty_label=pipeline_state.novelty_label if pipeline_state else None,
+        manual_novelty_label=(
+            pipeline_state.manual_novelty_label if pipeline_state else None
+        ),
+        manual_novelty_updated_at=(
+            pipeline_state.manual_novelty_updated_at if pipeline_state else None
+        ),
+        assignment_needs_review=(
+            pipeline_state.assignment_needs_review if pipeline_state else None
+        ),
+        novelty_needs_review=(
+            pipeline_state.novelty_needs_review if pipeline_state else None
+        ),
+        late_arrival=pipeline_state.late_arrival if pipeline_state else None,
+        processed_at=pipeline_state.processed_at if pipeline_state else None,
+        pipeline_error=article.extra_metadata.get("pipeline_error"),
+        possible_duplicate=bool(import_metadata.get("possible_duplicate_of")),
         published_at=article.published_at,
         fetched_at=article.fetched_at,
         url=article.url,
@@ -278,9 +821,13 @@ def _withdraw_or_raise(
     amount,
     reason: TransactionReason,
     reference_id: UUID,
+    batch_id: UUID | None = None,
 ) -> None:
+    if amount == 0:
+        return
+
     try:
-        accounting.withdraw_credit(user_id, amount, reason, reference_id)
+        accounting.withdraw_credit(user_id, amount, reason, reference_id, batch_id)
     except InsufficientBalanceError as exc:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -291,3 +838,23 @@ def _withdraw_or_raise(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User account not found",
         ) from exc
+
+
+def _withdraw_for_articles_or_raise(
+    *,
+    accounting: AccountingService,
+    user_id: UUID,
+    amount_per_article,
+    articles: Iterable[NewsArticle],
+    reason: TransactionReason = TransactionReason.NEWS_ADD,
+    batch_id: UUID | None = None,
+) -> None:
+    for article in articles:
+        _withdraw_or_raise(
+            accounting=accounting,
+            user_id=user_id,
+            amount=amount_per_article,
+            reason=reason,
+            reference_id=UUID(article.id),
+            batch_id=batch_id,
+        )

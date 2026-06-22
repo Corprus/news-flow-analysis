@@ -5,12 +5,23 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
+from accounting.exceptions import InsufficientBalanceError
 from accounting.models import TransactionReason
 from accounting.service import AccountingService
-from users.deps import CurrentUser, SessionDep, authenticate, ensure_admin
+from news.models import NewsArticle
+from users.deps import (
+    CurrentUser,
+    SessionDep,
+    authenticate,
+    ensure_admin,
+    get_admin_audit_service,
+)
+from users.models import Organization, User
+from users.service import AdminAuditService
 
 router = APIRouter(prefix="/v1/accounting", tags=["accounting"])
 
@@ -18,8 +29,13 @@ CurrentUserDep = Annotated[CurrentUser, Depends(authenticate)]
 
 
 class AddCreditRequest(BaseModel):
-    user_id: UUID
+    organization_id: UUID
     amount: Decimal = Field(gt=0)
+
+
+class AdjustCreditRequest(BaseModel):
+    organization_id: UUID
+    amount: Decimal
 
 
 class TransactionIdResponse(BaseModel):
@@ -27,16 +43,24 @@ class TransactionIdResponse(BaseModel):
 
 
 class BalanceResponse(BaseModel):
-    user_id: UUID
+    organization_id: UUID
     balance: str
 
 
 class TransactionResponse(BaseModel):
     id: UUID
+    organization_id: UUID
+    actor_user_id: UUID | None
+    actor_login: str | None = None
+    organization_name: str | None = None
     timestamp: datetime
     amount: str
     reason: str
     reference_id: UUID | None = None
+    reference_title: str | None = None
+    reference_url: str | None = None
+    batch_id: UUID | None = None
+    item_count: int = 1
 
 
 def get_accounting_service(session: SessionDep) -> AccountingService:
@@ -48,9 +72,64 @@ def add_credit(
     request: AddCreditRequest,
     current_user: CurrentUserDep,
     accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    audit: Annotated[AdminAuditService, Depends(get_admin_audit_service)],
 ) -> TransactionIdResponse:
     ensure_admin(current_user)
-    transaction_id = accounting.add_credit(request.user_id, request.amount)
+    transaction_id = accounting.add_credit(
+        request.organization_id,
+        current_user.id,
+        request.amount,
+    )
+    audit.record(
+        actor_user_id=current_user.id,
+        action="balance.adjust",
+        target_type="organization",
+        target_id=request.organization_id,
+        details={"amount": str(request.amount), "transaction_id": str(transaction_id)},
+    )
+    return TransactionIdResponse(transaction_id=transaction_id)
+
+
+@router.post(
+    "/adjustments",
+    response_model=TransactionIdResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def adjust_credit(
+    request: AdjustCreditRequest,
+    current_user: CurrentUserDep,
+    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    audit: Annotated[AdminAuditService, Depends(get_admin_audit_service)],
+) -> TransactionIdResponse:
+    ensure_admin(current_user)
+    if request.amount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Amount must not be zero",
+        )
+    if request.amount != request.amount.to_integral_value():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Amount must be a whole number",
+        )
+    try:
+        transaction_id = accounting.adjust_credit(
+            request.organization_id,
+            current_user.id,
+            request.amount,
+        )
+    except InsufficientBalanceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Insufficient organization balance",
+        ) from exc
+    audit.record(
+        actor_user_id=current_user.id,
+        action="balance.adjust",
+        target_type="organization",
+        target_id=request.organization_id,
+        details={"amount": str(request.amount), "transaction_id": str(transaction_id)},
+    )
     return TransactionIdResponse(transaction_id=transaction_id)
 
 
@@ -60,28 +139,171 @@ def get_my_balance(
     accounting: Annotated[AccountingService, Depends(get_accounting_service)],
 ) -> BalanceResponse:
     return BalanceResponse(
-        user_id=current_user.id,
-        balance=str(accounting.get_balance(current_user.id)),
+        organization_id=current_user.organization_id,
+        balance=str(accounting.get_balance(current_user.organization_id)),
     )
 
 
 @router.get("/me/transactions", response_model=list[TransactionResponse])
 def get_my_transactions(
     current_user: CurrentUserDep,
+    session: SessionDep,
     accounting: Annotated[AccountingService, Depends(get_accounting_service)],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     reason: TransactionReason | None = None,
 ) -> list[TransactionResponse]:
-    transactions = accounting.get_transaction_history(current_user.id, limit, offset, reason)
-    return [_to_response(transaction) for transaction in transactions]
+    return _get_transactions(
+        session=session,
+        accounting=accounting,
+        organization_id=current_user.organization_id,
+        limit=limit,
+        offset=offset,
+        reason=reason,
+    )
 
 
-def _to_response(transaction) -> TransactionResponse:
+@router.get("/admin/transactions", response_model=list[TransactionResponse])
+def get_admin_transactions(
+    current_user: CurrentUserDep,
+    session: SessionDep,
+    accounting: Annotated[AccountingService, Depends(get_accounting_service)],
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    reason: TransactionReason | None = None,
+) -> list[TransactionResponse]:
+    ensure_admin(current_user)
+    return _get_transactions(
+        session=session,
+        accounting=accounting,
+        organization_id=None,
+        limit=limit,
+        offset=offset,
+        reason=reason,
+    )
+
+
+def _get_transactions(
+    *,
+    session,
+    accounting: AccountingService,
+    organization_id: UUID | None,
+    limit: int,
+    offset: int,
+    reason: TransactionReason | None,
+) -> list[TransactionResponse]:
+    transactions = accounting.get_transaction_history(
+        organization_id,
+        limit=None,
+        reason=reason,
+    )
+    article_ids = [
+        transaction.reference_id
+        for transaction in transactions
+        if transaction.reason
+        in {
+            TransactionReason.NEWS_ADD.value,
+            TransactionReason.NEWS_REPROCESS.value,
+        }
+        and transaction.reference_id is not None
+    ]
+    articles = (
+        session.execute(
+            select(NewsArticle).where(NewsArticle.id.in_(article_ids))
+        ).scalars()
+        if article_ids
+        else []
+    )
+    article_by_id = {article.id: article for article in articles}
+    actor_ids = {
+        transaction.actor_user_id
+        for transaction in transactions
+        if transaction.actor_user_id is not None
+    }
+    actors = (
+        session.execute(select(User).where(User.id.in_(actor_ids))).scalars()
+        if actor_ids
+        else []
+    )
+    actor_login_by_id = {actor.id: actor.login for actor in actors}
+    organization_ids = {transaction.organization_id for transaction in transactions}
+    organizations = (
+        session.execute(
+            select(Organization).where(Organization.id.in_(organization_ids))
+        ).scalars()
+        if organization_ids
+        else []
+    )
+    organization_name_by_id = {
+        organization.id: organization.name for organization in organizations
+    }
+    grouped: dict[str, list] = {}
+    group_order: list[str] = []
+    for transaction in transactions:
+        group_key = transaction.batch_id or transaction.id
+        if group_key not in grouped:
+            grouped[group_key] = []
+            group_order.append(group_key)
+        grouped[group_key].append(transaction)
+
+    operations = [
+        _to_response_group(
+            grouped[group_key],
+            article_by_id,
+            actor_login_by_id,
+            organization_name_by_id,
+        )
+        for group_key in group_order[offset : offset + limit]
+    ]
+    return operations
+
+
+def _to_response(
+    transaction,
+    article: NewsArticle | None = None,
+    actor_login: str | None = None,
+    organization_name: str | None = None,
+) -> TransactionResponse:
     return TransactionResponse(
         id=UUID(transaction.id),
+        organization_id=UUID(transaction.organization_id),
+        actor_user_id=UUID(transaction.actor_user_id) if transaction.actor_user_id else None,
+        actor_login=actor_login,
+        organization_name=organization_name,
         timestamp=transaction.timestamp,
         amount=str(transaction.amount),
         reason=transaction.reason,
         reference_id=UUID(transaction.reference_id) if transaction.reference_id else None,
+        reference_title=article.title if article else None,
+        reference_url=article.url if article else None,
+        batch_id=UUID(transaction.batch_id) if transaction.batch_id else None,
+    )
+
+
+def _to_response_group(
+    transactions: list,
+    article_by_id: dict[str, NewsArticle],
+    actor_login_by_id: dict[str, str],
+    organization_name_by_id: dict[str, str],
+) -> TransactionResponse:
+    first = transactions[0]
+    if first.batch_id is None or len(transactions) == 1:
+        return _to_response(
+            first,
+            article_by_id.get(first.reference_id),
+            actor_login_by_id.get(first.actor_user_id),
+            organization_name_by_id.get(first.organization_id),
+        )
+
+    return TransactionResponse(
+        id=UUID(first.batch_id),
+        organization_id=UUID(first.organization_id),
+        actor_user_id=UUID(first.actor_user_id) if first.actor_user_id else None,
+        actor_login=actor_login_by_id.get(first.actor_user_id),
+        organization_name=organization_name_by_id.get(first.organization_id),
+        timestamp=max(transaction.timestamp for transaction in transactions),
+        amount=str(sum(transaction.amount for transaction in transactions)),
+        reason=first.reason,
+        batch_id=UUID(first.batch_id),
+        item_count=len(transactions),
     )

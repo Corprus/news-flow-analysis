@@ -26,10 +26,16 @@ class AccessTokenHandler:
     secret: str
     ttl_minutes: int
 
-    def create_access_token(self, user_id: UUID, role: str) -> str:
+    def create_access_token(
+        self,
+        user_id: UUID,
+        organization_id: UUID,
+        role: str,
+    ) -> str:
         now = datetime.now(UTC)
         payload = {
             "sub": str(user_id),
+            "organization_id": str(organization_id),
             "role": role,
             "iat": int(now.timestamp()),
             "exp": int((now + timedelta(minutes=self.ttl_minutes)).timestamp()),
@@ -53,6 +59,7 @@ class AccessTokenHandler:
             if int(payload["exp"]) < int(datetime.now(UTC).timestamp()):
                 raise InvalidAccessTokenError()
             UUID(payload["sub"])
+            UUID(payload["organization_id"])
             return payload
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise InvalidAccessTokenError() from exc

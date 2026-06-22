@@ -1,5 +1,6 @@
 # Service
 fastapi
+python-multipart
 uvicorn[standard]
 pydantic-settings
 aio-pika
@@ -16,7 +17,7 @@ pyarrow
 scikit-learn
 datasets
 sentence-transformers
+catboost
 accelerate
-faiss-cpu
 tqdm
 jsonlines
