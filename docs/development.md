@@ -33,7 +33,7 @@ tests/               автоматические тесты
 
 ## Проверки
 
-```powershell
+```console
 ruff check .
 python -m pytest
 docker compose config --quiet

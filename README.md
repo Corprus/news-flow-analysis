@@ -108,9 +108,7 @@ Runtime использует PostgreSQL/pgvector, а не FAISS.
 
 Требуются Docker Compose и NVIDIA GPU для рекомендуемого режима.
 
-```powershell
-Copy-Item .env.example .env
-```
+Скопируйте `.env.example` в `.env`.
 
 В `.env` замените пароли и секреты, затем включите демонстрационный режим:
 
@@ -118,12 +116,11 @@ Copy-Item .env.example .env
 DEMO_MODE=true
 MODEL_SERVICE_GPU_REPLICAS=1
 MODEL_SERVICE_CPU_REPLICAS=0
-PIPELINE_DEVICE=cuda
 ```
 
 Запуск:
 
-```powershell
+```console
 docker compose up --build -d
 docker compose ps
 ```
@@ -189,7 +186,7 @@ docker compose ps
 
 ## Проверки
 
-```powershell
+```console
 ruff check .
 python -m pytest
 docker compose config --quiet

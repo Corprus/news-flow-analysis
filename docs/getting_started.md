@@ -16,9 +16,7 @@ CPU-вариант описан в [развёртывании](deployment.md).
 
 Создайте локальный файл окружения:
 
-```powershell
-Copy-Item .env.example .env
-```
+Скопируйте `.env.example` в `.env`.
 
 Замените пароли и секреты. Для воспроизводимого демо включите:
 
@@ -26,18 +24,14 @@ Copy-Item .env.example .env
 DEMO_MODE=true
 MODEL_SERVICE_GPU_REPLICAS=1
 MODEL_SERVICE_CPU_REPLICAS=0
-PIPELINE_DEVICE=cuda
 ```
 
-Если BGE-M3 уже загружена на хост, можно подключить существующий кеш:
-
-```text
-MODEL_SERVICE_HF_CACHE=E:/MLCache/huggingface
-```
+Если BGE-M3 уже загружена на хост, укажите в MODEL_SERVICE_HF_CACHE` абсолютный путь к существующему кешу в  формате вашей операционной системы.
+По умолчанию используется именованный Docker volume `model_cache`.
 
 ## Запуск
 
-```powershell
+```console
 docker compose up --build -d
 docker compose ps
 ```
@@ -65,7 +59,7 @@ admin:     admin / admin12345
 
 ## Проверка
 
-```powershell
+```console
 python scripts/demo_smoke_test.py
 ```
 
@@ -74,7 +68,7 @@ python scripts/demo_smoke_test.py
 
 ## Остановка
 
-```powershell
+```console
 docker compose down
 ```
 

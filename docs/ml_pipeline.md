@@ -132,13 +132,8 @@ data/artifacts/models/final_exp10/final_pipeline_config.json
 
 ## Автономный запуск
 
-```powershell
-python scripts/run_final_pipeline.py `
-  --project-root . `
-  --input data/prepared/lenta_clean_news.csv `
-  --output data/predictions/final_pipeline_predictions.csv `
-  --embeddings-cache data/artifacts/embeddings/final_pipeline_bge_m3.npz `
-  --device cuda
+```console
+python scripts/run_final_pipeline.py --project-root . --input data/prepared/lenta_clean_news.csv --output data/predictions/final_pipeline_predictions.csv --embeddings-cache data/artifacts/embeddings/final_pipeline_bge_m3.npz --device cuda
 ```
 
 Для CPU замените `cuda` на `cpu`.

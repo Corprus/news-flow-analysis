@@ -93,7 +93,7 @@ Replay выполнен на 3 176 публикациях за март–апр
 
 ## Команды
 
-```powershell
+```console
 python scripts/benchmark_final_pipeline.py --project-root . --n-rows 10000 --device cuda
 python scripts/benchmark_service_pipeline.py --reset-news --timeout 1800
 python scripts/benchmark_existing_service_pipeline.py --mode full --limit 10000

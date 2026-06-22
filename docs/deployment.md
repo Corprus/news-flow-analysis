@@ -18,7 +18,7 @@
 - хранилище: `POSTGRES_*`;
 - очередь: `RABBITMQ_*`, `NEWS_VECTORIZATION_QUEUE`;
 - воркеры: `MODEL_SERVICE_GPU_REPLICAS`, `MODEL_SERVICE_CPU_REPLICAS`;
-- модель: `PIPELINE_DEVICE`, `MODEL_SERVICE_HF_CACHE`, `HF_TOKEN`;
+- модель: `MODEL_SERVICE_HF_CACHE`, `HF_TOKEN`;
 - внешний вход: `NGINX_PORT`.
 
 ## GPU-режим
@@ -26,7 +26,6 @@
 ```text
 MODEL_SERVICE_GPU_REPLICAS=1
 MODEL_SERVICE_CPU_REPLICAS=0
-PIPELINE_DEVICE=cuda
 ```
 
 GPU-образ основан на PyTorch `2.7.1`, CUDA `12.8` и cuDNN 9. Базовый registry
@@ -34,7 +33,7 @@ GPU-образ основан на PyTorch `2.7.1`, CUDA `12.8` и cuDNN 9. Ба
 
 Запуск:
 
-```powershell
+```console
 docker compose up --build -d
 ```
 
@@ -45,14 +44,14 @@ MODEL_SERVICE_GPU_REPLICAS=0
 MODEL_SERVICE_CPU_REPLICAS=1
 ```
 
-```powershell
+```console
 docker compose build model-service-cpu
 docker compose up -d
 ```
 
 Проверка:
 
-```powershell
+```console
 docker compose exec model-service-cpu python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
@@ -81,9 +80,9 @@ RabbitMQ выдаёт задачу первому свободному consumer 
 Без настройки Compose использует volume `model_cache`. Для повторного
 использования кеша хоста:
 
-```text
-MODEL_SERVICE_HF_CACHE=E:/MLCache/huggingface
-```
+Чтобы использовать существующий кеш на хосте, задайте
+`MODEL_SERVICE_HF_CACHE` как абсолютный путь в формате операционной системы.
+По умолчанию используется именованный Docker volume `model_cache`.
 
 Полные transformer checkpoints не хранятся в Git. Для production-поставки
 следует фиксировать ревизию модели и контрольную сумму артефактов.
