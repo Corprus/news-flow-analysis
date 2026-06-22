@@ -13,6 +13,17 @@ PAGE_SIZE = 20
 
 def render_date_news(client: ApiClient) -> None:
     st.header("Новости по дате")
+    if "date_news_selected_date" not in st.session_state:
+        try:
+            latest = client.get_latest_news_date()
+        except ApiError as exc:
+            st.error(str(exc))
+            return
+        latest_date = _parse_api_date(latest.get("latest_date"))
+        if latest_date is not None:
+            st.session_state["date_news_selected_date"] = latest_date
+            st.session_state["date_news_page"] = 0
+
     with st.form("date_news_form"):
         selected_date = st.date_input(
             "Дата публикации",

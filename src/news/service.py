@@ -569,6 +569,14 @@ class NewsService:
         ).scalar_one_or_none()
         return previous_date, next_date
 
+    def get_latest_public_article_date(self) -> datetime | None:
+        return self._session.execute(
+            select(func.max(NewsArticle.published_at)).where(
+                NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
+                NewsArticle.status == ArticleStatus.PROCESSED.value,
+            )
+        ).scalar_one_or_none()
+
     def list_search_queries(
         self,
         user_id: UUID,

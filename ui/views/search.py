@@ -202,7 +202,10 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
         if significant_count:
             label += f' · [⭐](# "Количество важных публикаций") {significant_count}'
         label += f' · [📰](# "Общее количество публикаций") {article_count}'
-        cluster_date = format_search_date(cluster.get("published_from"))
+        cluster_date = format_search_date(
+            cluster.get("published_from"),
+            hide_midnight=True,
+        )
         if cluster_date:
             label = f"**{label}** {cluster_date}"
         with st.expander(
@@ -244,7 +247,12 @@ def render_search_article(item: dict, *, key_prefix: str) -> None:
     title = html.escape(str(item.get("title") or "Без названия"))
     novelty_label = item.get("novelty_label")
     is_significant = novelty_label == "significant"
-    details = [format_search_date(item.get("published_at"))]
+    details = [
+        format_search_date(
+            item.get("published_at"),
+            hide_midnight=True,
+        )
+    ]
     if item.get("score") is not None:
         details.append(f"релевантность {float(item['score']):.3f}")
     if item.get("p_significant") is not None:

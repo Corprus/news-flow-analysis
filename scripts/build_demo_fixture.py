@@ -27,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--rows", type=int, default=250)
+    parser.add_argument("--rows", type=int, default=1000)
     return parser.parse_args()
 
 

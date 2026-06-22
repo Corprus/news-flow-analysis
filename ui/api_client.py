@@ -309,6 +309,9 @@ class ApiClient:
             },
         )
 
+    def get_latest_news_date(self) -> dict:
+        return self._request("GET", "/news/feed/latest-date")
+
     def search_news(self, payload: dict) -> dict:
         return self._request("POST", "/news-search", json=payload, timeout=60)
 

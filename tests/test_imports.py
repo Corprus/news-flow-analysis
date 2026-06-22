@@ -18,6 +18,7 @@ def test_api_routes_do_not_have_version_prefix() -> None:
         "/news",
         "/news/feed",
         "/news/feed/adjacent-dates",
+        "/news/feed/latest-date",
         "/news-search",
         "/news-pipeline",
         "/news-pipeline/{job_id}",

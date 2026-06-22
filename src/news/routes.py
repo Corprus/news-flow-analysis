@@ -177,6 +177,10 @@ class AdjacentNewsDatesResponse(BaseModel):
     next_date: datetime | None
 
 
+class LatestNewsDateResponse(BaseModel):
+    latest_date: datetime | None
+
+
 class NewsSearchRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
@@ -775,6 +779,17 @@ def get_adjacent_news_dates(
     return AdjacentNewsDatesResponse(
         previous_date=previous_date,
         next_date=next_date,
+    )
+
+
+@router.get("/feed/latest-date", response_model=LatestNewsDateResponse)
+def get_latest_news_date(
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+) -> LatestNewsDateResponse:
+    del current_user
+    return LatestNewsDateResponse(
+        latest_date=news.get_latest_public_article_date(),
     )
 
 

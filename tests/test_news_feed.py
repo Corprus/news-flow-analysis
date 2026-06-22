@@ -105,6 +105,21 @@ def test_adjacent_news_dates_skip_empty_periods() -> None:
     assert "news_articles.published_at >=" in next_sql
 
 
+def test_latest_news_date_uses_processed_public_articles() -> None:
+    latest_date = datetime(2026, 6, 25, 9, tzinfo=UTC)
+    session = _AdjacentDateSession(latest_date, None)
+    service = NewsService(session)  # type: ignore[arg-type]
+
+    result = service.get_latest_public_article_date()
+
+    sql = " ".join(str(session.statements[0]).split()).lower()
+    params = session.statements[0].compile().params.values()
+    assert result == latest_date
+    assert "max(news_articles.published_at)" in sql
+    assert ArticleVisibility.PUBLIC.value in params
+    assert ArticleStatus.PROCESSED.value in params
+
+
 class _NewsServiceSpy:
     def __init__(self, article) -> None:
         self.article = article
