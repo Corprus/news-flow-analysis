@@ -44,7 +44,9 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
 
     primary_organization = _get_or_create_organization(session, "Demo Research")
     partner_organization = _get_or_create_organization(session, "Partner Analytics")
-    admin_organization = _get_or_create_organization(session, "News Flow Administration")
+    admin_organization = _get_or_create_organization(
+        session, "Semantic News Novelty Administration"
+    )
 
     demo_publisher = _get_or_update_user(
         users=users,

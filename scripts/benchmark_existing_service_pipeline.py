@@ -37,9 +37,9 @@ def load_article_ids(limit: int) -> list[str]:
         "postgres",
         "psql",
         "-U",
-        os.getenv("POSTGRES_USER", "news_flow"),
+        os.getenv("POSTGRES_USER", "semantic_news_novelty"),
         "-d",
-        os.getenv("POSTGRES_DB", "news_flow"),
+        os.getenv("POSTGRES_DB", "semantic_news_novelty"),
         "-At",
         "-c",
         (

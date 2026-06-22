@@ -62,7 +62,7 @@ def refresh_account(client: ApiClient) -> None:
 
 
 def render_login(client: ApiClient, cookie_manager: object) -> None:
-    st.title("News Flow")
+    st.title("Semantic News Novelty")
     st.caption(
         "Семантический поиск новостей, публикация материалов и группировка событий."
     )

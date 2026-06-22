@@ -4,7 +4,7 @@ import os
 from datetime import timedelta, timezone
 
 API_INTERNAL = os.getenv("API_BASE_URL", "http://nginx/api")
-AUTH_COOKIE_NAME = "news_flow_access_token"
+AUTH_COOKIE_NAME = "semantic_news_novelty_access_token"
 AUTH_COOKIE_TTL_DAYS = int(os.getenv("AUTH_COOKIE_TTL_DAYS", "1"))
 MOSCOW_TIMEZONE = timezone(timedelta(hours=3))
 

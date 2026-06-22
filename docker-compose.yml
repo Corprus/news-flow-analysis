@@ -2,8 +2,8 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-news_flow}
-      POSTGRES_USER: ${POSTGRES_USER:-news_flow}
+      POSTGRES_DB: ${POSTGRES_DB:-semantic_news_novelty}
+      POSTGRES_USER: ${POSTGRES_USER:-semantic_news_novelty}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -18,7 +18,7 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-news_flow}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-semantic_news_novelty}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-/}
     ports:
@@ -47,12 +47,12 @@ services:
       DEMO_NEWS_PATH: ${DEMO_NEWS_PATH:-data/demo/lenta_demo.csv}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-news_flow}
-      POSTGRES_USER: ${POSTGRES_USER:-news_flow}
+      POSTGRES_DB: ${POSTGRES_DB:-semantic_news_novelty}
+      POSTGRES_USER: ${POSTGRES_USER:-semantic_news_novelty}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
-      RABBITMQ_USER: ${RABBITMQ_USER:-news_flow}
+      RABBITMQ_USER: ${RABBITMQ_USER:-semantic_news_novelty}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
@@ -84,12 +84,12 @@ services:
       APP_ENV: ${APP_ENV:-local}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-news_flow}
-      POSTGRES_USER: ${POSTGRES_USER:-news_flow}
+      POSTGRES_DB: ${POSTGRES_DB:-semantic_news_novelty}
+      POSTGRES_USER: ${POSTGRES_USER:-semantic_news_novelty}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
-      RABBITMQ_USER: ${RABBITMQ_USER:-news_flow}
+      RABBITMQ_USER: ${RABBITMQ_USER:-semantic_news_novelty}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
@@ -134,12 +134,12 @@ services:
       APP_ENV: ${APP_ENV:-local}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-news_flow}
-      POSTGRES_USER: ${POSTGRES_USER:-news_flow}
+      POSTGRES_DB: ${POSTGRES_DB:-semantic_news_novelty}
+      POSTGRES_USER: ${POSTGRES_USER:-semantic_news_novelty}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
-      RABBITMQ_USER: ${RABBITMQ_USER:-news_flow}
+      RABBITMQ_USER: ${RABBITMQ_USER:-semantic_news_novelty}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}

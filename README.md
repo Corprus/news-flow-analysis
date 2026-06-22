@@ -1,9 +1,16 @@
 # Semantic News Novelty
 
+> **Нейминг**
+>
+> `Semantic News Novelty` — публичное название продукта и проекта.
+> `news-flow-analysis` — технический идентификатор репозитория и инфраструктуры.
+> Для базы данных, RabbitMQ и внутренних настроек приложения используется
+> идентификатор `semantic_news_novelty`. В пользовательских интерфейсах и
+> документации API используется название `Semantic News Novelty`.
+
 ## Актуальная runtime-архитектура
 
-Финальный BGE-M3 clustering/novelty pipeline встроен в отдельный
-`model-service`.
+Финальный пайплайн (векторизация -> кластеризация -> классификация -> постпроцессинг) выделен в отдельный `model-service`.
 
 - RabbitMQ job: `{"news_ids": ["uuid", ...], "mode": "incremental|full"}`;
 - API: `POST /api/v1/news-pipeline`;

@@ -135,7 +135,11 @@ async def lifespan(app: FastAPI):
     await consumer.close()
 
 
-app = FastAPI(title="News Flow Model Service", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="Semantic News Novelty Model Service",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 
 @app.get("/health")

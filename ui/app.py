@@ -18,7 +18,7 @@ from views.news import render_news
 from views.search import render_search
 from views.transactions import render_transactions
 
-st.set_page_config(page_title="News Flow", layout="wide")
+st.set_page_config(page_title="Semantic News Novelty", layout="wide")
 apply_styles()
 
 cookie_manager = stx.CookieManager(key="auth_cookie_manager")

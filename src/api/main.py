@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
     await publisher.close()
 
 
-app = FastAPI(title="News Flow API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Semantic News Novelty API", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(organization_router)
