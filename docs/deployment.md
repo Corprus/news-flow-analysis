@@ -19,7 +19,8 @@
 - очередь: `RABBITMQ_*`, `NEWS_VECTORIZATION_QUEUE`;
 - воркеры: `MODEL_SERVICE_GPU_REPLICAS`, `MODEL_SERVICE_CPU_REPLICAS`;
 - модель: `MODEL_SERVICE_HF_CACHE`, `HF_TOKEN`;
-- внешний вход: `NGINX_PORT`.
+- внешний вход: `NGINX_PORT`;
+- мониторинг: `GRAFANA_*`, `PROMETHEUS_*`.
 
 ## GPU-режим
 
@@ -114,8 +115,13 @@ BGE-M3 загружается из Hugging Face cache или Hub.
 Текущий Compose — воспроизводимый стенд и основа поставки, но не заменяет
 production-настройку TLS, secret management, backup и observability.
 
+Минимальный мониторинг CPU, RAM, очереди и pipeline описан в
+[отдельном документе](monitoring.md). Порты Grafana и Prometheus не следует
+публиковать во внешнюю сеть без дополнительной защиты.
+
 ## Связанные документы
 
 - [Быстрый запуск](getting_started.md)
 - [Архитектура](architecture.md)
 - [Бенчмарки](benchmarks.md)
+- [Мониторинг](monitoring.md)

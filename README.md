@@ -18,6 +18,7 @@ Semantic News Novelty — анализатор информационного п
 | [Архитектура](docs/architecture.md) | Компоненты и движение данных |
 | [HTTP API](docs/api.md) | Импорт, публикация, задачи и поиск |
 | [Развёртывание](docs/deployment.md) | GPU, CPU и клиентская поставка |
+| [Мониторинг](docs/monitoring.md) | Grafana, нагрузка, очередь и скорость обработки |
 | [ML-пайплайн](docs/ml_pipeline.md) | Алгоритм, режимы и артефакты |
 | [Оценка качества](docs/evaluation.md) | Датасеты, методика и ML-метрики |
 | [Бенчмарки](docs/benchmarks.md) | Runtime, GPU/CPU и incremental replay |
@@ -97,6 +98,7 @@ Docker Compose поднимает:
 - `model-service` — BGE-M3, кластеризация и оценка новизны;
 - `rabbitmq` — очередь асинхронных задач;
 - `postgres` — PostgreSQL 16 с pgvector.
+- `prometheus`, `grafana`, `cadvisor` — метрики и дашборд нагрузки.
 
 Публикации хранятся в PostgreSQL. API передаёт через RabbitMQ только ID и режим
 обработки, а `model-service` читает данные, выполняет pipeline и сохраняет
