@@ -20,9 +20,16 @@ from users.service import UserService
 
 
 @dataclass(frozen=True)
+class DemoPipelineBatch:
+    organization_id: str
+    article_ids_to_process: list[str]
+
+
+@dataclass(frozen=True)
 class DemoSeedResult:
     organization_id: str
     article_ids_to_process: list[str]
+    pipeline_batches: list[DemoPipelineBatch]
     imported_article_count: int
 
 
@@ -93,38 +100,30 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
         ),
     )
 
-    _ensure_credit(
-        accounting,
-        partner_publisher,
-        settings.demo_initial_credit,
-    )
-
     articles = _load_demo_articles(settings.demo_news_path)
     news = NewsService(session)
-    result = news.import_user_articles(
-        user_id=UUID(demo_publisher.id),
-        organization_id=UUID(demo_publisher.organization_id),
-        format_id="lenta",
+    primary_batch, primary_imported_count = _import_and_publish_demo_articles(
+        news=news,
+        session=session,
+        accounting=accounting,
+        publisher=demo_publisher,
         articles=articles,
+        settings=settings,
     )
-    _ensure_credit(
-        accounting,
-        demo_publisher,
-        settings.demo_initial_credit
-        + settings.news_add_cost * len(result.article_ids),
-    )
-    article_ids_to_process = _publish_demo_articles(
-        session,
-        accounting,
-        demo_publisher,
-        result.article_ids,
-        settings.news_add_cost,
+    partner_batch, partner_imported_count = _import_and_publish_demo_articles(
+        news=news,
+        session=session,
+        accounting=accounting,
+        publisher=partner_publisher,
+        articles=articles,
+        settings=settings,
     )
     session.flush()
     return DemoSeedResult(
-        organization_id=demo_publisher.organization_id,
-        article_ids_to_process=article_ids_to_process,
-        imported_article_count=len(result.article_ids),
+        organization_id=primary_batch.organization_id,
+        article_ids_to_process=primary_batch.article_ids_to_process,
+        pipeline_batches=[primary_batch, partner_batch],
+        imported_article_count=primary_imported_count + partner_imported_count,
     )
 
 
@@ -190,6 +189,43 @@ def _load_demo_articles(path_value: str):
         return news_importers.parse("lenta", path.read_bytes())
     except NewsImportError as exc:
         raise RuntimeError(f"Invalid demo news fixture {path}: {exc}") from exc
+
+
+def _import_and_publish_demo_articles(
+    *,
+    news: NewsService,
+    session: Session,
+    accounting: AccountingService,
+    publisher: User,
+    articles,
+    settings: Settings,
+) -> tuple[DemoPipelineBatch, int]:
+    result = news.import_user_articles(
+        user_id=UUID(publisher.id),
+        organization_id=UUID(publisher.organization_id),
+        format_id="lenta",
+        articles=articles,
+    )
+    _ensure_credit(
+        accounting,
+        publisher,
+        settings.demo_initial_credit
+        + settings.news_add_cost * len(result.article_ids),
+    )
+    article_ids_to_process = _publish_demo_articles(
+        session,
+        accounting,
+        publisher,
+        result.article_ids,
+        settings.news_add_cost,
+    )
+    return (
+        DemoPipelineBatch(
+            organization_id=publisher.organization_id,
+            article_ids_to_process=article_ids_to_process,
+        ),
+        len(result.article_ids),
+    )
 
 
 def _publish_demo_articles(
