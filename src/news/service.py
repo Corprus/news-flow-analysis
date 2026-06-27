@@ -17,6 +17,7 @@ from news.models import (
     ArticleVisibility,
     NewsArticle,
     NewsArticleSubmission,
+    NewsClusterSummary,
     NewsSearchQuery,
     SearchQueryStatus,
 )
@@ -597,6 +598,42 @@ class NewsService:
         return self._session.execute(
             select(func.max(NewsArticle.published_at)).where(*filters)
         ).scalar_one_or_none()
+
+    def list_cluster_summaries(
+        self,
+        cluster_ids: Iterable[str],
+        organization_id: UUID | None = None,
+    ) -> dict[str, dict]:
+        unique_cluster_ids = list(dict.fromkeys(str(cluster_id) for cluster_id in cluster_ids))
+        if not unique_cluster_ids:
+            return {}
+        filters = [NewsClusterSummary.cluster_id.in_(unique_cluster_ids)]
+        if organization_id is not None:
+            filters.append(NewsClusterSummary.organization_id == str(organization_id))
+        rows = list(
+            self._session.execute(
+                select(NewsClusterSummary, NewsArticle.title)
+                .join(
+                    NewsArticle,
+                    NewsArticle.id == NewsClusterSummary.representative_article_id,
+                )
+                .where(*filters)
+            ).all()
+        )
+        return {
+            summary.cluster_id: {
+                "representative_article_id": summary.representative_article_id,
+                "representative_title": title,
+                "article_count": summary.article_count,
+                "published_from": (
+                    summary.started_at.isoformat() if summary.started_at else None
+                ),
+                "published_to": (
+                    summary.last_seen_at.isoformat() if summary.last_seen_at else None
+                ),
+            }
+            for summary, title in rows
+        }
 
     def list_search_queries(
         self,

@@ -248,6 +248,11 @@ class NewsPipelineRepository:
                 )
 
             existing = await self._load_existing_state(connection, persisted_ids)
+            affected_cluster_ids = self._collect_affected_cluster_ids(
+                existing=existing,
+                assignment_by_id=assignment_by_id,
+                prediction_by_id=prediction_by_id,
+            )
             for news_id in persisted_ids:
                 assignment = {**existing.get(news_id, {}), **assignment_by_id.get(news_id, {})}
                 prediction = {**existing.get(news_id, {}), **prediction_by_id.get(news_id, {})}
@@ -342,6 +347,15 @@ class NewsPipelineRepository:
                 """,
                 (ArticleStatus.PROCESSED.value, persisted_ids),
             )
+            affected_cluster_ids.update(
+                await self._load_current_cluster_ids(connection, persisted_ids)
+            )
+            await self._refresh_cluster_summaries(
+                connection,
+                cluster_ids=affected_cluster_ids,
+                embedding_model=result.versions.embedding_model,
+                embedding_model_revision=result.versions.embedding_model_revision,
+            )
 
     async def mark_articles_error(self, news_ids: list[str], error: str) -> None:
         error_payload = json.dumps(
@@ -420,10 +434,20 @@ class NewsPipelineRepository:
                 a.published_at, 1 - (e.embedding <=> %s::vector) AS score,
                 COALESCE(s.cluster_id, a.id::text) AS cluster_id,
                 COALESCE(s.manual_novelty_label, s.novelty_label) AS novelty_label,
-                s.p_significant, a.url, a.summary, a.content
+                s.p_significant, a.url, a.summary, a.content,
+                cs.representative_article_id::text,
+                representative.title,
+                cs.article_count,
+                cs.started_at,
+                cs.last_seen_at
             FROM article_pipeline_embeddings e
             JOIN news_articles a ON a.id = e.article_id
             LEFT JOIN article_pipeline_state s ON s.article_id = a.id
+            LEFT JOIN news_cluster_summaries cs
+                ON cs.cluster_id = COALESCE(s.cluster_id, a.id::text)
+               AND cs.organization_id = a.organization_id
+            LEFT JOIN news_articles representative
+                ON representative.id = cs.representative_article_id
             WHERE {" AND ".join(conditions)}
             ORDER BY e.embedding <=> %s::vector
             LIMIT %s
@@ -450,17 +474,37 @@ class NewsPipelineRepository:
                     "url": row[11],
                     "summary": row[12],
                     "content": row[13],
+                    "cluster_representative_article_id": row[14],
+                    "cluster_representative_title": row[15],
+                    "cluster_article_count": row[16],
+                    "cluster_published_from": row[17].isoformat() if row[17] else None,
+                    "cluster_published_to": row[18].isoformat() if row[18] else None,
                 }
                 for rank, row in enumerate(rows, start=1)
                 if float(row[7]) >= float(filters.get("min_relevance", 0.5))
             ]
             clusters = group_search_items(items, top_k=top_k)
-            selected_cluster_ids = {
-                cluster["cluster_id"] for cluster in clusters
-            }
-            selected_items = [
-                item for item in items if item["cluster_id"] in selected_cluster_ids
-            ]
+            selected_cluster_ids = [cluster["cluster_id"] for cluster in clusters]
+            selected_items = await self._load_cluster_items(
+                connection,
+                cluster_ids=selected_cluster_ids,
+                organization_id=organization_id,
+                matched_items=items,
+            )
+            if selected_items:
+                cluster_scores = {
+                    cluster["cluster_id"]: cluster.get("score")
+                    for cluster in clusters
+                    if cluster.get("score") is not None
+                }
+                clusters = group_search_items(
+                    selected_items,
+                    top_k=len(selected_cluster_ids),
+                )
+                for cluster in clusters:
+                    score = cluster_scores.get(cluster["cluster_id"])
+                    if score is not None:
+                        cluster["score"] = score
             result = {"clusters": clusters, "items": selected_items}
             await connection.execute(
                 """
@@ -471,6 +515,89 @@ class NewsPipelineRepository:
                 (SearchQueryStatus.DONE.value, json.dumps(result), query_id),
             )
         return result
+
+    @staticmethod
+    async def _load_cluster_items(
+        connection: AsyncConnection,
+        *,
+        cluster_ids: list[str],
+        organization_id: str | None,
+        matched_items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not cluster_ids:
+            return []
+        conditions = [
+            "a.status = %s",
+            "a.visibility = %s",
+            "COALESCE(s.cluster_id, a.id::text) = ANY(%s::text[])",
+        ]
+        params: list[Any] = [
+            ArticleStatus.PROCESSED.value,
+            ArticleVisibility.PUBLIC.value,
+            cluster_ids,
+        ]
+        if organization_id is not None:
+            conditions.append("a.organization_id = %s")
+            params.append(organization_id)
+        query = f"""
+            SELECT
+                a.id::text, a.title, a.status, a.language, a.novelty_score,
+                a.organization_id::text,
+                a.published_at,
+                COALESCE(s.cluster_id, a.id::text) AS cluster_id,
+                COALESCE(s.manual_novelty_label, s.novelty_label) AS novelty_label,
+                s.p_significant, a.url, a.summary, a.content,
+                cs.representative_article_id::text,
+                representative.title,
+                cs.article_count,
+                cs.started_at,
+                cs.last_seen_at
+            FROM news_articles a
+            LEFT JOIN article_pipeline_state s ON s.article_id = a.id
+            LEFT JOIN news_cluster_summaries cs
+                ON cs.cluster_id = COALESCE(s.cluster_id, a.id::text)
+               AND cs.organization_id = a.organization_id
+            LEFT JOIN news_articles representative
+                ON representative.id = cs.representative_article_id
+            WHERE {" AND ".join(conditions)}
+            ORDER BY
+                array_position(%s::text[], COALESCE(s.cluster_id, a.id::text)),
+                a.published_at,
+                a.id
+        """
+        params.append(cluster_ids)
+        matched_by_id = {item["article_id"]: item for item in matched_items}
+        async with connection.cursor() as cursor:
+            await cursor.execute(query, params)
+            rows = await cursor.fetchall()
+        items: list[dict[str, Any]] = []
+        for rank, row in enumerate(rows, start=1):
+            item = {
+                "article_id": row[0],
+                "title": row[1],
+                "status": row[2],
+                "language": row[3],
+                "novelty_score": row[4],
+                "organization_id": row[5],
+                "published_at": row[6].isoformat() if row[6] else None,
+                "rank": rank,
+                "cluster_id": row[7],
+                "novelty_label": row[8],
+                "p_significant": row[9],
+                "url": row[10],
+                "summary": row[11],
+                "content": row[12],
+                "cluster_representative_article_id": row[13],
+                "cluster_representative_title": row[14],
+                "cluster_article_count": row[15],
+                "cluster_published_from": row[16].isoformat() if row[16] else None,
+                "cluster_published_to": row[17].isoformat() if row[17] else None,
+            }
+            matched = matched_by_id.get(item["article_id"])
+            if matched and matched.get("score") is not None:
+                item["score"] = matched["score"]
+            items.append(item)
+        return items
 
     async def resolve_article_organization_id(
         self,
@@ -580,3 +707,153 @@ class NewsPipelineRepository:
             row[0]: dict(zip(columns[1:], row[1:], strict=True))
             for row in rows
         }
+
+    @staticmethod
+    def _collect_affected_cluster_ids(
+        *,
+        existing: dict[str, dict[str, Any]],
+        assignment_by_id: dict[str, dict[str, Any]],
+        prediction_by_id: dict[str, dict[str, Any]],
+    ) -> set[str]:
+        cluster_ids: set[str] = set()
+        for row in existing.values():
+            cluster_id = _clean_scalar(row.get("cluster_id"))
+            if cluster_id:
+                cluster_ids.add(str(cluster_id))
+        for row in [*assignment_by_id.values(), *prediction_by_id.values()]:
+            for key in ("cluster_id", "previous_cluster_id"):
+                cluster_id = _clean_scalar(row.get(key))
+                if cluster_id:
+                    cluster_ids.add(str(cluster_id))
+            for key in ("merged_cluster_ids",):
+                value = row.get(key)
+                if isinstance(value, list):
+                    cluster_ids.update(str(item) for item in value if item)
+        return cluster_ids
+
+    @staticmethod
+    async def _load_current_cluster_ids(
+        connection: AsyncConnection,
+        news_ids: list[str],
+    ) -> set[str]:
+        if not news_ids:
+            return set()
+        async with connection.cursor() as cursor:
+            await cursor.execute(
+                """
+                SELECT DISTINCT cluster_id
+                FROM article_pipeline_state
+                WHERE article_id = ANY(%s::uuid[])
+                """,
+                (news_ids,),
+            )
+            rows = await cursor.fetchall()
+        return {str(row[0]) for row in rows if row[0]}
+
+    @staticmethod
+    async def _refresh_cluster_summaries(
+        connection: AsyncConnection,
+        *,
+        cluster_ids: set[str],
+        embedding_model: str,
+        embedding_model_revision: str,
+    ) -> None:
+        if not cluster_ids:
+            return
+        ordered_cluster_ids = sorted(cluster_ids)
+        await connection.execute(
+            "DELETE FROM news_cluster_summaries WHERE cluster_id = ANY(%s::text[])",
+            (ordered_cluster_ids,),
+        )
+        async with connection.cursor() as cursor:
+            await cursor.execute(
+                """
+                SELECT
+                    a.organization_id::text,
+                    s.cluster_id,
+                    a.id::text,
+                    a.published_at,
+                    COALESCE(s.manual_novelty_label, s.novelty_label) AS novelty_label,
+                    e.embedding::text
+                FROM article_pipeline_state s
+                JOIN news_articles a ON a.id = s.article_id
+                JOIN article_pipeline_embeddings e ON e.article_id = a.id
+                WHERE s.cluster_id = ANY(%s::text[])
+                  AND a.status = %s
+                  AND a.visibility = %s
+                  AND e.model_name = %s
+                  AND e.model_revision = %s
+                ORDER BY s.cluster_id, a.published_at, a.id
+                """,
+                (
+                    ordered_cluster_ids,
+                    ArticleStatus.PROCESSED.value,
+                    ArticleVisibility.PUBLIC.value,
+                    embedding_model,
+                    embedding_model_revision,
+                ),
+            )
+            rows = await cursor.fetchall()
+
+        rows_by_cluster: dict[tuple[str, str], list[tuple[Any, ...]]] = {}
+        for row in rows:
+            rows_by_cluster.setdefault((str(row[0]), str(row[1])), []).append(row)
+
+        for (organization_id, cluster_id), cluster_rows in rows_by_cluster.items():
+            embeddings = np.asarray(
+                [json.loads(row[5]) for row in cluster_rows],
+                dtype=np.float32,
+            )
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            normalized_embeddings = np.divide(
+                embeddings,
+                norms,
+                out=np.zeros_like(embeddings),
+                where=norms > 0,
+            )
+            centroid = normalized_embeddings.mean(axis=0)
+            centroid_norm = float(np.linalg.norm(centroid))
+            if centroid_norm > 0:
+                centroid = centroid / centroid_norm
+            similarities = normalized_embeddings @ centroid
+            novelty_priority = {
+                "significant": 2,
+                "minor": 1,
+                "duplicate": 0,
+            }
+            representative_position = min(
+                range(len(cluster_rows)),
+                key=lambda position: (
+                    -float(similarities[position]),
+                    -novelty_priority.get(str(cluster_rows[position][4]), 0),
+                    cluster_rows[position][3],
+                    str(cluster_rows[position][2]),
+                ),
+            )
+            representative = cluster_rows[representative_position]
+            dates = [row[3] for row in cluster_rows if row[3] is not None]
+            started_at = min(dates) if dates else None
+            last_seen_at = max(dates) if dates else None
+            await connection.execute(
+                """
+                INSERT INTO news_cluster_summaries (
+                    organization_id, cluster_id, representative_article_id, article_count,
+                    started_at, last_seen_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (organization_id, cluster_id) DO UPDATE SET
+                    representative_article_id = EXCLUDED.representative_article_id,
+                    article_count = EXCLUDED.article_count,
+                    started_at = EXCLUDED.started_at,
+                    last_seen_at = EXCLUDED.last_seen_at,
+                    updated_at = now()
+                """,
+                (
+                    organization_id,
+                    cluster_id,
+                    representative[2],
+                    len(cluster_rows),
+                    started_at,
+                    last_seen_at,
+                ),
+            )

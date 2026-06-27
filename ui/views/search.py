@@ -202,10 +202,7 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
         if significant_count:
             label += f' · [⭐](# "Количество важных публикаций") {significant_count}'
         label += f' · [📰](# "Общее количество публикаций") {article_count}'
-        cluster_date = format_search_date(
-            cluster.get("published_from"),
-            hide_midnight=True,
-        )
+        cluster_date = _format_cluster_period(cluster)
         if cluster_date:
             label = f"**{label}** {cluster_date}"
         with st.expander(
@@ -243,6 +240,20 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
                 st.caption(f"Скрыто публикаций: {hidden_count}")
 
 
+def _format_cluster_period(cluster: dict) -> str:
+    started = format_search_date(
+        cluster.get("published_from"),
+        hide_midnight=True,
+    )
+    finished = format_search_date(
+        cluster.get("published_to"),
+        hide_midnight=True,
+    )
+    if started and finished and started != finished:
+        return f"{started} — {finished}"
+    return started or finished
+
+
 def render_search_article(item: dict, *, key_prefix: str) -> None:
     title = html.escape(str(item.get("title") or "Без названия"))
     novelty_label = item.get("novelty_label")
@@ -256,7 +267,7 @@ def render_search_article(item: dict, *, key_prefix: str) -> None:
     if item.get("score") is not None:
         details.append(f"релевантность {float(item['score']):.3f}")
     if item.get("p_significant") is not None:
-        details.append(f"важность {float(item['p_significant']):.0%}")
+        details.append(f"оценка модели {float(item['p_significant']):.0%}")
     metadata = html.escape(" · ".join(detail for detail in details if detail))
     title_style = (
         "font-weight:700;color:#f0f2f6"

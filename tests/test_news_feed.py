@@ -130,10 +130,20 @@ class _NewsServiceSpy:
     def __init__(self, article) -> None:
         self.article = article
         self.calls = []
+        self.cluster_summaries = {}
 
     def list_public_articles_by_period(self, **kwargs):
         self.calls.append(kwargs)
         return [self.article], 1
+
+    def list_cluster_summaries(self, cluster_ids, organization_id=None):
+        self.calls.append(
+            {
+                "cluster_ids": list(cluster_ids),
+                "organization_id": organization_id,
+            }
+        )
+        return self.cluster_summaries
 
 
 def test_news_feed_response_matches_clustered_search_result_without_relevance() -> None:
@@ -188,6 +198,10 @@ def test_news_feed_response_matches_clustered_search_result_without_relevance() 
         "organization_id",
     }
     assert service.calls[0]["organization_id"] == organization_id
+    assert service.calls[1] == {
+        "cluster_ids": ["cluster-1"],
+        "organization_id": organization_id,
+    }
 
 
 def test_admin_news_feed_can_read_all_organizations() -> None:
@@ -257,3 +271,44 @@ def test_group_search_items_keeps_search_score_only_when_present() -> None:
 
     assert "score" not in feed_cluster
     assert search_cluster["score"] == 0.95
+
+
+def test_group_search_items_uses_cluster_summary_for_title_and_period() -> None:
+    items = [
+        {
+            "article_id": "article-1",
+            "title": "Search nearest title",
+            "published_at": "2026-06-23T12:00:00+00:00",
+            "rank": 1,
+            "cluster_id": "cluster-1",
+            "novelty_label": "minor",
+        },
+        {
+            "article_id": "article-2",
+            "title": "Earlier title",
+            "published_at": "2026-06-22T12:00:00+00:00",
+            "rank": 2,
+            "cluster_id": "cluster-1",
+            "novelty_label": "significant",
+        },
+    ]
+
+    cluster = group_search_items(
+        items,
+        top_k=10,
+        cluster_summaries={
+            "cluster-1": {
+                "representative_article_id": "article-2",
+                "representative_title": "Medoid title",
+                "article_count": 5,
+                "published_from": "2026-06-20T00:00:00+00:00",
+                "published_to": "2026-06-25T00:00:00+00:00",
+            }
+        },
+    )[0]
+
+    assert cluster["representative_article_id"] == "article-2"
+    assert cluster["representative_title"] == "Medoid title"
+    assert cluster["article_count"] == 5
+    assert cluster["published_from"] == "2026-06-20T00:00:00+00:00"
+    assert cluster["published_to"] == "2026-06-25T00:00:00+00:00"

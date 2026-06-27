@@ -398,7 +398,7 @@ def render_published(client: ApiClient, published: list[dict]) -> None:
                         "Автоматически",
                     ),
                     "Итоговый тип": novelty_label,
-                    "Важность, %": (
+                    "Оценка модели, %": (
                         round(float(item["novelty_score"]) * 100)
                         if item.get("novelty_score") is not None
                         else None
@@ -417,7 +417,7 @@ def render_published(client: ApiClient, published: list[dict]) -> None:
                 "Обработка",
                 "Тип модели",
                 "Итоговый тип",
-                "Важность, %",
+                "Оценка модели, %",
                 "Источник",
             ],
             column_config={
@@ -442,7 +442,7 @@ def render_published(client: ApiClient, published: list[dict]) -> None:
                     "Тип модели",
                     width=PUBLISHED_MODEL_TYPE_COLUMN_WIDTH,
                 ),
-                "Важность, %": st.column_config.NumberColumn(
+                "Оценка модели, %": st.column_config.NumberColumn(
                     help=(
                         "Автоматическая оценка модели: насколько вероятно, что "
                         "новость содержит важное обновление сюжета. "

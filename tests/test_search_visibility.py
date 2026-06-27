@@ -8,6 +8,8 @@ from news.pipeline_repository import NewsPipelineRepository
 class _FakeCursor:
     def __init__(self, executed) -> None:
         self._executed = executed
+        self._query = ""
+        self._params = []
 
     async def __aenter__(self):
         return self
@@ -16,9 +18,96 @@ class _FakeCursor:
         return None
 
     async def execute(self, query, params) -> None:
+        self._query = query
+        self._params = params
         self._executed.append((query, params))
 
     async def fetchall(self):
+        if "from news_articles a" in self._query.lower():
+            rows = [
+                (
+                    "00000000-0000-0000-0000-000000000002",
+                    "Significant earlier update",
+                    ArticleStatus.PROCESSED.value,
+                    "ru",
+                    0.9,
+                    "10000000-0000-0000-0000-000000000001",
+                    datetime(2026, 1, 1, tzinfo=UTC),
+                    "cluster-1",
+                    "significant",
+                    0.9,
+                    "https://example.com/significant",
+                    None,
+                    "Significant full article text",
+                    "00000000-0000-0000-0000-000000000002",
+                    "Medoid cluster title",
+                    7,
+                    datetime(2026, 1, 1, tzinfo=UTC),
+                    datetime(2026, 1, 5, tzinfo=UTC),
+                ),
+                (
+                    "00000000-0000-0000-0000-000000000001",
+                    "Public article from another publisher",
+                    ArticleStatus.PROCESSED.value,
+                    "ru",
+                    0.8,
+                    "10000000-0000-0000-0000-000000000001",
+                    datetime(2026, 1, 2, tzinfo=UTC),
+                    "cluster-1",
+                    "minor",
+                    0.2,
+                    "https://example.com/minor",
+                    "Short summary",
+                    "Full article text",
+                    "00000000-0000-0000-0000-000000000002",
+                    "Medoid cluster title",
+                    7,
+                    datetime(2026, 1, 1, tzinfo=UTC),
+                    datetime(2026, 1, 5, tzinfo=UTC),
+                ),
+                (
+                    "00000000-0000-0000-0000-000000000004",
+                    "Cluster item outside semantic top",
+                    ArticleStatus.PROCESSED.value,
+                    "ru",
+                    0.4,
+                    "10000000-0000-0000-0000-000000000001",
+                    datetime(2026, 1, 4, tzinfo=UTC),
+                    "cluster-1",
+                    "duplicate",
+                    0.1,
+                    "https://example.com/duplicate",
+                    None,
+                    "Duplicate full article text",
+                    "00000000-0000-0000-0000-000000000002",
+                    "Medoid cluster title",
+                    7,
+                    datetime(2026, 1, 1, tzinfo=UTC),
+                    datetime(2026, 1, 5, tzinfo=UTC),
+                ),
+                (
+                    "00000000-0000-0000-0000-000000000003",
+                    "Another story",
+                    ArticleStatus.PROCESSED.value,
+                    "ru",
+                    0.7,
+                    "10000000-0000-0000-0000-000000000001",
+                    datetime(2026, 1, 3, tzinfo=UTC),
+                    "cluster-2",
+                    "significant",
+                    0.8,
+                    None,
+                    None,
+                    "Another story text",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            ]
+            cluster_ids = set(self._params[2])
+            return [row for row in rows if row[7] in cluster_ids]
         return [
             (
                 "00000000-0000-0000-0000-000000000001",
@@ -35,6 +124,11 @@ class _FakeCursor:
                 "https://example.com/minor",
                 "Short summary",
                 "Full article text",
+                "00000000-0000-0000-0000-000000000002",
+                "Medoid cluster title",
+                7,
+                datetime(2026, 1, 1, tzinfo=UTC),
+                datetime(2026, 1, 5, tzinfo=UTC),
             ),
             (
                 "00000000-0000-0000-0000-000000000002",
@@ -51,6 +145,11 @@ class _FakeCursor:
                 "https://example.com/significant",
                 None,
                 "Significant full article text",
+                "00000000-0000-0000-0000-000000000002",
+                "Medoid cluster title",
+                7,
+                datetime(2026, 1, 1, tzinfo=UTC),
+                datetime(2026, 1, 5, tzinfo=UTC),
             ),
             (
                 "00000000-0000-0000-0000-000000000003",
@@ -67,6 +166,11 @@ class _FakeCursor:
                 None,
                 None,
                 "Another story text",
+                None,
+                None,
+                None,
+                None,
+                None,
             )
         ]
 
@@ -123,25 +227,31 @@ def test_search_is_scoped_to_requested_organization(monkeypatch) -> None:
     assert "submitted_by_user_id" not in normalized_sql
     assert "user_id" not in normalized_sql
     assert "10000000-0000-0000-0000-000000000001" in search_params
-    assert result["items"][0]["title"] == "Public article from another publisher"
+    assert result["items"][0]["title"] == "Significant earlier update"
     assert result["items"][0]["organization_id"] == (
         "10000000-0000-0000-0000-000000000001"
     )
-    assert result["items"][0]["summary"] == "Short summary"
-    assert result["items"][0]["content"] == "Full article text"
+    assert result["items"][1]["summary"] == "Short summary"
+    assert result["items"][1]["content"] == "Full article text"
     assert "left join article_pipeline_state" in normalized_sql
+    assert "left join news_cluster_summaries" in normalized_sql
     assert "coalesce(s.manual_novelty_label, s.novelty_label)" in normalized_sql
     assert len(result["clusters"]) == 2
     assert result["clusters"][0]["cluster_id"] == "cluster-1"
     assert result["clusters"][0]["representative_article_id"] == (
-        "00000000-0000-0000-0000-000000000001"
+        "00000000-0000-0000-0000-000000000002"
     )
+    assert result["clusters"][0]["representative_title"] == "Medoid cluster title"
+    assert result["clusters"][0]["article_count"] == 7
+    assert result["clusters"][0]["published_from"] == "2026-01-01T00:00:00+00:00"
+    assert result["clusters"][0]["published_to"] == "2026-01-05T00:00:00+00:00"
     assert result["clusters"][0]["significant_count"] == 1
     assert [
         item["title"] for item in result["clusters"][0]["items"]
     ] == [
         "Significant earlier update",
         "Public article from another publisher",
+        "Cluster item outside semantic top",
     ]
 
 
@@ -169,7 +279,9 @@ def test_search_filters_candidates_below_minimum_relevance(monkeypatch) -> None:
         )
     )
 
-    assert [item["score"] for item in result["items"]] == [0.95]
+    assert [
+        item["score"] for item in result["items"] if item.get("score") is not None
+    ] == [0.95]
 
 
 def test_admin_search_can_run_without_organization_scope(monkeypatch) -> None:
