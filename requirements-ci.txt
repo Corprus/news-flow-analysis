@@ -9,6 +9,7 @@ SQLAlchemy==2.0.51
 psycopg[binary]==3.3.4
 pytest==9.0.3
 httpx==0.28.1
+requests==2.34.2
 prometheus-client==0.22.1
 
 # Облегчённый стек обработки данных и ML для модульных тестов финального пайплайна.
