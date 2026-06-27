@@ -8,7 +8,7 @@ from fastapi.exceptions import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from accounting.routes import router as accounting_router
-from api.demo import seed_demo, validate_demo_settings
+from api.demo import DemoSeedResult, seed_demo, validate_demo_settings
 from db.database import create_tables, drop_tables, get_session, init_db
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
@@ -25,6 +25,7 @@ class NewsVectorizationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     news_ids: list[UUID] = Field(min_length=1, max_length=10_000)
+    organization_id: UUID
     mode: Literal["full", "incremental"] = "incremental"
 
 
@@ -67,20 +68,7 @@ async def lifespan(app: FastAPI):
     if settings.demo_mode:
         with get_session() as session:
             demo = seed_demo(session, settings)
-        if demo.article_ids_to_process:
-            job_id = str(uuid4())
-            payload = {
-                "news_ids": demo.article_ids_to_process,
-                "mode": "incremental",
-            }
-            await repository.mark_queued(job_id, payload)
-            await publisher.publish(
-                {
-                    "job_id": job_id,
-                    "type": "news_pipeline",
-                    "payload": payload,
-                }
-            )
+        await enqueue_demo_pipeline_jobs(repository, publisher, demo)
     yield
     await publisher.close()
 
@@ -121,6 +109,30 @@ async def create_news_vectorization_job(
         }
     )
     return NewsVectorizationJobResponse(job_id=UUID(job_id), status="queued")
+
+
+async def enqueue_demo_pipeline_jobs(
+    repository: NewsPipelineJobRepository,
+    publisher: RabbitPublisher,
+    demo: DemoSeedResult,
+) -> None:
+    for batch in demo.pipeline_batches:
+        if not batch.article_ids_to_process:
+            continue
+        job_id = str(uuid4())
+        payload = {
+            "news_ids": batch.article_ids_to_process,
+            "organization_id": str(batch.organization_id),
+            "mode": "incremental",
+        }
+        await repository.mark_queued(job_id, payload)
+        await publisher.publish(
+            {
+                "job_id": job_id,
+                "type": "news_pipeline",
+                "payload": payload,
+            }
+        )
 
 
 @app.get("/news-pipeline/{job_id}", response_model=NewsVectorizationJobStatus)

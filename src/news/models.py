@@ -103,6 +103,16 @@ class NewsArticle(Base):
         index=True,
         nullable=True,
     )
+    organization_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "organizations.id",
+            name="fk_news_articles_organization_id",
+            ondelete="RESTRICT",
+        ),
+        index=True,
+        nullable=False,
+    )
     submitted_by_user_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
         ForeignKey("users.id", ondelete="SET NULL"),

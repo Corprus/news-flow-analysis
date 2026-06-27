@@ -50,13 +50,18 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
             raise ValueError("news_ids must contain at least one article ID")
         if mode not in {"full", "incremental"}:
             raise ValueError(f"Unsupported pipeline mode: {mode}")
+        organization_id = payload.get("organization_id")
+        if organization_id is not None:
+            organization_id = str(organization_id)
         await jobs.mark_processing(job_id, payload)
-        requested = await repository.load_articles(news_ids)
+        requested = await repository.load_articles(news_ids, organization_id)
+        organization_id = str(requested["organization_id"].iloc[0])
         await repository.mark_articles_processing(news_ids)
         if mode == "full":
             result = await asyncio.to_thread(app.state.full_pipeline.run, requested)
         else:
             history, history_embeddings = await repository.load_history(
+                organization_id=organization_id,
                 exclude_news_ids=news_ids,
                 embedding_model=app.state.config.embedding_model_name,
                 embedding_model_revision=app.state.config.embedding_model_revision,
@@ -115,6 +120,7 @@ async def _handle_search_job(app: FastAPI, message: dict[str, Any]) -> None:
         )
         result = await repository.complete_search_query(
             query_id=query_id,
+            organization_id=payload.get("organization_id"),
             query_embedding=embedding[0].tolist(),
             filters=payload.get("filters") or {},
             top_k=int(payload.get("top_k") or 20),

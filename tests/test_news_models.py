@@ -31,6 +31,15 @@ def test_user_requires_an_organization() -> None:
     } == {"organizations.id"}
 
 
+def test_news_article_requires_an_organization() -> None:
+    organization_id = Base.metadata.tables["news_articles"].c.organization_id
+
+    assert organization_id.nullable is False
+    assert {
+        foreign_key.target_fullname for foreign_key in organization_id.foreign_keys
+    } == {"organizations.id"}
+
+
 def test_accounting_is_scoped_to_organization_and_tracks_actor() -> None:
     accounts = Base.metadata.tables["accounts"]
     transactions = Base.metadata.tables["transactions"]

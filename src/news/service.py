@@ -24,6 +24,7 @@ from news.models import (
 
 @dataclass(frozen=True)
 class NewsSearchFilters:
+    organization_id: UUID | None = None
     language: str | None = None
     source_id: UUID | None = None
     published_from: datetime | None = None
@@ -33,6 +34,8 @@ class NewsSearchFilters:
 
     def to_payload(self) -> dict[str, str]:
         payload: dict[str, str] = {}
+        if self.organization_id is not None:
+            payload["organization_id"] = str(self.organization_id)
         if self.language is not None:
             payload["language"] = self.language
         if self.source_id is not None:
@@ -63,6 +66,7 @@ class NewsService:
         self,
         *,
         user_id: UUID,
+        organization_id: UUID,
         title: str,
         content: str,
         published_at: datetime,
@@ -77,6 +81,7 @@ class NewsService:
             canonical_url,
             content_hash,
             user_id,
+            organization_id,
         )
         if existing_article is not None:
             if existing_article.visibility != ArticleVisibility.DRAFT.value:
@@ -97,6 +102,7 @@ class NewsService:
             return existing_article
 
         article = NewsArticle(
+            organization_id=str(organization_id),
             submitted_by_user_id=str(user_id),
             title=title,
             content=content,
@@ -120,6 +126,7 @@ class NewsService:
         self,
         *,
         user_id: UUID,
+        organization_id: UUID,
         format_id: str,
         articles: Iterable[ImportedNews],
     ) -> NewsImportResult:
@@ -134,6 +141,7 @@ class NewsService:
                 imported.url,
                 content_hash,
                 user_id,
+                organization_id,
             )
             if existing_article is not None:
                 duplicate_count += 1
@@ -150,6 +158,7 @@ class NewsService:
                 }
             }
             article = NewsArticle(
+                organization_id=str(organization_id),
                 submitted_by_user_id=str(user_id),
                 external_id=imported.external_id,
                 title=imported.title,
@@ -526,13 +535,16 @@ class NewsService:
         *,
         published_from: datetime,
         published_to: datetime,
+        organization_id: UUID | None = None,
     ) -> tuple[list[NewsArticle], int]:
-        filters = (
+        filters = [
             NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
             NewsArticle.status == ArticleStatus.PROCESSED.value,
             NewsArticle.published_at >= published_from,
             NewsArticle.published_at < published_to,
-        )
+        ]
+        if organization_id is not None:
+            filters.append(NewsArticle.organization_id == str(organization_id))
         total = self._session.execute(
             select(func.count()).select_from(NewsArticle).where(*filters)
         ).scalar_one()
@@ -550,11 +562,14 @@ class NewsService:
         *,
         published_from: datetime,
         published_to: datetime,
+        organization_id: UUID | None = None,
     ) -> tuple[datetime | None, datetime | None]:
-        filters = (
+        filters = [
             NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
             NewsArticle.status == ArticleStatus.PROCESSED.value,
-        )
+        ]
+        if organization_id is not None:
+            filters.append(NewsArticle.organization_id == str(organization_id))
         previous_date = self._session.execute(
             select(func.max(NewsArticle.published_at)).where(
                 *filters,
@@ -569,12 +584,18 @@ class NewsService:
         ).scalar_one_or_none()
         return previous_date, next_date
 
-    def get_latest_public_article_date(self) -> datetime | None:
+    def get_latest_public_article_date(
+        self,
+        organization_id: UUID | None = None,
+    ) -> datetime | None:
+        filters = [
+            NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
+            NewsArticle.status == ArticleStatus.PROCESSED.value,
+        ]
+        if organization_id is not None:
+            filters.append(NewsArticle.organization_id == str(organization_id))
         return self._session.execute(
-            select(func.max(NewsArticle.published_at)).where(
-                NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
-                NewsArticle.status == ArticleStatus.PROCESSED.value,
-            )
+            select(func.max(NewsArticle.published_at)).where(*filters)
         ).scalar_one_or_none()
 
     def list_search_queries(
@@ -603,9 +624,13 @@ class NewsService:
         canonical_url: str | None,
         content_hash: str,
         user_id: UUID,
+        organization_id: UUID,
     ) -> NewsArticle | None:
         allowed = or_(
-            NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
+            (
+                NewsArticle.visibility == ArticleVisibility.PUBLIC.value
+            )
+            & (NewsArticle.organization_id == str(organization_id)),
             NewsArticle.submitted_by_user_id == str(user_id),
         )
         if canonical_url:

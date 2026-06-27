@@ -166,6 +166,66 @@ def create_tables() -> None:
         connection.execute(
             text(
                 """
+                ALTER TABLE news_articles
+                ADD COLUMN IF NOT EXISTS organization_id uuid
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE news_articles AS article
+                SET organization_id = users.organization_id
+                FROM users
+                WHERE article.submitted_by_user_id = users.id
+                  AND article.organization_id IS NULL
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO organizations (id, name, created_at)
+                SELECT '00000000-0000-0000-0000-000000000000'::uuid,
+                       'System imports',
+                       NOW()
+                WHERE EXISTS (
+                    SELECT 1 FROM news_articles WHERE organization_id IS NULL
+                )
+                ON CONFLICT (id) DO NOTHING
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE news_articles
+                SET organization_id = '00000000-0000-0000-0000-000000000000'::uuid
+                WHERE organization_id IS NULL
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                ALTER TABLE news_articles
+                    ALTER COLUMN organization_id SET NOT NULL,
+                    DROP CONSTRAINT IF EXISTS fk_news_articles_organization_id;
+
+                ALTER TABLE news_articles
+                    ADD CONSTRAINT fk_news_articles_organization_id
+                    FOREIGN KEY (organization_id)
+                    REFERENCES organizations (id)
+                    ON DELETE RESTRICT;
+
+                CREATE INDEX IF NOT EXISTS ix_news_articles_organization_id
+                    ON news_articles (organization_id)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
                 ALTER TABLE transactions
                 ADD COLUMN IF NOT EXISTS batch_id uuid;
 
