@@ -112,6 +112,7 @@ def test_import_keeps_detected_duplicate_as_separate_draft(monkeypatch) -> None:
 
     result = service.import_user_articles(
         user_id=uuid4(),
+        organization_id=uuid4(),
         format_id="lenta",
         articles=[
             ImportedNews(
@@ -137,6 +138,7 @@ class _ImportNewsServiceSpy:
 
     def import_user_articles(self, **kwargs) -> NewsImportResult:
         assert kwargs["format_id"] == "lenta"
+        assert kwargs["organization_id"] is not None
         assert len(kwargs["articles"]) == 1
         article_id = str(uuid4())
         return NewsImportResult(

@@ -9,6 +9,7 @@ from news.models import ArticleStatus, ArticleVisibility
 from news.routes import get_news_feed
 from news.search_results import group_search_items
 from news.service import NewsService
+from users.models import UserRole
 
 
 class _ScalarCollection:
@@ -66,6 +67,7 @@ def test_news_feed_query_filters_public_articles_by_half_open_period() -> None:
     articles, total = service.list_public_articles_by_period(
         published_from=published_from,
         published_to=published_to,
+        organization_id=uuid4(),
     )
 
     count_sql = str(session.statements[0])
@@ -75,6 +77,7 @@ def test_news_feed_query_filters_public_articles_by_half_open_period() -> None:
     assert articles == [article]
     assert total == 1
     assert "news_articles.visibility" in count_sql
+    assert "news_articles.organization_id" in count_sql
     assert "news_articles.status" in count_sql
     assert "news_articles.published_at >=" in normalized_sql
     assert "news_articles.published_at <" in normalized_sql
@@ -94,6 +97,7 @@ def test_adjacent_news_dates_skip_empty_periods() -> None:
     result = service.get_adjacent_public_article_dates(
         published_from=datetime(2026, 6, 22, tzinfo=UTC),
         published_to=datetime(2026, 6, 23, tzinfo=UTC),
+        organization_id=uuid4(),
     )
 
     previous_sql = " ".join(str(session.statements[0]).split()).lower()
@@ -101,6 +105,7 @@ def test_adjacent_news_dates_skip_empty_periods() -> None:
     assert result == (previous_date, next_date)
     assert "max(news_articles.published_at)" in previous_sql
     assert "news_articles.published_at <" in previous_sql
+    assert "news_articles.organization_id" in previous_sql
     assert "min(news_articles.published_at)" in next_sql
     assert "news_articles.published_at >=" in next_sql
 
@@ -110,12 +115,13 @@ def test_latest_news_date_uses_processed_public_articles() -> None:
     session = _AdjacentDateSession(latest_date, None)
     service = NewsService(session)  # type: ignore[arg-type]
 
-    result = service.get_latest_public_article_date()
+    result = service.get_latest_public_article_date(uuid4())
 
     sql = " ".join(str(session.statements[0]).split()).lower()
     params = session.statements[0].compile().params.values()
     assert result == latest_date
     assert "max(news_articles.published_at)" in sql
+    assert "news_articles.organization_id" in sql
     assert ArticleVisibility.PUBLIC.value in params
     assert ArticleStatus.PROCESSED.value in params
 
@@ -152,9 +158,13 @@ def test_news_feed_response_matches_clustered_search_result_without_relevance() 
         pipeline_state=pipeline_state,
     )
     service = _NewsServiceSpy(article)
+    organization_id = uuid4()
 
     response = get_news_feed(
-        current_user=object(),  # type: ignore[arg-type]
+        current_user=SimpleNamespace(
+            role=UserRole.USER,
+            organization_id=organization_id,
+        ),
         news=service,  # type: ignore[arg-type]
         published_from=datetime(2026, 6, 22, tzinfo=UTC),
         published_to=datetime(2026, 6, 23, tzinfo=UTC),
@@ -172,7 +182,42 @@ def test_news_feed_response_matches_clustered_search_result_without_relevance() 
     assert response.clusters[0]["representative_article_id"] == str(article_id)
     assert response.clusters[0]["significant_count"] == 1
     assert "score" not in response.clusters[0]
-    assert set(service.calls[0]) == {"published_from", "published_to"}
+    assert set(service.calls[0]) == {
+        "published_from",
+        "published_to",
+        "organization_id",
+    }
+    assert service.calls[0]["organization_id"] == organization_id
+
+
+def test_admin_news_feed_can_read_all_organizations() -> None:
+    article = SimpleNamespace(
+        id=str(uuid4()),
+        title="Admin visible",
+        status=ArticleStatus.PROCESSED.value,
+        summary=None,
+        content="Text",
+        published_at=datetime(2026, 6, 22, 12, tzinfo=UTC),
+        language="ru",
+        novelty_score=0.5,
+        url=None,
+        pipeline_state=None,
+    )
+    service = _NewsServiceSpy(article)
+
+    get_news_feed(
+        current_user=SimpleNamespace(
+            role=UserRole.ADMIN,
+            organization_id=uuid4(),
+        ),
+        news=service,  # type: ignore[arg-type]
+        published_from=datetime(2026, 6, 22, tzinfo=UTC),
+        published_to=datetime(2026, 6, 23, tzinfo=UTC),
+        limit=50,
+        offset=0,
+    )
+
+    assert service.calls[0]["organization_id"] is None
 
 
 def test_news_feed_rejects_empty_or_reversed_period() -> None:
@@ -181,7 +226,10 @@ def test_news_feed_rejects_empty_or_reversed_period() -> None:
 
     with pytest.raises(HTTPException) as error:
         get_news_feed(
-            current_user=object(),  # type: ignore[arg-type]
+            current_user=SimpleNamespace(
+                role=UserRole.USER,
+                organization_id=uuid4(),
+            ),
             news=service,  # type: ignore[arg-type]
             published_from=same_time,
             published_to=same_time,

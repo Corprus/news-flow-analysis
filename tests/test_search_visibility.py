@@ -26,6 +26,7 @@ class _FakeCursor:
                 ArticleStatus.PROCESSED.value,
                 "ru",
                 0.8,
+                "10000000-0000-0000-0000-000000000001",
                 datetime(2026, 1, 2, tzinfo=UTC),
                 0.95,
                 "cluster-1",
@@ -41,6 +42,7 @@ class _FakeCursor:
                 ArticleStatus.PROCESSED.value,
                 "ru",
                 0.9,
+                "10000000-0000-0000-0000-000000000001",
                 datetime(2026, 1, 1, tzinfo=UTC),
                 0.9,
                 "cluster-1",
@@ -56,6 +58,7 @@ class _FakeCursor:
                 ArticleStatus.PROCESSED.value,
                 "ru",
                 0.7,
+                "10000000-0000-0000-0000-000000000001",
                 datetime(2026, 1, 3, tzinfo=UTC),
                 0.8,
                 "cluster-2",
@@ -86,7 +89,7 @@ class _FakeConnection:
         self.update_queries.append((query, params))
 
 
-def test_search_returns_all_public_articles_without_publisher_scope(monkeypatch) -> None:
+def test_search_is_scoped_to_requested_organization(monkeypatch) -> None:
     connection = _FakeConnection()
 
     async def connect(_database_url):
@@ -101,6 +104,7 @@ def test_search_returns_all_public_articles_without_publisher_scope(monkeypatch)
     result = asyncio.run(
         repository.complete_search_query(
             query_id="00000000-0000-0000-0000-000000000002",
+            organization_id="10000000-0000-0000-0000-000000000001",
             query_embedding=[1.0, 0.0],
             filters={},
             top_k=20,
@@ -113,12 +117,16 @@ def test_search_returns_all_public_articles_without_publisher_scope(monkeypatch)
     normalized_sql = " ".join(search_sql.split()).lower()
 
     assert "a.visibility = %s" in normalized_sql
+    assert "a.organization_id = %s" in normalized_sql
     assert ArticleVisibility.PUBLIC.value in search_params
     assert ArticleStatus.PROCESSED.value in search_params
     assert "submitted_by_user_id" not in normalized_sql
     assert "user_id" not in normalized_sql
-    assert "organization_id" not in normalized_sql
+    assert "10000000-0000-0000-0000-000000000001" in search_params
     assert result["items"][0]["title"] == "Public article from another publisher"
+    assert result["items"][0]["organization_id"] == (
+        "10000000-0000-0000-0000-000000000001"
+    )
     assert result["items"][0]["summary"] == "Short summary"
     assert result["items"][0]["content"] == "Full article text"
     assert "left join article_pipeline_state" in normalized_sql
@@ -152,6 +160,7 @@ def test_search_filters_candidates_below_minimum_relevance(monkeypatch) -> None:
     result = asyncio.run(
         repository.complete_search_query(
             query_id="00000000-0000-0000-0000-000000000002",
+            organization_id="10000000-0000-0000-0000-000000000001",
             query_embedding=[1.0, 0.0],
             filters={"min_relevance": 0.91},
             top_k=20,
@@ -161,3 +170,33 @@ def test_search_filters_candidates_below_minimum_relevance(monkeypatch) -> None:
     )
 
     assert [item["score"] for item in result["items"]] == [0.95]
+
+
+def test_admin_search_can_run_without_organization_scope(monkeypatch) -> None:
+    connection = _FakeConnection()
+
+    async def connect(_database_url):
+        return connection
+
+    monkeypatch.setattr(
+        "news.pipeline_repository.AsyncConnection.connect",
+        connect,
+    )
+    repository = NewsPipelineRepository("postgresql://test")
+
+    asyncio.run(
+        repository.complete_search_query(
+            query_id="00000000-0000-0000-0000-000000000002",
+            organization_id=None,
+            query_embedding=[1.0, 0.0],
+            filters={},
+            top_k=20,
+            model_name="test-model",
+            model_revision="test-revision",
+        )
+    )
+
+    search_sql, _ = connection.cursor_queries[0]
+    normalized_sql = " ".join(search_sql.split()).lower()
+
+    assert "a.organization_id = %s" not in normalized_sql

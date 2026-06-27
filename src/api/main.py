@@ -25,6 +25,7 @@ class NewsVectorizationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     news_ids: list[UUID] = Field(min_length=1, max_length=10_000)
+    organization_id: UUID
     mode: Literal["full", "incremental"] = "incremental"
 
 
@@ -71,6 +72,7 @@ async def lifespan(app: FastAPI):
             job_id = str(uuid4())
             payload = {
                 "news_ids": demo.article_ids_to_process,
+                "organization_id": str(demo.organization_id),
                 "mode": "incremental",
             }
             await repository.mark_queued(job_id, payload)

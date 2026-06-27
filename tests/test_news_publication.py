@@ -25,8 +25,9 @@ from users.models import UserRole
 
 
 class _Article:
-    def __init__(self, article_id: str) -> None:
+    def __init__(self, article_id: str, organization_id: str | None = None) -> None:
         self.id = article_id
+        self.organization_id = organization_id or str(uuid4())
         self.visibility = ArticleVisibility.PUBLIC
         self.status = ArticleStatus.PENDING
 
@@ -127,7 +128,8 @@ class _PublisherSpy:
 
 def test_batch_publication_uses_one_pipeline_job_with_multiple_ids() -> None:
     article_ids = [uuid4(), uuid4()]
-    articles = [_Article(str(article_id)) for article_id in article_ids]
+    organization_id = str(uuid4())
+    articles = [_Article(str(article_id), organization_id) for article_id in article_ids]
     news = _NewsServiceSpy(articles)
     accounting = _AccountingSpy()
     repository = _JobRepositorySpy()
@@ -159,6 +161,7 @@ def test_batch_publication_uses_one_pipeline_job_with_multiple_ids() -> None:
     assert len(repository.queued) == 1
     assert repository.queued[0][1] == {
         "news_ids": [str(article_id) for article_id in article_ids],
+        "organization_id": organization_id,
         "mode": "incremental",
     }
     assert len(publisher.messages) == 1
@@ -240,7 +243,8 @@ def test_manual_labels_are_saved_for_current_publishers_articles() -> None:
 
 def test_reprocess_uses_one_pipeline_job_and_charges_each_article() -> None:
     article_ids = [uuid4(), uuid4()]
-    articles = [_Article(str(article_id)) for article_id in article_ids]
+    organization_id = str(uuid4())
+    articles = [_Article(str(article_id), organization_id) for article_id in article_ids]
     news = _NewsServiceSpy(articles)
     repository = _JobRepositorySpy()
     publisher = _PublisherSpy()
@@ -274,6 +278,7 @@ def test_reprocess_uses_one_pipeline_job_and_charges_each_article() -> None:
     assert accounting.withdraw_calls[0][4] == accounting.withdraw_calls[1][4]
     assert repository.queued[0][1] == {
         "news_ids": [str(article_id) for article_id in article_ids],
+        "organization_id": organization_id,
         "mode": "incremental",
     }
     assert len(publisher.messages) == 1

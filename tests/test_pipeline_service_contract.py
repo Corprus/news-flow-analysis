@@ -28,6 +28,7 @@ from news.routes import (
 
 class _Article:
     id = "00000000-0000-0000-0000-000000000001"
+    organization_id = "10000000-0000-0000-0000-000000000001"
 
 
 def test_pipeline_job_contract_contains_ids_and_mode() -> None:
@@ -36,6 +37,7 @@ def test_pipeline_job_contract_contains_ids_and_mode() -> None:
             "00000000-0000-0000-0000-000000000001",
             "00000000-0000-0000-0000-000000000002",
         ],
+        organization_id="10000000-0000-0000-0000-000000000001",
         mode="full",
     )
 
@@ -44,6 +46,7 @@ def test_pipeline_job_contract_contains_ids_and_mode() -> None:
             "00000000-0000-0000-0000-000000000001",
             "00000000-0000-0000-0000-000000000002",
         ],
+        "organization_id": "10000000-0000-0000-0000-000000000001",
         "mode": "full",
     }
 
@@ -51,18 +54,43 @@ def test_pipeline_job_contract_contains_ids_and_mode() -> None:
 def test_new_article_uses_incremental_pipeline_by_default() -> None:
     assert _article_vectorization_payload(_Article()) == {
         "news_ids": [_Article.id],
+        "organization_id": _Article.organization_id,
         "mode": "incremental",
     }
 
 
 def test_multiple_articles_use_one_incremental_pipeline_payload() -> None:
-    first = type("Article", (), {"id": "news-1"})()
-    second = type("Article", (), {"id": "news-2"})()
+    organization_id = "10000000-0000-0000-0000-000000000001"
+    first = type("Article", (), {"id": "news-1", "organization_id": organization_id})()
+    second = type("Article", (), {"id": "news-2", "organization_id": organization_id})()
 
     assert _articles_vectorization_payload([first, second]) == {
         "news_ids": ["news-1", "news-2"],
+        "organization_id": organization_id,
         "mode": "incremental",
     }
+
+
+def test_multiple_articles_reject_mixed_organizations_in_pipeline_payload() -> None:
+    first = type(
+        "Article",
+        (),
+        {
+            "id": "news-1",
+            "organization_id": "10000000-0000-0000-0000-000000000001",
+        },
+    )()
+    second = type(
+        "Article",
+        (),
+        {
+            "id": "news-2",
+            "organization_id": "10000000-0000-0000-0000-000000000002",
+        },
+    )()
+
+    with pytest.raises(ValueError, match="one organization"):
+        _articles_vectorization_payload([first, second])
 
 
 def test_add_and_batch_publish_contracts_expose_immediate_publication() -> None:

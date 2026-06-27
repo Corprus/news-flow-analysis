@@ -47,15 +47,24 @@ class NewsPipelineRepository:
                 row = await cursor.fetchone()
         return int(row[0]) if row is not None else 0
 
-    async def load_articles(self, news_ids: list[str]) -> pd.DataFrame:
+    async def load_articles(
+        self,
+        news_ids: list[str],
+        organization_id: str | None,
+    ) -> pd.DataFrame:
         if not news_ids:
             return pd.DataFrame()
+        organization_id = await self.resolve_article_organization_id(
+            news_ids,
+            organization_id,
+        )
         async with await AsyncConnection.connect(self._database_url) as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
                     """
                     SELECT
                         id::text AS news_id,
+                        organization_id::text AS organization_id,
                         published_at,
                         COALESCE(topic, '<missing>') AS topic,
                         title,
@@ -64,8 +73,9 @@ class NewsPipelineRepository:
                     FROM news_articles
                     WHERE id = ANY(%s::uuid[])
                       AND visibility = %s
+                      AND organization_id = %s
                     """,
-                    (news_ids, ArticleVisibility.PUBLIC.value),
+                    (news_ids, ArticleVisibility.PUBLIC.value, organization_id),
                 )
                 rows = await cursor.fetchall()
                 columns = [column.name for column in cursor.description]
@@ -94,6 +104,7 @@ class NewsPipelineRepository:
     async def load_history(
         self,
         *,
+        organization_id: str,
         exclude_news_ids: list[str],
         embedding_model: str,
         embedding_model_revision: str,
@@ -104,6 +115,7 @@ class NewsPipelineRepository:
                     """
                     SELECT
                         a.id::text AS news_id,
+                        a.organization_id::text AS organization_id,
                         a.published_at,
                         COALESCE(a.topic, '<missing>') AS topic,
                         a.title,
@@ -122,6 +134,7 @@ class NewsPipelineRepository:
                     WHERE NOT (a.id = ANY(%s::uuid[]))
                       AND a.status = %s
                       AND a.visibility = %s
+                      AND a.organization_id = %s
                       AND e.model_name = %s
                       AND e.model_revision = %s
                     ORDER BY a.published_at, a.id
@@ -130,6 +143,7 @@ class NewsPipelineRepository:
                         exclude_news_ids,
                         ArticleStatus.PROCESSED.value,
                         ArticleVisibility.PUBLIC.value,
+                        organization_id,
                         embedding_model,
                         embedding_model_revision,
                     ),
@@ -141,6 +155,7 @@ class NewsPipelineRepository:
                 pd.DataFrame(
                     columns=[
                         "news_id",
+                        "organization_id",
                         "published_at",
                         "topic",
                         "title",
@@ -361,6 +376,7 @@ class NewsPipelineRepository:
         self,
         *,
         query_id: str,
+        organization_id: str | None,
         query_embedding: list[float],
         filters: dict[str, Any],
         top_k: int,
@@ -392,11 +408,15 @@ class NewsPipelineRepository:
         if filters.get("min_novelty_score") is not None:
             conditions.append("a.novelty_score >= %s")
             params.append(float(filters["min_novelty_score"]))
+        if organization_id is not None:
+            conditions.append("a.organization_id = %s")
+            params.append(organization_id)
         vector = _vector_literal(query_embedding)
         candidate_limit = min(max(top_k * 10, 100), 1000)
         query = f"""
             SELECT
                 a.id::text, a.title, a.status, a.language, a.novelty_score,
+                a.organization_id::text,
                 a.published_at, 1 - (e.embedding <=> %s::vector) AS score,
                 COALESCE(s.cluster_id, a.id::text) AS cluster_id,
                 COALESCE(s.manual_novelty_label, s.novelty_label) AS novelty_label,
@@ -420,18 +440,19 @@ class NewsPipelineRepository:
                     "status": row[2],
                     "language": row[3],
                     "novelty_score": row[4],
-                    "published_at": row[5].isoformat() if row[5] else None,
-                    "score": float(row[6]),
+                    "organization_id": row[5],
+                    "published_at": row[6].isoformat() if row[6] else None,
+                    "score": float(row[7]),
                     "rank": rank,
-                    "cluster_id": row[7],
-                    "novelty_label": row[8],
-                    "p_significant": row[9],
-                    "url": row[10],
-                    "summary": row[11],
-                    "content": row[12],
+                    "cluster_id": row[8],
+                    "novelty_label": row[9],
+                    "p_significant": row[10],
+                    "url": row[11],
+                    "summary": row[12],
+                    "content": row[13],
                 }
                 for rank, row in enumerate(rows, start=1)
-                if float(row[6]) >= float(filters.get("min_relevance", 0.5))
+                if float(row[7]) >= float(filters.get("min_relevance", 0.5))
             ]
             clusters = group_search_items(items, top_k=top_k)
             selected_cluster_ids = {
@@ -450,6 +471,32 @@ class NewsPipelineRepository:
                 (SearchQueryStatus.DONE.value, json.dumps(result), query_id),
             )
         return result
+
+    async def resolve_article_organization_id(
+        self,
+        news_ids: list[str],
+        organization_id: str | None,
+    ) -> str:
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    SELECT DISTINCT organization_id::text
+                    FROM news_articles
+                    WHERE id = ANY(%s::uuid[])
+                    """,
+                    (news_ids,),
+                )
+                rows = await cursor.fetchall()
+        found_organization_ids = {str(row[0]) for row in rows}
+        if not found_organization_ids:
+            raise ValueError(f"News articles not found: {news_ids[:10]}")
+        if len(found_organization_ids) != 1:
+            raise ValueError("Pipeline job cannot mix organizations")
+        found_organization_id = found_organization_ids.pop()
+        if organization_id is not None and organization_id != found_organization_id:
+            raise ValueError("Pipeline job organization_id does not match news articles")
+        return found_organization_id
 
     async def mark_search_processing(self, query_id: str) -> None:
         await self._set_search_status(query_id, SearchQueryStatus.PROCESSING.value)

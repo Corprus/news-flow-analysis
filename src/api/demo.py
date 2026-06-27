@@ -21,6 +21,7 @@ from users.service import UserService
 
 @dataclass(frozen=True)
 class DemoSeedResult:
+    organization_id: str
     article_ids_to_process: list[str]
     imported_article_count: int
 
@@ -102,6 +103,7 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
     news = NewsService(session)
     result = news.import_user_articles(
         user_id=UUID(demo_publisher.id),
+        organization_id=UUID(demo_publisher.organization_id),
         format_id="lenta",
         articles=articles,
     )
@@ -120,6 +122,7 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
     )
     session.flush()
     return DemoSeedResult(
+        organization_id=demo_publisher.organization_id,
         article_ids_to_process=article_ids_to_process,
         imported_article_count=len(result.article_ids),
     )

@@ -31,6 +31,7 @@ from news.search_results import group_search_items
 from news.service import NewsSearchFilters, NewsService
 from settings import Settings, get_settings
 from users.deps import CurrentUser, SessionDep, authenticate, ensure_publisher
+from users.models import UserRole
 
 router = APIRouter(prefix="/news", tags=["news"])
 search_router = APIRouter(prefix="/news-search", tags=["news-search"])
@@ -186,6 +187,7 @@ class NewsSearchRequest(BaseModel):
 
     query_text: str = Field(min_length=1)
     top_k: int = Field(default=20, ge=1, le=100)
+    organization_id: UUID | None = None
     language: str | None = Field(default=None, max_length=16)
     source_id: UUID | None = None
     published_from: datetime | None = None
@@ -283,6 +285,7 @@ async def add_news(
     try:
         article = news.add_user_article(
             user_id=current_user.id,
+            organization_id=current_user.organization_id,
             title=request.title,
             content=request.content,
             url=request.url,
@@ -375,6 +378,7 @@ async def import_news(
     try:
         result = news.import_user_articles(
             user_id=current_user.id,
+            organization_id=current_user.organization_id,
             format_id=import_format,
             articles=articles,
         )
@@ -688,10 +692,11 @@ def get_news_feed(
     news: Annotated[NewsService, Depends(get_news_service)],
     published_from: datetime,
     published_to: datetime,
+    organization_id: UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> NewsFeedResponse:
-    del current_user
+    visible_organization_id = _visible_organization_id(current_user, organization_id)
     for value in (published_from, published_to):
         if value.tzinfo is None or value.utcoffset() is None:
             raise HTTPException(
@@ -707,6 +712,7 @@ def get_news_feed(
     articles, total = news.list_public_articles_by_period(
         published_from=published_from,
         published_to=published_to,
+        organization_id=visible_organization_id,
     )
     items = []
     for rank, article in enumerate(articles, start=1):
@@ -759,8 +765,9 @@ def get_adjacent_news_dates(
     news: Annotated[NewsService, Depends(get_news_service)],
     published_from: datetime,
     published_to: datetime,
+    organization_id: UUID | None = None,
 ) -> AdjacentNewsDatesResponse:
-    del current_user
+    visible_organization_id = _visible_organization_id(current_user, organization_id)
     for value in (published_from, published_to):
         if value.tzinfo is None or value.utcoffset() is None:
             raise HTTPException(
@@ -775,6 +782,7 @@ def get_adjacent_news_dates(
     previous_date, next_date = news.get_adjacent_public_article_dates(
         published_from=published_from,
         published_to=published_to,
+        organization_id=visible_organization_id,
     )
     return AdjacentNewsDatesResponse(
         previous_date=previous_date,
@@ -786,10 +794,11 @@ def get_adjacent_news_dates(
 def get_latest_news_date(
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],
+    organization_id: UUID | None = None,
 ) -> LatestNewsDateResponse:
-    del current_user
+    visible_organization_id = _visible_organization_id(current_user, organization_id)
     return LatestNewsDateResponse(
-        latest_date=news.get_latest_public_article_date(),
+        latest_date=news.get_latest_public_article_date(visible_organization_id),
     )
 
 
@@ -803,7 +812,12 @@ async def create_news_search(
     publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
     repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
 ) -> NewsSearchResponse:
+    visible_organization_id = _visible_organization_id(
+        current_user,
+        request.organization_id,
+    )
     filters = NewsSearchFilters(
+        organization_id=visible_organization_id,
         language=request.language,
         source_id=request.source_id,
         published_from=request.published_from,
@@ -853,13 +867,23 @@ def get_my_search_history(
 def _article_vectorization_payload(article: NewsArticle) -> dict:
     return {
         "news_ids": [article.id],
+        "organization_id": article.organization_id,
         "mode": "incremental",
     }
 
 
 def _articles_vectorization_payload(articles: Iterable[NewsArticle]) -> dict:
+    article_list = list(articles)
+    organization_ids = {
+        str(article.organization_id)
+        for article in article_list
+        if article.organization_id is not None
+    }
+    if len(organization_ids) != 1:
+        raise ValueError("All articles in a pipeline job must belong to one organization")
     return {
-        "news_ids": [article.id for article in articles],
+        "news_ids": [article.id for article in article_list],
+        "organization_id": organization_ids.pop(),
         "mode": "incremental",
     }
 
@@ -883,10 +907,28 @@ def _search_vectorization_payload(search_query: NewsSearchQuery) -> dict:
     return {
         "target_type": "news_search_query",
         "query_id": search_query.id,
+        "organization_id": search_query.filters.get("organization_id"),
         "text": search_query.query_text,
         "filters": search_query.filters,
         "top_k": search_query.top_k,
     }
+
+
+def _visible_organization_id(
+    current_user: CurrentUser,
+    requested_organization_id: UUID | None,
+) -> UUID | None:
+    if current_user.role == UserRole.ADMIN:
+        return requested_organization_id
+    if (
+        requested_organization_id is not None
+        and requested_organization_id != current_user.organization_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot access another organization's news",
+        )
+    return current_user.organization_id
 
 
 def _article_history_item(article: NewsArticle) -> NewsArticleHistoryItem:
