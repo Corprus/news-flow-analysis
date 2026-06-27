@@ -484,12 +484,27 @@ class NewsPipelineRepository:
                 if float(row[7]) >= float(filters.get("min_relevance", 0.5))
             ]
             clusters = group_search_items(items, top_k=top_k)
-            selected_cluster_ids = {
-                cluster["cluster_id"] for cluster in clusters
-            }
-            selected_items = [
-                item for item in items if item["cluster_id"] in selected_cluster_ids
-            ]
+            selected_cluster_ids = [cluster["cluster_id"] for cluster in clusters]
+            selected_items = await self._load_cluster_items(
+                connection,
+                cluster_ids=selected_cluster_ids,
+                organization_id=organization_id,
+                matched_items=items,
+            )
+            if selected_items:
+                cluster_scores = {
+                    cluster["cluster_id"]: cluster.get("score")
+                    for cluster in clusters
+                    if cluster.get("score") is not None
+                }
+                clusters = group_search_items(
+                    selected_items,
+                    top_k=len(selected_cluster_ids),
+                )
+                for cluster in clusters:
+                    score = cluster_scores.get(cluster["cluster_id"])
+                    if score is not None:
+                        cluster["score"] = score
             result = {"clusters": clusters, "items": selected_items}
             await connection.execute(
                 """
@@ -500,6 +515,89 @@ class NewsPipelineRepository:
                 (SearchQueryStatus.DONE.value, json.dumps(result), query_id),
             )
         return result
+
+    @staticmethod
+    async def _load_cluster_items(
+        connection: AsyncConnection,
+        *,
+        cluster_ids: list[str],
+        organization_id: str | None,
+        matched_items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not cluster_ids:
+            return []
+        conditions = [
+            "a.status = %s",
+            "a.visibility = %s",
+            "COALESCE(s.cluster_id, a.id::text) = ANY(%s::text[])",
+        ]
+        params: list[Any] = [
+            ArticleStatus.PROCESSED.value,
+            ArticleVisibility.PUBLIC.value,
+            cluster_ids,
+        ]
+        if organization_id is not None:
+            conditions.append("a.organization_id = %s")
+            params.append(organization_id)
+        query = f"""
+            SELECT
+                a.id::text, a.title, a.status, a.language, a.novelty_score,
+                a.organization_id::text,
+                a.published_at,
+                COALESCE(s.cluster_id, a.id::text) AS cluster_id,
+                COALESCE(s.manual_novelty_label, s.novelty_label) AS novelty_label,
+                s.p_significant, a.url, a.summary, a.content,
+                cs.representative_article_id::text,
+                representative.title,
+                cs.article_count,
+                cs.started_at,
+                cs.last_seen_at
+            FROM news_articles a
+            LEFT JOIN article_pipeline_state s ON s.article_id = a.id
+            LEFT JOIN news_cluster_summaries cs
+                ON cs.cluster_id = COALESCE(s.cluster_id, a.id::text)
+               AND cs.organization_id = a.organization_id
+            LEFT JOIN news_articles representative
+                ON representative.id = cs.representative_article_id
+            WHERE {" AND ".join(conditions)}
+            ORDER BY
+                array_position(%s::text[], COALESCE(s.cluster_id, a.id::text)),
+                a.published_at,
+                a.id
+        """
+        params.append(cluster_ids)
+        matched_by_id = {item["article_id"]: item for item in matched_items}
+        async with connection.cursor() as cursor:
+            await cursor.execute(query, params)
+            rows = await cursor.fetchall()
+        items: list[dict[str, Any]] = []
+        for rank, row in enumerate(rows, start=1):
+            item = {
+                "article_id": row[0],
+                "title": row[1],
+                "status": row[2],
+                "language": row[3],
+                "novelty_score": row[4],
+                "organization_id": row[5],
+                "published_at": row[6].isoformat() if row[6] else None,
+                "rank": rank,
+                "cluster_id": row[7],
+                "novelty_label": row[8],
+                "p_significant": row[9],
+                "url": row[10],
+                "summary": row[11],
+                "content": row[12],
+                "cluster_representative_article_id": row[13],
+                "cluster_representative_title": row[14],
+                "cluster_article_count": row[15],
+                "cluster_published_from": row[16].isoformat() if row[16] else None,
+                "cluster_published_to": row[17].isoformat() if row[17] else None,
+            }
+            matched = matched_by_id.get(item["article_id"])
+            if matched and matched.get("score") is not None:
+                item["score"] = matched["score"]
+            items.append(item)
+        return items
 
     async def resolve_article_organization_id(
         self,
