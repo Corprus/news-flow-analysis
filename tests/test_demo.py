@@ -6,12 +6,22 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from api.demo import DemoPipelineBatch, DemoSeedResult, validate_demo_settings
+from api.demo import (
+    DemoPipelineBatch,
+    DemoSeedResult,
+    _split_demo_articles,
+    validate_demo_settings,
+)
 from api.main import enqueue_demo_pipeline_jobs
 from settings import Settings
 from users.models import Organization, User, UserRole
 from users.passwords import PasswordHasher
 from users.service import UserService
+
+
+class _ImportedNewsStub:
+    def __init__(self, external_id: str) -> None:
+        self.external_id = external_id
 
 
 def make_settings(**overrides) -> Settings:
@@ -125,3 +135,13 @@ def test_demo_pipeline_jobs_are_queued_per_organization() -> None:
     assert [message["payload"] for message in publisher.messages] == [
         payload for _, payload in repository.queued
     ]
+
+
+def test_demo_articles_are_split_between_organizations() -> None:
+    articles = [_ImportedNewsStub(str(index)) for index in range(6)]
+
+    primary, partner = _split_demo_articles(articles)  # type: ignore[arg-type]
+
+    assert [article.external_id for article in primary] == ["0", "1", "2"]
+    assert [article.external_id for article in partner] == ["3", "4", "5"]
+    assert set(primary).isdisjoint(partner)

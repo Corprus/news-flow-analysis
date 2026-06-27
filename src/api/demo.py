@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from accounting.models import TransactionReason
 from accounting.service import AccountingService
-from news.importers import NewsImportError, news_importers
+from news.importers import ImportedNews, NewsImportError, news_importers
 from news.models import ArticleStatus, ArticleVisibility, NewsArticle
 from news.service import NewsService
 from settings import Settings
@@ -100,14 +100,16 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
         ),
     )
 
-    articles = _load_demo_articles(settings.demo_news_path)
+    primary_articles, partner_articles = _split_demo_articles(
+        _load_demo_articles(settings.demo_news_path)
+    )
     news = NewsService(session)
     primary_batch, primary_imported_count = _import_and_publish_demo_articles(
         news=news,
         session=session,
         accounting=accounting,
         publisher=demo_publisher,
-        articles=articles,
+        articles=primary_articles,
         settings=settings,
     )
     partner_batch, partner_imported_count = _import_and_publish_demo_articles(
@@ -115,7 +117,7 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
         session=session,
         accounting=accounting,
         publisher=partner_publisher,
-        articles=articles,
+        articles=partner_articles,
         settings=settings,
     )
     session.flush()
@@ -189,6 +191,15 @@ def _load_demo_articles(path_value: str):
         return news_importers.parse("lenta", path.read_bytes())
     except NewsImportError as exc:
         raise RuntimeError(f"Invalid demo news fixture {path}: {exc}") from exc
+
+
+def _split_demo_articles(
+    articles: list[ImportedNews],
+) -> tuple[list[ImportedNews], list[ImportedNews]]:
+    if len(articles) < 2:
+        return articles, articles
+    midpoint = len(articles) // 2
+    return articles[:midpoint], articles[midpoint:]
 
 
 def _import_and_publish_demo_articles(
