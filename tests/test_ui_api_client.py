@@ -1,7 +1,6 @@
 from unittest.mock import Mock, patch
 
 import pytest
-
 from ui.api_client import ApiClient, ApiError
 
 
