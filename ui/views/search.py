@@ -202,10 +202,7 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
         if significant_count:
             label += f' · [⭐](# "Количество важных публикаций") {significant_count}'
         label += f' · [📰](# "Общее количество публикаций") {article_count}'
-        cluster_date = format_search_date(
-            cluster.get("published_from"),
-            hide_midnight=True,
-        )
+        cluster_date = _format_cluster_period(cluster)
         if cluster_date:
             label = f"**{label}** {cluster_date}"
         with st.expander(
@@ -241,6 +238,20 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
             hidden_count = len(items) - len(visible_items)
             if hidden_count > 0 and not show_all:
                 st.caption(f"Скрыто публикаций: {hidden_count}")
+
+
+def _format_cluster_period(cluster: dict) -> str:
+    started = format_search_date(
+        cluster.get("published_from"),
+        hide_midnight=True,
+    )
+    finished = format_search_date(
+        cluster.get("published_to"),
+        hide_midnight=True,
+    )
+    if started and finished and started != finished:
+        return f"{started} — {finished}"
+    return started or finished
 
 
 def render_search_article(item: dict, *, key_prefix: str) -> None:

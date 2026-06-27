@@ -273,6 +273,50 @@ class ArticlePipelineState(Base):
     article: Mapped[NewsArticle] = relationship(back_populates="pipeline_state")
 
 
+class NewsClusterSummary(Base):
+    __tablename__ = "news_cluster_summaries"
+
+    organization_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "organizations.id",
+            name="fk_news_cluster_summaries_organization_id",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    cluster_id: Mapped[str] = mapped_column(String(256), primary_key=True)
+    representative_article_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("news_articles.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    article_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    representative_article: Mapped[NewsArticle] = relationship()
+
+    __table_args__ = (
+        Index("ix_news_cluster_summaries_organization_id", "organization_id"),
+        Index("ix_news_cluster_summaries_started_at", "started_at"),
+        Index("ix_news_cluster_summaries_last_seen_at", "last_seen_at"),
+    )
+
+
 class NewsArticleSubmission(Base):
     __tablename__ = "news_article_submissions"
 

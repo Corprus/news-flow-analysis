@@ -743,7 +743,15 @@ def get_news_feed(
                 "content": article.content,
             }
         )
-    all_clusters = group_search_items(items, top_k=len(items))
+    cluster_summaries = news.list_cluster_summaries(
+        (item["cluster_id"] for item in items),
+        organization_id=visible_organization_id,
+    )
+    all_clusters = group_search_items(
+        items,
+        top_k=len(items),
+        cluster_summaries=cluster_summaries,
+    )
     clusters = all_clusters[offset : offset + limit]
     selected_cluster_ids = {cluster["cluster_id"] for cluster in clusters}
     selected_items = [

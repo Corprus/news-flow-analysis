@@ -35,6 +35,11 @@ class _FakeCursor:
                 "https://example.com/minor",
                 "Short summary",
                 "Full article text",
+                "00000000-0000-0000-0000-000000000002",
+                "Medoid cluster title",
+                7,
+                datetime(2026, 1, 1, tzinfo=UTC),
+                datetime(2026, 1, 5, tzinfo=UTC),
             ),
             (
                 "00000000-0000-0000-0000-000000000002",
@@ -51,6 +56,11 @@ class _FakeCursor:
                 "https://example.com/significant",
                 None,
                 "Significant full article text",
+                "00000000-0000-0000-0000-000000000002",
+                "Medoid cluster title",
+                7,
+                datetime(2026, 1, 1, tzinfo=UTC),
+                datetime(2026, 1, 5, tzinfo=UTC),
             ),
             (
                 "00000000-0000-0000-0000-000000000003",
@@ -67,6 +77,11 @@ class _FakeCursor:
                 None,
                 None,
                 "Another story text",
+                None,
+                None,
+                None,
+                None,
+                None,
             )
         ]
 
@@ -130,12 +145,17 @@ def test_search_is_scoped_to_requested_organization(monkeypatch) -> None:
     assert result["items"][0]["summary"] == "Short summary"
     assert result["items"][0]["content"] == "Full article text"
     assert "left join article_pipeline_state" in normalized_sql
+    assert "left join news_cluster_summaries" in normalized_sql
     assert "coalesce(s.manual_novelty_label, s.novelty_label)" in normalized_sql
     assert len(result["clusters"]) == 2
     assert result["clusters"][0]["cluster_id"] == "cluster-1"
     assert result["clusters"][0]["representative_article_id"] == (
-        "00000000-0000-0000-0000-000000000001"
+        "00000000-0000-0000-0000-000000000002"
     )
+    assert result["clusters"][0]["representative_title"] == "Medoid cluster title"
+    assert result["clusters"][0]["article_count"] == 7
+    assert result["clusters"][0]["published_from"] == "2026-01-01T00:00:00+00:00"
+    assert result["clusters"][0]["published_to"] == "2026-01-05T00:00:00+00:00"
     assert result["clusters"][0]["significant_count"] == 1
     assert [
         item["title"] for item in result["clusters"][0]["items"]

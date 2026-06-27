@@ -1,3 +1,6 @@
+import asyncio
+from datetime import UTC, datetime
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -11,6 +14,7 @@ from news.models import (
     ArticlePipelineState,
     ArticleStatus,
     ArticleVisibility,
+    NewsClusterSummary,
     NewsArticle,
 )
 from news.pipeline_repository import NewsPipelineRepository
@@ -24,6 +28,35 @@ from news.routes import (
     _article_vectorization_payload,
     _articles_vectorization_payload,
 )
+
+
+class _ClusterSummaryCursor:
+    def __init__(self, rows) -> None:
+        self.rows = rows
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    async def execute(self, query, params) -> None:
+        return None
+
+    async def fetchall(self):
+        return self.rows
+
+
+class _ClusterSummaryConnection:
+    def __init__(self, rows) -> None:
+        self.rows = rows
+        self.executed = []
+
+    def cursor(self):
+        return _ClusterSummaryCursor(self.rows)
+
+    async def execute(self, query, params) -> None:
+        self.executed.append((query, params))
 
 
 class _Article:
@@ -119,6 +152,57 @@ def test_pipeline_storage_uses_bge_m3_vector_dimensions() -> None:
     assert ArticlePipelineState.__table__.c.manual_novelty_label.nullable
     assert ArticlePipelineState.__table__.c.manual_novelty_actor_id.nullable
     assert ArticlePipelineState.__table__.c.manual_novelty_updated_at.nullable
+    assert NewsClusterSummary.__tablename__ == "news_cluster_summaries"
+    assert NewsClusterSummary.__table__.c.organization_id.nullable is False
+    assert NewsClusterSummary.__table__.c.representative_article_id.nullable is False
+    assert NewsClusterSummary.__table__.c.article_count.nullable is False
+
+
+def test_cluster_summary_representative_is_article_nearest_to_centroid() -> None:
+    connection = _ClusterSummaryConnection(
+        [
+            (
+                "10000000-0000-0000-0000-000000000001",
+                "cluster-1",
+                "00000000-0000-0000-0000-000000000001",
+                datetime(2026, 1, 1, tzinfo=UTC),
+                "significant",
+                "[1,0]",
+            ),
+            (
+                "10000000-0000-0000-0000-000000000001",
+                "cluster-1",
+                "00000000-0000-0000-0000-000000000002",
+                datetime(2026, 1, 2, tzinfo=UTC),
+                "minor",
+                "[0.8,0.6]",
+            ),
+            (
+                "10000000-0000-0000-0000-000000000001",
+                "cluster-1",
+                "00000000-0000-0000-0000-000000000003",
+                datetime(2026, 1, 3, tzinfo=UTC),
+                "significant",
+                "[0,1]",
+            ),
+        ]
+    )
+
+    asyncio.run(
+        NewsPipelineRepository._refresh_cluster_summaries(
+            connection,  # type: ignore[arg-type]
+            cluster_ids={"cluster-1"},
+            embedding_model="test-model",
+            embedding_model_revision="test-revision",
+        )
+    )
+
+    insert_query, insert_params = connection.executed[-1]
+    assert "news_cluster_summaries" in insert_query
+    assert insert_params[2] == "00000000-0000-0000-0000-000000000002"
+    assert insert_params[3] == 3
+    assert insert_params[4] == datetime(2026, 1, 1, tzinfo=UTC)
+    assert insert_params[5] == datetime(2026, 1, 3, tzinfo=UTC)
 
 
 def test_article_status_contract_and_required_storage_fields() -> None:

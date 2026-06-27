@@ -10,6 +10,7 @@ def test_news_storage_tables_are_registered() -> None:
         "article_pipeline_embeddings",
         "article_pipeline_state",
         "news_article_submissions",
+        "news_cluster_summaries",
         "news_events",
         "event_articles",
         "news_search_queries",
