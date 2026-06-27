@@ -14,8 +14,8 @@ from news.models import (
     ArticlePipelineState,
     ArticleStatus,
     ArticleVisibility,
-    NewsClusterSummary,
     NewsArticle,
+    NewsClusterSummary,
 )
 from news.pipeline_repository import NewsPipelineRepository
 from news.routes import (

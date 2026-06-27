@@ -267,7 +267,7 @@ def render_search_article(item: dict, *, key_prefix: str) -> None:
     if item.get("score") is not None:
         details.append(f"релевантность {float(item['score']):.3f}")
     if item.get("p_significant") is not None:
-        details.append(f"важность {float(item['p_significant']):.0%}")
+        details.append(f"оценка модели {float(item['p_significant']):.0%}")
     metadata = html.escape(" · ".join(detail for detail in details if detail))
     title_style = (
         "font-weight:700;color:#f0f2f6"
