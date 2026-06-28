@@ -1090,6 +1090,12 @@ async def _run_news_import_job(
             settings,
             payload["format"],
             payload["publish_immediately"],
+            _news_import_progress_callback(
+                repository=repository,
+                import_job_id=import_job_id,
+                payload=payload,
+                total_rows=len(articles),
+            ),
         )
         if result.published_count:
             await repository.update_result(
@@ -1129,12 +1135,46 @@ def _news_import_result_payload(result: NewsImportResponse) -> dict:
     return payload
 
 
+def _news_import_progress_callback(
+    *,
+    repository: NewsPipelineJobRepository,
+    import_job_id: str,
+    payload: dict,
+    total_rows: int,
+):
+    def update_progress(
+        processed_rows: int,
+        created_count: int,
+        duplicate_count: int,
+    ) -> None:
+        progress_percent = 25
+        if total_rows > 0:
+            progress_percent += int((processed_rows / total_rows) * 60)
+        asyncio.run(
+            repository.update_result(
+                import_job_id,
+                {
+                    "stage": "importing",
+                    "progress_percent": min(progress_percent, 85),
+                    "file_name": payload.get("file_name"),
+                    "total_rows": total_rows,
+                    "processed_rows": processed_rows,
+                    "created_count": created_count,
+                    "duplicate_count": duplicate_count,
+                },
+            )
+        )
+
+    return update_progress
+
+
 def _import_parsed_news_in_new_session(
     articles: list[ImportedNews],
     current_user: CurrentUser,
     settings: Settings,
     import_format: str,
     publish_immediately: bool,
+    progress_callback,
 ) -> NewsImportResponse:
     with get_session() as session:
         news = NewsService(session)
@@ -1145,6 +1185,7 @@ def _import_parsed_news_in_new_session(
                 organization_id=current_user.organization_id,
                 format_id=import_format,
                 articles=articles,
+                progress_callback=progress_callback,
             )
             published: list[NewsArticle] = []
             if publish_immediately:

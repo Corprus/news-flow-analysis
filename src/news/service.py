@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -21,6 +21,8 @@ from news.models import (
     NewsSearchQuery,
     SearchQueryStatus,
 )
+
+IMPORT_PROGRESS_INTERVAL_ROWS = 1_000
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,8 @@ class NewsService:
         organization_id: UUID,
         format_id: str,
         articles: Iterable[ImportedNews],
+        progress_callback: Callable[[int, int, int], None] | None = None,
+        progress_interval_rows: int = IMPORT_PROGRESS_INTERVAL_ROWS,
     ) -> NewsImportResult:
         article_ids: list[str] = []
         created_count = 0
@@ -180,6 +184,22 @@ class NewsService:
             self._add_submission(article.id, user_id)
             article_ids.append(article.id)
             created_count += 1
+            if (
+                progress_callback is not None
+                and progress_interval_rows > 0
+                and total_rows % progress_interval_rows == 0
+            ):
+                progress_callback(total_rows, created_count, duplicate_count)
+
+        if (
+            progress_callback is not None
+            and total_rows > 0
+            and (
+                progress_interval_rows <= 0
+                or total_rows % progress_interval_rows != 0
+            )
+        ):
+            progress_callback(total_rows, created_count, duplicate_count)
 
         return NewsImportResult(
             total_rows=total_rows,

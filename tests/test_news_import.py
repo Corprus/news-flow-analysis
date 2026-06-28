@@ -163,6 +163,35 @@ def test_import_keeps_detected_duplicate_as_separate_draft(monkeypatch) -> None:
     assert session.added[0].extra_metadata["import"]["possible_duplicate_of"] == existing_id
 
 
+def test_import_reports_row_progress(monkeypatch) -> None:
+    session = _ImportSession()
+    service = NewsService(session)  # type: ignore[arg-type]
+    monkeypatch.setattr(service, "_find_existing_article", lambda *_args: None)
+    monkeypatch.setattr(service, "_add_submission", lambda *_args: None)
+    progress: list[tuple[int, int, int]] = []
+
+    result = service.import_user_articles(
+        user_id=uuid4(),
+        organization_id=uuid4(),
+        format_id="lenta",
+        articles=[
+            ImportedNews(
+                title=f"Title {index}",
+                content=f"Content {index}",
+                published_at=datetime(2020, 1, 1, tzinfo=UTC),
+            )
+            for index in range(5)
+        ],
+        progress_callback=lambda processed, created, duplicates: progress.append(
+            (processed, created, duplicates)
+        ),
+        progress_interval_rows=2,
+    )
+
+    assert result.created_count == 5
+    assert progress == [(2, 2, 0), (4, 4, 0), (5, 5, 0)]
+
+
 class _ImportNewsServiceSpy:
     def __init__(self) -> None:
         self.committed = False

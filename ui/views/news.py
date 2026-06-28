@@ -219,6 +219,11 @@ def render_news_import_job_status(client: ApiClient, import_job_id: str) -> None
             st.caption(f"Файл: {result['file_name']}")
         if result.get("total_rows") is not None:
             st.caption(f"Строк CSV найдено: {result['total_rows']}")
+        if result.get("processed_rows") is not None:
+            st.caption(
+                f"Черновиков создано: {result['processed_rows']} из "
+                f"{result.get('total_rows', '?')}"
+            )
         if st.button("Скрыть этот статус и запустить новый импорт"):
             st.session_state.pop("news_import_job_id", None)
             st.session_state["news_import_ignored_job_id"] = import_job_id
