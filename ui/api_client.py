@@ -249,6 +249,13 @@ class ApiClient:
             timeout=30,
         )
 
+    def get_latest_news_import_job(self) -> dict:
+        return self._request(
+            "GET",
+            "/news/import-jobs/latest",
+            timeout=30,
+        )
+
     def publish_news(self, article_id: str) -> dict:
         return self._request("POST", f"/news/{article_id}/publish", timeout=60)
 

@@ -52,6 +52,18 @@ class NewsPipelineJobRepository:
                 (job_id, json.dumps(request)),
             )
 
+    async def update_result(self, job_id: str, result: dict[str, Any]) -> None:
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            await connection.execute(
+                """
+                UPDATE news_pipeline_jobs
+                SET result = %s::jsonb,
+                    updated_at = now()
+                WHERE id = %s
+                """,
+                (json.dumps(result), job_id),
+            )
+
     async def mark_done(self, job_id: str, result: dict[str, Any]) -> None:
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
@@ -88,6 +100,38 @@ class NewsPipelineJobRepository:
                     WHERE id = %s
                     """,
                     (job_id,),
+                )
+                row = await cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return {
+            "job_id": row[0],
+            "status": row[1],
+            "request": row[2],
+            "result": row[3],
+            "created_at": row[4],
+            "updated_at": row[5],
+        }
+
+    async def get_latest_by_request_type_and_user(
+        self,
+        request_type: str,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    SELECT id::text, status, request, result, created_at, updated_at
+                    FROM news_pipeline_jobs
+                    WHERE request->>'type' = %s
+                      AND request->>'user_id' = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (request_type, user_id),
                 )
                 row = await cursor.fetchone()
 

@@ -120,6 +120,21 @@ def render_news_file_import(client: ApiClient) -> None:
     if active_import_job_id:
         render_news_import_job_status(client, active_import_job_id)
         return
+    try:
+        latest_job = client.get_latest_news_import_job()
+        latest_job_id = latest_job.get("import_job_id")
+        ignored_job_id = st.session_state.get("news_import_ignored_job_id")
+        if (
+            latest_job.get("status") in {"queued", "processing"}
+            and latest_job_id != ignored_job_id
+        ):
+            st.session_state["news_import_job_id"] = latest_job_id
+            render_news_import_job_status(client, latest_job_id)
+            return
+    except ApiError as exc:
+        if exc.status_code != 404:
+            st.error(str(exc))
+            return
 
     try:
         formats = client.list_news_import_formats()
@@ -182,25 +197,40 @@ def render_news_import_job_status(client: ApiClient, import_job_id: str) -> None
         st.error(str(exc))
         if st.button("Запустить новый импорт"):
             st.session_state.pop("news_import_job_id", None)
+            st.session_state["news_import_ignored_job_id"] = import_job_id
             st.rerun()
         return
 
     status = job.get("status")
+    result = job.get("result") or {}
     if status in {"queued", "processing"}:
+        stage = {
+            "queued": "ожидает запуска",
+            "parsing": "чтение файла",
+            "importing": "создание черновиков",
+            "queueing_vectorization": "постановка на обработку",
+        }.get(result.get("stage"), "выполняется")
         st.info(
-            "Импорт выполняется. "
-            "Это может занять несколько минут."
+            f"Импорт выполняется: {stage}. "
+            "Для большого ZIP это может занять несколько минут."
         )
-        st.progress(0 if status == "queued" else 50)
+        st.progress(int(result.get("progress_percent") or 0))
+        if result.get("file_name"):
+            st.caption(f"Файл: {result['file_name']}")
+        if result.get("total_rows") is not None:
+            st.caption(f"Строк CSV найдено: {result['total_rows']}")
+        if st.button("Скрыть этот статус и запустить новый импорт"):
+            st.session_state.pop("news_import_job_id", None)
+            st.session_state["news_import_ignored_job_id"] = import_job_id
+            st.rerun()
         return
 
     st.session_state.pop("news_import_job_id", None)
+    st.session_state["news_import_ignored_job_id"] = import_job_id
     if status == "failed":
-        result = job.get("result") or {}
         st.error(result.get("error") or "Импорт завершился с ошибкой.")
         return
 
-    result = job.get("result") or {}
     message = f"Импортировано новостей: {result.get('created_count', 0)}"
     if result.get("duplicate_count"):
         message += (
