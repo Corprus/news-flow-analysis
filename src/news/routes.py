@@ -1,21 +1,34 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.exceptions import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from accounting.exceptions import InsufficientBalanceError, UserAccountNotFoundError
 from accounting.models import TransactionReason
 from accounting.service import AccountingService
+from db.database import get_session
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
 from news.importers import (
     MAX_IMPORT_FILE_BYTES,
+    ImportedNews,
     NewsImportError,
     news_importers,
 )
@@ -83,6 +96,20 @@ class NewsImportResponse(BaseModel):
     article_ids: list[UUID]
     published_count: int
     job_id: UUID | None = None
+
+
+class NewsImportJobResponse(BaseModel):
+    import_job_id: UUID
+    status: Literal["queued"]
+
+
+class NewsImportJobStatus(BaseModel):
+    import_job_id: UUID
+    status: Literal["queued", "processing", "done", "failed"]
+    request: dict[str, object]
+    result: dict[str, object] | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class PublishNewsBatchRequest(BaseModel):
@@ -420,6 +447,103 @@ async def import_news(
         published_count=len(published),
         job_id=job_id,
     )
+
+
+@router.post(
+    "/import-jobs",
+    response_model=NewsImportJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_news_import_job(
+    current_user: CurrentUserDep,
+    background_tasks: BackgroundTasks,
+    file: Annotated[UploadFile, File()],
+    settings: Annotated[Settings, Depends(get_settings)],
+    publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
+    import_format: Annotated[str, Form(alias="format")],
+    publish_immediately: Annotated[bool, Form()] = False,
+) -> NewsImportJobResponse:
+    ensure_publisher(current_user)
+    content = await file.read(MAX_IMPORT_FILE_BYTES + 1)
+    if len(content) > MAX_IMPORT_FILE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Uploaded news file exceeds the 200 MB limit",
+        )
+
+    import_job_id = uuid4()
+    payload = {
+        "type": "news_import",
+        "format": import_format,
+        "file_name": file.filename,
+        "publish_immediately": publish_immediately,
+        "user_id": str(current_user.id),
+        "organization_id": str(current_user.organization_id),
+    }
+    await repository.mark_queued(str(import_job_id), payload)
+    await repository.update_result(
+        str(import_job_id),
+        {
+            "stage": "queued",
+            "progress_percent": 0,
+            "file_name": file.filename,
+        },
+    )
+    background_tasks.add_task(
+        _run_news_import_job,
+        str(import_job_id),
+        payload,
+        content,
+        current_user,
+        settings,
+        publisher,
+        repository,
+    )
+    return NewsImportJobResponse(import_job_id=import_job_id, status="queued")
+
+
+@router.get("/import-jobs/latest", response_model=NewsImportJobStatus)
+async def get_latest_news_import_job(
+    current_user: CurrentUserDep,
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
+) -> NewsImportJobStatus:
+    ensure_publisher(current_user)
+    job = await repository.get_latest_by_request_type_and_user(
+        "news_import",
+        str(current_user.id),
+    )
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Import job not found",
+        )
+    return _news_import_job_status(job)
+
+
+@router.get("/import-jobs/{import_job_id}", response_model=NewsImportJobStatus)
+async def get_news_import_job(
+    import_job_id: UUID,
+    current_user: CurrentUserDep,
+    repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
+) -> NewsImportJobStatus:
+    ensure_publisher(current_user)
+    job = await repository.get(str(import_job_id))
+    if job is None or job["request"].get("type") != "news_import":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Import job not found",
+        )
+    if (
+        current_user.role != UserRole.ADMIN
+        and job["request"].get("user_id") != str(current_user.id)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot access another user's import job",
+        )
+
+    return _news_import_job_status(job)
 
 
 @router.post(
@@ -912,6 +1036,183 @@ async def _enqueue_articles_if_any(
         repository=repository,
         publisher=publisher,
         payload=_articles_vectorization_payload(articles),
+    )
+
+
+def _news_import_job_status(job: dict) -> NewsImportJobStatus:
+    return NewsImportJobStatus(
+        import_job_id=UUID(job["job_id"]),
+        status=job["status"],
+        request=job["request"],
+        result=job["result"],
+        created_at=job["created_at"],
+        updated_at=job["updated_at"],
+    )
+
+
+async def _run_news_import_job(
+    import_job_id: str,
+    payload: dict,
+    content: bytes,
+    current_user: CurrentUser,
+    settings: Settings,
+    publisher: RabbitPublisher,
+    repository: NewsPipelineJobRepository,
+) -> None:
+    await repository.mark_processing(import_job_id, payload)
+    try:
+        await repository.update_result(
+            import_job_id,
+            {
+                "stage": "parsing",
+                "progress_percent": 5,
+                "file_name": payload.get("file_name"),
+            },
+        )
+        articles = await asyncio.to_thread(
+            news_importers.parse,
+            payload["format"],
+            content,
+        )
+        await repository.update_result(
+            import_job_id,
+            {
+                "stage": "importing",
+                "progress_percent": 25,
+                "file_name": payload.get("file_name"),
+                "total_rows": len(articles),
+            },
+        )
+        result = await asyncio.to_thread(
+            _import_parsed_news_in_new_session,
+            articles,
+            current_user,
+            settings,
+            payload["format"],
+            payload["publish_immediately"],
+            _news_import_progress_callback(
+                repository=repository,
+                import_job_id=import_job_id,
+                payload=payload,
+                total_rows=len(articles),
+            ),
+        )
+        if result.published_count:
+            await repository.update_result(
+                import_job_id,
+                {
+                    **_news_import_result_payload(result),
+                    "stage": "queueing_vectorization",
+                    "progress_percent": 90,
+                    "file_name": payload.get("file_name"),
+                },
+            )
+            result.job_id = await enqueue_vectorization_job(
+                repository=repository,
+                publisher=publisher,
+                payload={
+                    "news_ids": [str(article_id) for article_id in result.article_ids],
+                    "organization_id": str(current_user.organization_id),
+                    "mode": "incremental",
+                },
+            )
+        await repository.mark_done(
+            import_job_id,
+            {
+                **_news_import_result_payload(result),
+                "stage": "done",
+                "progress_percent": 100,
+                "file_name": payload.get("file_name"),
+            },
+        )
+    except Exception as exc:
+        await repository.mark_failed(import_job_id, str(exc))
+
+
+def _news_import_result_payload(result: NewsImportResponse) -> dict:
+    payload = result.model_dump(mode="json", exclude={"article_ids"})
+    payload["article_id_count"] = len(result.article_ids)
+    return payload
+
+
+def _news_import_progress_callback(
+    *,
+    repository: NewsPipelineJobRepository,
+    import_job_id: str,
+    payload: dict,
+    total_rows: int,
+):
+    def update_progress(
+        processed_rows: int,
+        created_count: int,
+        duplicate_count: int,
+    ) -> None:
+        progress_percent = 25
+        if total_rows > 0:
+            progress_percent += int((processed_rows / total_rows) * 60)
+        asyncio.run(
+            repository.update_result(
+                import_job_id,
+                {
+                    "stage": "importing",
+                    "progress_percent": min(progress_percent, 85),
+                    "file_name": payload.get("file_name"),
+                    "total_rows": total_rows,
+                    "processed_rows": processed_rows,
+                    "created_count": created_count,
+                    "duplicate_count": duplicate_count,
+                },
+            )
+        )
+
+    return update_progress
+
+
+def _import_parsed_news_in_new_session(
+    articles: list[ImportedNews],
+    current_user: CurrentUser,
+    settings: Settings,
+    import_format: str,
+    publish_immediately: bool,
+    progress_callback,
+) -> NewsImportResponse:
+    with get_session() as session:
+        news = NewsService(session)
+        accounting = AccountingService(session)
+        try:
+            result = news.import_user_articles(
+                user_id=current_user.id,
+                organization_id=current_user.organization_id,
+                format_id=import_format,
+                articles=articles,
+                progress_callback=progress_callback,
+            )
+            published: list[NewsArticle] = []
+            if publish_immediately:
+                published = news.publish_user_articles(
+                    [UUID(article_id) for article_id in result.article_ids],
+                    current_user.id,
+                    allow_already_public=True,
+                )
+                _withdraw_for_articles_or_raise(
+                    accounting=accounting,
+                    user_id=current_user.id,
+                    amount_per_article=settings.news_add_cost,
+                    articles=published,
+                )
+            news.commit()
+        except Exception:
+            news.rollback()
+            raise
+
+    return NewsImportResponse(
+        format=import_format,
+        total_rows=result.total_rows,
+        created_count=result.created_count,
+        duplicate_count=result.duplicate_count,
+        article_ids=[UUID(article_id) for article_id in result.article_ids],
+        published_count=len(published),
+        job_id=None,
     )
 
 

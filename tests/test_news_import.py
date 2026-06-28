@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from io import BytesIO
 from types import SimpleNamespace
 from uuid import uuid4
+from zipfile import ZipFile
 
 import pytest
 from fastapi import HTTPException, UploadFile
@@ -24,7 +25,7 @@ def test_lenta_import_format_is_exposed_by_registry() -> None:
     formats = news_importers.list_formats()
 
     assert [item.id for item in formats] == ["lenta"]
-    assert formats[0].file_extensions == (".csv",)
+    assert formats[0].file_extensions == (".csv", ".zip")
 
 
 def test_lenta_csv_is_mapped_to_imported_news() -> None:
@@ -54,6 +55,33 @@ def test_lenta_csv_accepts_timezone_aware_published_at_and_news_id() -> None:
 
     assert article.external_id == "42"
     assert article.published_at.isoformat() == "2020-01-01T12:30:00+03:00"
+
+
+def test_lenta_zip_imports_csv_files_and_ignores_other_entries() -> None:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as zip_file:
+        zip_file.writestr(
+            "first.csv",
+            "title,text,date\nFirst,Content,2020-01-01\n",
+        )
+        zip_file.writestr(
+            "nested/second.CSV",
+            "title,text,date\nSecond,Content,2020-01-02\n",
+        )
+        zip_file.writestr("notes.txt", "not a CSV")
+
+    articles = news_importers.parse("lenta", archive.getvalue())
+
+    assert [article.title for article in articles] == ["First", "Second"]
+
+
+def test_lenta_zip_without_csv_files_is_rejected() -> None:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as zip_file:
+        zip_file.writestr("notes.txt", "not a CSV")
+
+    with pytest.raises(NewsImportError, match="does not contain CSV"):
+        news_importers.parse("lenta", archive.getvalue())
 
 
 @pytest.mark.parametrize(
@@ -133,6 +161,35 @@ def test_import_keeps_detected_duplicate_as_separate_draft(monkeypatch) -> None:
     assert len(result.article_ids) == 1
     assert result.article_ids[0] != existing_id
     assert session.added[0].extra_metadata["import"]["possible_duplicate_of"] == existing_id
+
+
+def test_import_reports_row_progress(monkeypatch) -> None:
+    session = _ImportSession()
+    service = NewsService(session)  # type: ignore[arg-type]
+    monkeypatch.setattr(service, "_find_existing_article", lambda *_args: None)
+    monkeypatch.setattr(service, "_add_submission", lambda *_args: None)
+    progress: list[tuple[int, int, int]] = []
+
+    result = service.import_user_articles(
+        user_id=uuid4(),
+        organization_id=uuid4(),
+        format_id="lenta",
+        articles=[
+            ImportedNews(
+                title=f"Title {index}",
+                content=f"Content {index}",
+                published_at=datetime(2020, 1, 1, tzinfo=UTC),
+            )
+            for index in range(5)
+        ],
+        progress_callback=lambda processed, created, duplicates: progress.append(
+            (processed, created, duplicates)
+        ),
+        progress_interval_rows=2,
+    )
+
+    assert result.created_count == 5
+    assert progress == [(2, 2, 0), (4, 4, 0), (5, 5, 0)]
 
 
 class _ImportNewsServiceSpy:

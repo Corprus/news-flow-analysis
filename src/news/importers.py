@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import csv
 import io
+import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import Protocol
 
 MAX_IMPORT_ROWS = 50_000
@@ -44,13 +46,51 @@ class LentaCsvImporter:
     format = NewsImportFormat(
         id="lenta",
         label="Lenta.ru CSV",
-        file_extensions=(".csv",),
-        media_types=("text/csv", "application/csv", "application/vnd.ms-excel"),
+        file_extensions=(".csv", ".zip"),
+        media_types=(
+            "text/csv",
+            "application/csv",
+            "application/vnd.ms-excel",
+            "application/zip",
+            "application/x-zip-compressed",
+        ),
     )
 
     _required_columns = frozenset({"title", "text"})
 
     def parse(self, content: bytes) -> list[ImportedNews]:
+        if _looks_like_zip(content):
+            return self._parse_zip(content)
+        return self._parse_csv(content)
+
+    def _parse_zip(self, content: bytes) -> list[ImportedNews]:
+        if not content:
+            raise NewsImportError("Uploaded file is empty")
+        articles: list[ImportedNews] = []
+        csv_count = 0
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                for member in archive.infolist():
+                    if member.is_dir() or not _is_csv_path(member.filename):
+                        continue
+                    csv_count += 1
+                    with archive.open(member) as csv_file:
+                        csv_articles = self._parse_csv(csv_file.read())
+                    if len(articles) + len(csv_articles) > MAX_IMPORT_ROWS:
+                        raise NewsImportError(
+                            f"Archive contains more than {MAX_IMPORT_ROWS} news rows"
+                        )
+                    articles.extend(csv_articles)
+        except zipfile.BadZipFile as exc:
+            raise NewsImportError("ZIP archive is invalid") from exc
+
+        if csv_count == 0:
+            raise NewsImportError("ZIP archive does not contain CSV files")
+        if not articles:
+            raise NewsImportError("ZIP archive does not contain any news rows")
+        return articles
+
+    def _parse_csv(self, content: bytes) -> list[ImportedNews]:
         text = _decode_csv(content)
         reader = csv.DictReader(io.StringIO(text))
         columns = set(reader.fieldnames or ())
@@ -122,6 +162,16 @@ class NewsImporterRegistry:
 
 
 news_importers = NewsImporterRegistry([LentaCsvImporter()])
+
+
+def _looks_like_zip(content: bytes) -> bool:
+    if not content:
+        return False
+    return zipfile.is_zipfile(io.BytesIO(content))
+
+
+def _is_csv_path(path: str) -> bool:
+    return PurePosixPath(path).suffix.lower() == ".csv"
 
 
 def _decode_csv(content: bytes) -> str:

@@ -1,10 +1,15 @@
+import asyncio
+import inspect
+import logging
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import HTTPException
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
 from accounting.routes import router as accounting_router
@@ -20,6 +25,10 @@ from users.routes import router as users_router
 
 JobStatus = Literal["queued", "processing", "done", "failed"]
 MAX_PIPELINE_NEWS_IDS = 50_000
+STARTUP_RETRY_ATTEMPTS = 12
+STARTUP_RETRY_DELAY_SECONDS = 5
+
+logger = logging.getLogger(__name__)
 
 
 class NewsVectorizationRequest(BaseModel):
@@ -58,12 +67,15 @@ async def lifespan(app: FastAPI):
     validate_demo_settings(settings)
     init_db(settings)
     if settings.demo_mode:
-        drop_tables()
-    create_tables()
+        await _run_startup_step_with_retries("drop demo tables", drop_tables)
+    await _run_startup_step_with_retries("create database tables", create_tables)
     repository = NewsPipelineJobRepository(settings.database_url)
     publisher = RabbitPublisher(settings.rabbitmq_url, settings.news_vectorization_queue)
-    await repository.initialize()
-    await publisher.connect()
+    await _run_startup_step_with_retries(
+        "initialize pipeline job repository",
+        repository.initialize,
+    )
+    await _run_startup_step_with_retries("connect RabbitMQ publisher", publisher.connect)
     app.state.repository = repository
     app.state.publisher = publisher
     if settings.demo_mode:
@@ -74,7 +86,32 @@ async def lifespan(app: FastAPI):
     await publisher.close()
 
 
+async def _run_startup_step_with_retries(
+    name: str,
+    operation: Callable[[], Any],
+) -> Any:
+    for attempt in range(1, STARTUP_RETRY_ATTEMPTS + 1):
+        try:
+            result = operation()
+            if inspect.isawaitable(result):
+                return await result
+            return result
+        except Exception:
+            if attempt >= STARTUP_RETRY_ATTEMPTS:
+                raise
+            logger.warning(
+                "Startup step %s failed on attempt %s/%s; retrying in %s seconds",
+                name,
+                attempt,
+                STARTUP_RETRY_ATTEMPTS,
+                STARTUP_RETRY_DELAY_SECONDS,
+                exc_info=True,
+            )
+            await asyncio.sleep(STARTUP_RETRY_DELAY_SECONDS)
+
+
 app = FastAPI(title="Semantic News Novelty API", version="0.1.0", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(organization_router)

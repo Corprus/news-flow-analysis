@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -218,8 +219,41 @@ class ApiClient:
                 "format": format_id,
                 "publish_immediately": str(publish_immediately).lower(),
             },
-            files={"file": (file_name, content, "text/csv")},
+            files={"file": (file_name, content, _news_import_content_type(file_name))},
             timeout=120,
+        )
+
+    def create_news_import_job(
+        self,
+        format_id: str,
+        file_name: str,
+        content: bytes,
+        *,
+        publish_immediately: bool = False,
+    ) -> dict:
+        return self._request(
+            "POST",
+            "/news/import-jobs",
+            data={
+                "format": format_id,
+                "publish_immediately": str(publish_immediately).lower(),
+            },
+            files={"file": (file_name, content, _news_import_content_type(file_name))},
+            timeout=120,
+        )
+
+    def get_news_import_job(self, import_job_id: str) -> dict:
+        return self._request(
+            "GET",
+            f"/news/import-jobs/{import_job_id}",
+            timeout=30,
+        )
+
+    def get_latest_news_import_job(self) -> dict:
+        return self._request(
+            "GET",
+            "/news/import-jobs/latest",
+            timeout=30,
         )
 
     def publish_news(self, article_id: str) -> dict:
@@ -269,12 +303,19 @@ class ApiClient:
             timeout=120,
         )
 
-    def list_news_history(self, limit: int = 10_000) -> list[dict]:
-        return self._request(
-            "GET",
-            "/news/me/history",
-            params={"limit": limit},
-        )
+    def list_news_history(self, page_size: int = 10_000) -> list[dict]:
+        history: list[dict] = []
+        offset = 0
+        while True:
+            page = self._request(
+                "GET",
+                "/news/me/history",
+                params={"limit": page_size, "offset": offset},
+            )
+            history.extend(page)
+            if len(page) < page_size:
+                return history
+            offset += page_size
 
     def list_news_feed(
         self,
@@ -318,3 +359,9 @@ class ApiClient:
 
     def list_search_history(self) -> list[dict]:
         return self._request("GET", "/news-search/history")
+
+
+def _news_import_content_type(file_name: str) -> str:
+    if Path(file_name).suffix.lower() == ".zip":
+        return "application/zip"
+    return "text/csv"
