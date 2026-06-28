@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import HTTPException
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
 from accounting.routes import router as accounting_router
@@ -75,6 +76,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Semantic News Novelty API", version="0.1.0", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(organization_router)
