@@ -303,12 +303,19 @@ class ApiClient:
             timeout=120,
         )
 
-    def list_news_history(self, limit: int = 10_000) -> list[dict]:
-        return self._request(
-            "GET",
-            "/news/me/history",
-            params={"limit": limit},
-        )
+    def list_news_history(self, page_size: int = 10_000) -> list[dict]:
+        history: list[dict] = []
+        offset = 0
+        while True:
+            page = self._request(
+                "GET",
+                "/news/me/history",
+                params={"limit": page_size, "offset": offset},
+            )
+            history.extend(page)
+            if len(page) < page_size:
+                return history
+            offset += page_size
 
     def list_news_feed(
         self,
