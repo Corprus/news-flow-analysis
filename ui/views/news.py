@@ -116,6 +116,11 @@ def render_manual_news_form(client: ApiClient) -> None:
 
 
 def render_news_file_import(client: ApiClient) -> None:
+    active_import_job_id = st.session_state.get("news_import_job_id")
+    if active_import_job_id:
+        render_news_import_job_status(client, active_import_job_id)
+        return
+
     try:
         formats = client.list_news_import_formats()
     except ApiError as exc:
@@ -157,27 +162,58 @@ def render_news_file_import(client: ApiClient) -> None:
             st.warning("Выберите файл для импорта.")
             return
         try:
-            result = client.import_news(
+            result = client.create_news_import_job(
                 selected_format["id"],
                 uploaded_file.name,
                 uploaded_file.getvalue(),
                 publish_immediately=publish_immediately,
             )
-            message = f"Импортировано новостей: {result['created_count']}"
-            if result["duplicate_count"]:
-                message += (
-                    f". Возможных дубликатов: {result['duplicate_count']} — "
-                    "они созданы отдельными записями"
-                )
-            if result.get("published_count"):
-                refresh_account(client)
-                message += (
-                    f". Отправлено на обработку: {result['published_count']}"
-                )
-            st.session_state["my_news_notice"] = message + "."
+            st.session_state["news_import_job_id"] = result["import_job_id"]
             st.rerun()
         except ApiError as exc:
             st.error(str(exc))
+
+
+@st.fragment(run_every=2)
+def render_news_import_job_status(client: ApiClient, import_job_id: str) -> None:
+    try:
+        job = client.get_news_import_job(import_job_id)
+    except ApiError as exc:
+        st.error(str(exc))
+        if st.button("Запустить новый импорт"):
+            st.session_state.pop("news_import_job_id", None)
+            st.rerun()
+        return
+
+    status = job.get("status")
+    if status in {"queued", "processing"}:
+        st.info(
+            "Импорт выполняется. "
+            "Это может занять несколько минут."
+        )
+        st.progress(0 if status == "queued" else 50)
+        return
+
+    st.session_state.pop("news_import_job_id", None)
+    if status == "failed":
+        result = job.get("result") or {}
+        st.error(result.get("error") or "Импорт завершился с ошибкой.")
+        return
+
+    result = job.get("result") or {}
+    message = f"Импортировано новостей: {result.get('created_count', 0)}"
+    if result.get("duplicate_count"):
+        message += (
+            f". Возможных дубликатов: {result['duplicate_count']} — "
+            "они созданы отдельными записями"
+        )
+    if result.get("published_count"):
+        refresh_account(client)
+        message += (
+            f". Отправлено на обработку: {result['published_count']}"
+        )
+    st.session_state["my_news_notice"] = message + "."
+    st.rerun()
 
 
 def render_my_news(client: ApiClient, *, show_header: bool = True) -> None:
