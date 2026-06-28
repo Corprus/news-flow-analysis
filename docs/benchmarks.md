@@ -48,6 +48,63 @@
 HTTP import 10 000 публикаций занял 49.47 с. Полное пользовательское время
 import + incremental pipeline — 747.47 с.
 
+## Сервисный прогон 50 000 публикаций
+
+Измерение 28 июня 2026 года на том же GPU-стеке: Docker Compose, прогретый
+`model-service`, `BAAI/bge-m3`, batch size 16, PostgreSQL 16 + pgvector,
+RabbitMQ 3.13. Входной файл подготовлен через
+`scripts/build_lenta_import_sample.py --limit 50000`.
+
+| Этап | Результат |
+|---|---:|
+| HTTP import 50 000 публикаций | 114.42 с |
+| `full` pipeline job, 50 000 публикаций | 1237 с |
+| Throughput pipeline | 40.42/с |
+| Embedding batches | 3125 |
+| Embedding phase по логам | 14:27 |
+| Рёбер в графе похожести | 4429 |
+| Кластеров | 46 412 |
+
+Job `52ff1cef-14b1-45fb-b8ea-e22b410a2655` завершился в статусе `done`:
+50 000 requested IDs и 50 000 updated IDs. В БД после прогона стало 51 000
+`processed` публикаций и 51 000 строк в `article_pipeline_embeddings`/
+`article_pipeline_state`: 1 000 baseline + 50 000 benchmark. Дублирующиеся
+50 000 `draft/not_started` строк от предыдущей попытки import, завершившейся
+nginx 504 до увеличения proxy timeout, в job не включались.
+
+Пиковые и средние ресурсы за окно job `05:18:49Z`-`05:39:26Z`:
+
+| Ресурс | Peak | Avg |
+|---|---:|---:|
+| GPU utilization | 100% | 78% |
+| VRAM, RTX 4070 | 8.33 GiB | 8.23 GiB |
+| model-service CPU | 3.92 cores | 1.03 cores |
+| model-service RAM | 4.85 GiB | 2.21 GiB |
+| postgres CPU | 0.95 cores | 0.16 cores |
+| postgres RAM | 1.03 GiB | 0.55 GiB |
+| api CPU | 0.27 cores | 0.05 cores |
+| api RAM | 0.38 GiB | 0.37 GiB |
+| rabbitmq CPU | 7.47 cores | 1.23 cores |
+| rabbitmq RAM | 0.27 GiB | 0.21 GiB |
+
+RabbitMQ очередь во время job держала одно `unacked` сообщение и после
+завершения стала пустой (`messages=0`, `unacked=0`). Новых RabbitMQ timeout
+в окне 50k job не было; зафиксированный `missed heartbeats from client,
+timeout: 60s` относится к более ранней попытке до старта этого job.
+
+Для 50k через HTTP API потребовались изменения лимитов: import, batch publish,
+batch delete, novelty labels и `/news-pipeline` принимают до 50 000 элементов.
+Также для `/api/` в nginx увеличены `proxy_send_timeout` и
+`proxy_read_timeout` до 600 с: без этого одиночный import 50k успевал
+закоммититься на backend, но nginx возвращал 504 примерно через 60 с.
+
+Артефакты прогона:
+
+- `data/import/lenta_import_sample_50000.csv`;
+- `data/artifacts/service_runtime_benchmark/import_50000_response.json`;
+- `data/artifacts/service_runtime_benchmark/service_full_50000.json`;
+- `data/artifacts/service_runtime_benchmark/service_full_50000_metrics.json`.
+
 ## CPU
 
 Измерения 22 июня 2026 года на AMD Ryzen 9 5900X и поднаборе 1 000 публикаций:

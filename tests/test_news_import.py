@@ -75,6 +75,10 @@ def test_unknown_import_format_is_rejected() -> None:
         news_importers.parse("unknown", b"content")
 
 
+def test_lenta_csv_import_limit_supports_50k_rows() -> None:
+    assert MAX_IMPORT_ROWS == 50_000
+
+
 def test_lenta_csv_row_limit_is_enforced() -> None:
     rows = ["title,text,date"]
     rows.extend(

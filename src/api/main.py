@@ -19,12 +19,13 @@ from users.routes import admin_router, auth_router, organization_router
 from users.routes import router as users_router
 
 JobStatus = Literal["queued", "processing", "done", "failed"]
+MAX_PIPELINE_NEWS_IDS = 50_000
 
 
 class NewsVectorizationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    news_ids: list[UUID] = Field(min_length=1, max_length=10_000)
+    news_ids: list[UUID] = Field(min_length=1, max_length=MAX_PIPELINE_NEWS_IDS)
     organization_id: UUID
     mode: Literal["full", "incremental"] = "incremental"
 

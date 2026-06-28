@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import csv
 import hashlib
 import os
@@ -19,6 +20,16 @@ OUTPUT_COLUMNS = [
     "published_at",
     "language",
 ]
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Build a unique Lenta import fixture, excluding rows already in DB."
+    )
+    parser.add_argument("--limit", type=int, default=1000)
+    parser.add_argument("--source", type=Path, default=SOURCE)
+    parser.add_argument("--output", type=Path, default=OUTPUT)
+    return parser.parse_args()
 
 
 def load_existing_keys() -> tuple[set[str], set[str], set[str]]:
@@ -71,13 +82,17 @@ def load_existing_keys() -> tuple[set[str], set[str], set[str]]:
 
 
 def main() -> None:
+    args = parse_args()
     external_ids, urls, content_hashes = load_existing_keys()
     selected: list[dict[str, str]] = []
     selected_ids: set[str] = set()
     selected_urls: set[str] = set()
     selected_hashes: set[str] = set()
 
-    with SOURCE.open("r", encoding="utf-8-sig", newline="") as source:
+    source_path = args.source if args.source.is_absolute() else ROOT / args.source
+    output_path = args.output if args.output.is_absolute() else ROOT / args.output
+
+    with source_path.open("r", encoding="utf-8-sig", newline="") as source:
         for row in csv.DictReader(source):
             news_id = (row.get("news_id") or "").strip()
             url = (row.get("url") or "").strip()
@@ -111,19 +126,19 @@ def main() -> None:
             selected_ids.add(news_id)
             selected_urls.add(url)
             selected_hashes.add(content_hash)
-            if len(selected) == 1000:
+            if len(selected) == args.limit:
                 break
 
-    if len(selected) != 1000:
-        raise RuntimeError(f"Expected 1000 unique rows, found {len(selected)}")
+    if len(selected) != args.limit:
+        raise RuntimeError(f"Expected {args.limit} unique rows, found {len(selected)}")
 
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    with OUTPUT.open("w", encoding="utf-8-sig", newline="") as output:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8-sig", newline="") as output:
         writer = csv.DictWriter(output, fieldnames=OUTPUT_COLUMNS)
         writer.writeheader()
         writer.writerows(selected)
 
-    print(OUTPUT)
+    print(output_path)
     print(f"rows={len(selected)}")
     print(f"first_news_id={selected[0]['news_id']}")
     print(f"last_news_id={selected[-1]['news_id']}")

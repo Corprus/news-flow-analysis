@@ -35,6 +35,7 @@ from users.models import UserRole
 
 router = APIRouter(prefix="/news", tags=["news"])
 search_router = APIRouter(prefix="/news-search", tags=["news-search"])
+MAX_BATCH_ARTICLES = 50_000
 
 CurrentUserDep = Annotated[CurrentUser, Depends(authenticate)]
 
@@ -87,7 +88,7 @@ class NewsImportResponse(BaseModel):
 class PublishNewsBatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    article_ids: list[UUID] = Field(min_length=1, max_length=10_000)
+    article_ids: list[UUID] = Field(min_length=1, max_length=MAX_BATCH_ARTICLES)
 
 
 class PublishNewsBatchResponse(BaseModel):
@@ -100,7 +101,7 @@ class PublishNewsBatchResponse(BaseModel):
 class DeleteNewsBatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    article_ids: list[UUID] = Field(min_length=1, max_length=10_000)
+    article_ids: list[UUID] = Field(min_length=1, max_length=MAX_BATCH_ARTICLES)
 
 
 class DeleteNewsBatchResponse(BaseModel):
@@ -119,7 +120,10 @@ class NoveltyLabelUpdate(BaseModel):
 class UpdateNoveltyLabelsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    updates: list[NoveltyLabelUpdate] = Field(min_length=1, max_length=10_000)
+    updates: list[NoveltyLabelUpdate] = Field(
+        min_length=1,
+        max_length=MAX_BATCH_ARTICLES,
+    )
 
 
 class UpdateNoveltyLabelsResponse(BaseModel):

@@ -20,11 +20,14 @@ from news.models import (
 from news.pipeline_repository import NewsPipelineRepository
 from news.routes import (
     AddNewsRequest,
+    DeleteNewsBatchRequest,
     NewsArticlePublishResponse,
     NewsArticleResponse,
     NewsSearchRequest,
     NewsSearchResponse,
+    NoveltyLabelUpdate,
     PublishNewsBatchRequest,
+    UpdateNoveltyLabelsRequest,
     _article_vectorization_payload,
     _articles_vectorization_payload,
 )
@@ -82,6 +85,55 @@ def test_pipeline_job_contract_contains_ids_and_mode() -> None:
         "organization_id": "10000000-0000-0000-0000-000000000001",
         "mode": "full",
     }
+
+
+def test_pipeline_job_accepts_50k_article_ids() -> None:
+    article_ids = [
+        f"00000000-0000-0000-0000-{index:012d}"
+        for index in range(1, 50_001)
+    ]
+
+    request = NewsVectorizationRequest(
+        news_ids=article_ids,
+        organization_id="10000000-0000-0000-0000-000000000001",
+        mode="full",
+    )
+
+    assert len(request.news_ids) == 50_000
+
+
+def test_pipeline_job_rejects_more_than_50k_article_ids() -> None:
+    article_ids = [
+        f"00000000-0000-0000-0000-{index:012d}"
+        for index in range(1, 50_002)
+    ]
+
+    with pytest.raises(ValidationError):
+        NewsVectorizationRequest(
+            news_ids=article_ids,
+            organization_id="10000000-0000-0000-0000-000000000001",
+        )
+
+
+def test_news_batch_contract_accepts_50k_article_ids() -> None:
+    article_ids = [
+        f"00000000-0000-0000-0000-{index:012d}"
+        for index in range(1, 50_001)
+    ]
+
+    assert len(PublishNewsBatchRequest(article_ids=article_ids).article_ids) == 50_000
+    assert len(DeleteNewsBatchRequest(article_ids=article_ids).article_ids) == 50_000
+    assert (
+        len(
+            UpdateNoveltyLabelsRequest(
+                updates=[
+                    NoveltyLabelUpdate(article_id=article_id, label="minor")
+                    for article_id in article_ids
+                ]
+            ).updates
+        )
+        == 50_000
+    )
 
 
 def test_new_article_uses_incremental_pipeline_by_default() -> None:
