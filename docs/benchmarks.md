@@ -105,6 +105,47 @@ batch delete, novelty labels и `/news-pipeline` принимают до 50 000 
 - `data/artifacts/service_runtime_benchmark/service_full_50000.json`;
 - `data/artifacts/service_runtime_benchmark/service_full_50000_metrics.json`.
 
+## Сервисный chunked incremental 50 000 публикаций
+
+Измерение 30 июня 2026 года на том же GPU-стеке после разделения runtime на
+`model-service-vectorizer-gpu` и `model-service-processor`. Конфигурация:
+`PIPELINE_CHUNK_SIZE=5000`, `PIPELINE_AGGREGATE_BATCH_SIZE=1000`,
+`PIPELINE_HISTORY_WINDOW_DAYS=30`, `PIPELINE_HISTORY_EXPAND_CLUSTERS=true`,
+`PIPELINE_HISTORY_CLUSTER_EXPANSION_MAX_ROWS=20000`.
+
+| Этап | Результат |
+|---|---:|
+| `incremental_chunked` parent job, 50 000 публикаций | 29:01 |
+| `vectorize` child jobs | 10 |
+| Окно выполнения `vectorize` | 16:45 |
+| `aggregate` child jobs | 50 |
+| Окно выполнения `aggregate` | 29:01 |
+| Время от первого pipeline job до последнего обновления | 38:48 |
+| Итоговый статус публикаций в БД | 50 050 `processed` |
+
+В текущей базе до прогона уже было 50 обработанных публикаций, поэтому итоговый
+счётчик `processed` равен 50 050. Для основного bulk job в `news_pipeline_jobs`
+зафиксировано 50 000 requested news: 10 `vectorize` jobs по 5 000 публикаций и
+50 `aggregate` jobs по 1 000 публикаций. Все jobs завершились в статусе `done`;
+старого зависания одной монолитной aggregate job не наблюдалось.
+
+Суммарные Prometheus-метрики processor за время жизни контейнера включали также
+предыдущий прогон, поэтому для количества jobs надёжнее использовать
+`news_pipeline_jobs`. По текущим stage duration самым дорогим участком остаётся
+CPU-часть aggregate:
+
+| Стадия processor | Суммарное время |
+|---|---:|
+| `cluster_assignment` | 366 с |
+| `novelty_prediction` | 335 с |
+| `result_assembly` | 203 с |
+| `loading_history` | 151 с |
+
+Этот результат является актуальным runtime baseline для большого импорта с
+публикацией сразу. Старый `full`-прогон выше остаётся отдельным сравнением:
+он считает весь корпус совместно и не эквивалентен production-сценарию
+`incremental_chunked`.
+
 ## CPU
 
 Измерения 22 июня 2026 года на AMD Ryzen 9 5900X и поднаборе 1 000 публикаций:

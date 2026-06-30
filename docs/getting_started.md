@@ -28,9 +28,12 @@ MODEL_SERVICE_PROCESSOR_REPLICAS=1
 PIPELINE_CHUNK_SIZE=5000
 PIPELINE_AGGREGATE_BATCH_SIZE=1000
 PIPELINE_HISTORY_WINDOW_DAYS=30
+PIPELINE_HISTORY_EXPAND_CLUSTERS=true
+PIPELINE_HISTORY_CLUSTER_EXPANSION_MAX_ROWS=20000
 ```
 
-Если BGE-M3 уже загружена на хост, укажите в MODEL_SERVICE_HF_CACHE` абсолютный путь к существующему кешу в  формате вашей операционной системы.
+Если BGE-M3 уже загружена на хост, укажите в `MODEL_SERVICE_HF_CACHE`
+абсолютный путь к существующему кешу в формате вашей операционной системы.
 По умолчанию используется именованный Docker volume `model_cache`.
 
 ## Запуск
@@ -40,7 +43,9 @@ docker compose up --build -d
 docker compose ps
 ```
 
-При первом запуске `model-service` может несколько минут загружать модель.
+При первом запуске `model-service-vectorizer-*` может несколько минут загружать
+embedding-модель. `model-service-processor` использует CPU и обрабатывает
+aggregate-пачки после готовности embeddings.
 
 После готовности:
 
