@@ -12,6 +12,7 @@ from prometheus_client import REGISTRY, make_asgi_app
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from final_pipeline import FinalPipelineConfig, IncrementalNewsNoveltyPipeline, load_pipeline
 from messaging.rabbitmq import RabbitConsumer, RabbitPublisher
+from model.significance_model import CatBoostSignificanceModel
 from model_service.gpu_metrics import NvidiaGpuCollector
 from model_service.metrics import (
     PIPELINE_ARTICLES_PROCESSED,
@@ -662,16 +663,26 @@ async def lifespan(app: FastAPI):
         else settings.news_aggregation_queue
     )
     config = FinalPipelineConfig.from_json(Path(settings.pipeline_config_path))
-    full_pipeline = await asyncio.to_thread(
-        load_pipeline,
-        model_path=settings.pipeline_model_path,
-        config=config,
-        device=settings.pipeline_device,
-        project_root=Path.cwd(),
-    )
+    full_pipeline = None
+    if worker_role in {"all", "vectorizer"}:
+        full_pipeline = await asyncio.to_thread(
+            load_pipeline,
+            model_path=settings.pipeline_model_path,
+            config=config,
+            device=settings.pipeline_device,
+            project_root=Path.cwd(),
+        )
+        encoder = full_pipeline.encoder
+        novelty_model = full_pipeline.novelty_model
+    else:
+        encoder = None
+        novelty_model = await asyncio.to_thread(
+            CatBoostSignificanceModel.load,
+            Path(settings.pipeline_model_path),
+        )
     incremental_pipeline = IncrementalNewsNoveltyPipeline(
-        encoder=full_pipeline.encoder,
-        novelty_model=full_pipeline.novelty_model,
+        encoder=encoder,
+        novelty_model=novelty_model,
         final_config=config,
     )
 
@@ -736,8 +747,16 @@ async def health(request: Request) -> dict[str, str]:
         )
     return {
         "status": "ok",
-        "service": "model-service",
+        "service": _service_name(str(getattr(request.app.state, "worker_role", "all"))),
         "role": str(getattr(request.app.state, "worker_role", "all")),
         "pipeline_version": config.pipeline_version,
         "embedding_model": config.embedding_model_name,
     }
+
+
+def _service_name(worker_role: str) -> str:
+    if worker_role == "vectorizer":
+        return "model-service-vectorizer"
+    if worker_role == "aggregator":
+        return "model-service-processor"
+    return "model-service"

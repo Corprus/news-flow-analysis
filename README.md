@@ -95,13 +95,13 @@ Docker Compose поднимает:
 - `nginx` — единая точка входа;
 - `ui` — Streamlit-интерфейс;
 - `api` — FastAPI для пользователей, публикаций и операций;
-- `model-service` — BGE-M3, кластеризация и оценка новизны;
+- `model-service-vectorizer-*` — BGE-M3 векторизация, `model-service-processor` — кластеризация и оценка новизны;
 - `rabbitmq` — очередь асинхронных задач;
 - `postgres` — PostgreSQL 16 с pgvector.
 - `prometheus`, `grafana`, `metrics-exporter` — метрики и дашборд нагрузки.
 
 Публикации хранятся в PostgreSQL. API передаёт через RabbitMQ только ID и режим
-обработки, а `model-service` читает данные, выполняет pipeline и сохраняет
+обработки, а model-service containers читают данные, выполняют pipeline и сохраняют
 эмбеддинги, кластеры и оценки обратно в базу.
 
 Runtime использует PostgreSQL/pgvector, а не FAISS.
@@ -116,8 +116,9 @@ Runtime использует PostgreSQL/pgvector, а не FAISS.
 
 ```text
 DEMO_MODE=true
-MODEL_SERVICE_GPU_REPLICAS=1
-MODEL_SERVICE_CPU_REPLICAS=1
+MODEL_SERVICE_VECTORIZER_GPU_REPLICAS=1
+MODEL_SERVICE_VECTORIZER_CPU_REPLICAS=0
+MODEL_SERVICE_PROCESSOR_REPLICAS=1
 PIPELINE_CHUNK_SIZE=5000
 PIPELINE_AGGREGATE_BATCH_SIZE=1000
 ```
