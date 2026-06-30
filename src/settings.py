@@ -74,6 +74,20 @@ class Settings(BaseSettings):
         ge=1,
         alias="PIPELINE_AGGREGATE_BATCH_SIZE",
     )
+    pipeline_history_window_days: int = Field(
+        default=30,
+        ge=0,
+        alias="PIPELINE_HISTORY_WINDOW_DAYS",
+    )
+    pipeline_history_expand_clusters: bool = Field(
+        default=True,
+        alias="PIPELINE_HISTORY_EXPAND_CLUSTERS",
+    )
+    pipeline_history_cluster_expansion_max_rows: int = Field(
+        default=20_000,
+        ge=0,
+        alias="PIPELINE_HISTORY_CLUSTER_EXPANSION_MAX_ROWS",
+    )
     model_service_role: str = Field(default="all", alias="MODEL_SERVICE_ROLE")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

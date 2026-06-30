@@ -63,6 +63,64 @@ class _ClusterSummaryConnection:
         self.executed.append((query, params))
 
 
+class _HistoryColumn:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _HistoryCursor:
+    columns = [
+        _HistoryColumn(name)
+        for name in (
+            "news_id",
+            "organization_id",
+            "published_at",
+            "topic",
+            "title",
+            "text",
+            "url",
+            "cluster_id",
+            "baseline_component_id",
+            "assignment_method",
+            "assignment_parent_news_id",
+            "assignment_similarity",
+            "attached_to_component_id",
+            "embedding",
+        )
+    ]
+
+    def __init__(self, row_batches) -> None:
+        self.row_batches = list(row_batches)
+        self.description = self.columns
+        self.executed = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    async def execute(self, query, params) -> None:
+        self.executed.append((query, params))
+
+    async def fetchall(self):
+        return self.row_batches.pop(0)
+
+
+class _HistoryConnection:
+    def __init__(self, row_batches) -> None:
+        self.cursor_instance = _HistoryCursor(row_batches)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    def cursor(self):
+        return self.cursor_instance
+
+
 class _Article:
     id = "00000000-0000-0000-0000-000000000001"
     organization_id = "10000000-0000-0000-0000-000000000001"
@@ -97,6 +155,25 @@ class _PipelinePublisherSpy:
 
     async def publish(self, message: dict) -> None:
         self.messages.append(message)
+
+
+def _history_row(news_id: str, cluster_id: str, published_at: datetime):
+    return (
+        news_id,
+        "10000000-0000-0000-0000-000000000001",
+        published_at,
+        "topic",
+        f"Title {news_id}",
+        f"Text {news_id}",
+        "",
+        cluster_id,
+        cluster_id,
+        "baseline",
+        None,
+        None,
+        None,
+        "[1.0,0.0]",
+    )
 
 
 def test_pipeline_job_contract_contains_ids_and_mode() -> None:
@@ -187,6 +264,94 @@ def test_large_incremental_pipeline_job_plans_ordered_aggregate_batches() -> Non
         "vectorize",
         "vectorize",
     ]
+
+
+def test_history_load_expands_window_to_full_clusters(monkeypatch) -> None:
+    window_rows = [
+        _history_row(
+            "00000000-0000-0000-0000-000000000001",
+            "cluster-1",
+            datetime(2026, 1, 2, tzinfo=UTC),
+        )
+    ]
+    expanded_rows = [
+        _history_row(
+            "00000000-0000-0000-0000-000000000000",
+            "cluster-1",
+            datetime(2025, 12, 1, tzinfo=UTC),
+        ),
+        *window_rows,
+    ]
+    connection = _HistoryConnection([window_rows, expanded_rows])
+
+    async def connect(_database_url):
+        return connection
+
+    monkeypatch.setattr("news.pipeline_repository.AsyncConnection.connect", connect)
+
+    history, embeddings = asyncio.run(
+        NewsPipelineRepository("postgresql://test").load_history(
+            organization_id="10000000-0000-0000-0000-000000000001",
+            exclude_news_ids=["00000000-0000-0000-0000-000000000099"],
+            embedding_model="test-model",
+            embedding_model_revision="test-revision",
+            published_from=datetime(2026, 1, 1, tzinfo=UTC),
+            published_to=datetime(2026, 1, 31, tzinfo=UTC),
+            expand_clusters=True,
+            cluster_expansion_max_rows=10,
+        )
+    )
+
+    assert history["news_id"].tolist() == [
+        "00000000-0000-0000-0000-000000000000",
+        "00000000-0000-0000-0000-000000000001",
+    ]
+    assert embeddings.shape == (2, 2)
+    assert len(connection.cursor_instance.executed) == 2
+    assert "s.cluster_id = ANY" in connection.cursor_instance.executed[1][0]
+
+
+def test_history_load_keeps_window_when_cluster_expansion_exceeds_limit(monkeypatch) -> None:
+    window_rows = [
+        _history_row(
+            "00000000-0000-0000-0000-000000000001",
+            "cluster-1",
+            datetime(2026, 1, 2, tzinfo=UTC),
+        )
+    ]
+    expanded_rows = [
+        _history_row(
+            f"00000000-0000-0000-0000-{index:012d}",
+            "cluster-1",
+            datetime(2025, 12, index + 1, tzinfo=UTC),
+        )
+        for index in range(3)
+    ]
+    connection = _HistoryConnection([window_rows, expanded_rows])
+
+    async def connect(_database_url):
+        return connection
+
+    monkeypatch.setattr("news.pipeline_repository.AsyncConnection.connect", connect)
+
+    history, embeddings = asyncio.run(
+        NewsPipelineRepository("postgresql://test").load_history(
+            organization_id="10000000-0000-0000-0000-000000000001",
+            exclude_news_ids=["00000000-0000-0000-0000-000000000099"],
+            embedding_model="test-model",
+            embedding_model_revision="test-revision",
+            published_from=datetime(2026, 1, 1, tzinfo=UTC),
+            published_to=datetime(2026, 1, 31, tzinfo=UTC),
+            expand_clusters=True,
+            cluster_expansion_max_rows=2,
+        )
+    )
+
+    assert history["news_id"].tolist() == [
+        "00000000-0000-0000-0000-000000000001"
+    ]
+    assert embeddings.shape == (1, 2)
+    assert len(connection.cursor_instance.executed) == 2
 
 
 def test_pipeline_job_rejects_more_than_50k_article_ids() -> None:

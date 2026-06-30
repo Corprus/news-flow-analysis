@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import Future
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -141,6 +143,7 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
         else:
             new_embeddings = None
             process_progress_callback = None
+            progress_update_futures: list[Future] = []
             if mode == PIPELINE_MODE_AGGREGATE:
                 await mark_stage("loading_embeddings", progress_percent=91)
                 new_embeddings = await repository.load_embeddings(
@@ -156,13 +159,15 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
                     details: dict[str, Any],
                 ) -> None:
                     progress_percent = _aggregate_stage_progress_percent(stage, details)
-                    asyncio.run_coroutine_threadsafe(
-                        mark_stage(
-                            stage,
-                            progress_percent=progress_percent,
-                            extra={"stage_details": details},
-                        ),
-                        loop,
+                    progress_update_futures.append(
+                        asyncio.run_coroutine_threadsafe(
+                            mark_stage(
+                                stage,
+                                progress_percent=progress_percent,
+                                extra={"stage_details": details},
+                            ),
+                            loop,
+                        )
                     )
 
             else:
@@ -175,6 +180,8 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
                 new_embeddings=new_embeddings,
                 progress_callback=process_progress_callback,
             )
+            for future in progress_update_futures:
+                await asyncio.wrap_future(future)
             result_payload = _pipeline_result_payload(result)
             await jobs.mark_done(job_id, result_payload)
             parent_job_id = payload.get("parent_job_id")
@@ -429,6 +436,18 @@ def _stage_timings_payload(
             "new_rows",
             "assigned_to_existing",
             "created_clusters",
+            "candidate_scoring_seconds",
+            "merge_seconds",
+            "selection_seconds",
+            "affected_lookup_seconds",
+            "history_append_seconds",
+            "embedding_normalization_seconds",
+            "candidate_rows_total",
+            "candidate_rows_avg",
+            "candidate_rows_max",
+            "rows_without_candidates",
+            "merged_cluster_count",
+            "merged_component_count",
         ):
             if key in stage_details:
                 stage_entry[key] = stage_details[key]
@@ -447,12 +466,22 @@ async def _run_incremental_stage(
 ):
     requested = await repository.load_articles(news_ids, organization_id)
     resolved_organization_id = str(requested["organization_id"].iloc[0])
+    history_published_from, history_published_to = _history_date_bounds(
+        requested,
+        window_days=app.state.settings.pipeline_history_window_days,
+    )
     await repository.mark_articles_processing(news_ids)
     history, history_embeddings = await repository.load_history(
         organization_id=resolved_organization_id,
         exclude_news_ids=news_ids,
         embedding_model=app.state.config.embedding_model_name,
         embedding_model_revision=app.state.config.embedding_model_revision,
+        published_from=history_published_from,
+        published_to=history_published_to,
+        expand_clusters=app.state.settings.pipeline_history_expand_clusters,
+        cluster_expansion_max_rows=(
+            app.state.settings.pipeline_history_cluster_expansion_max_rows
+        ),
     )
     result = await asyncio.to_thread(
         app.state.incremental_pipeline.process,
@@ -464,6 +493,27 @@ async def _run_incremental_stage(
     )
     await repository.save_result(result)
     return result
+
+
+def _history_date_bounds(
+    requested,
+    *,
+    window_days: int,
+) -> tuple[Any | None, Any | None]:
+    if requested.empty or "published_at" not in requested.columns:
+        return None, None
+    min_date = requested["published_at"].min()
+    max_date = requested["published_at"].max()
+    if min_date is None or max_date is None:
+        return None, None
+    window = timedelta(days=window_days)
+    return _to_python_datetime(min_date - window), _to_python_datetime(max_date + window)
+
+
+def _to_python_datetime(value):
+    if hasattr(value, "to_pydatetime"):
+        return value.to_pydatetime()
+    return value
 
 
 def _aggregate_stage_progress_percent(stage: str, details: dict[str, Any]) -> int:
@@ -690,6 +740,7 @@ async def lifespan(app: FastAPI):
     await publisher.connect()
     await publisher.declare_queue(settings.news_aggregation_queue)
     app.state.jobs = jobs
+    app.state.settings = settings
     app.state.pipeline_repository = repository
     app.state.publisher = publisher
     app.state.worker_role = worker_role

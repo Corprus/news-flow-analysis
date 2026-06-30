@@ -109,48 +109,97 @@ class NewsPipelineRepository:
         exclude_news_ids: list[str],
         embedding_model: str,
         embedding_model_revision: str,
+        published_from: datetime | None = None,
+        published_to: datetime | None = None,
+        expand_clusters: bool = False,
+        cluster_expansion_max_rows: int = 0,
     ) -> tuple[pd.DataFrame, np.ndarray]:
+        base_predicates = [
+            "NOT (a.id = ANY(%s::uuid[]))",
+            "a.status = %s",
+            "a.visibility = %s",
+            "a.organization_id = %s",
+            "e.model_name = %s",
+            "e.model_revision = %s",
+        ]
+        base_params: list[Any] = [
+            exclude_news_ids,
+            ArticleStatus.PROCESSED.value,
+            ArticleVisibility.PUBLIC.value,
+            organization_id,
+            embedding_model,
+            embedding_model_revision,
+        ]
+        predicates = list(base_predicates)
+        params = list(base_params)
+        if published_from is not None:
+            predicates.append("a.published_at >= %s")
+            params.append(published_from)
+        if published_to is not None:
+            predicates.append("a.published_at <= %s")
+            params.append(published_to)
+        where_clause = "\n                      AND ".join(predicates)
+        select_sql = """
+            SELECT
+                a.id::text AS news_id,
+                a.organization_id::text AS organization_id,
+                a.published_at,
+                COALESCE(a.topic, '<missing>') AS topic,
+                a.title,
+                a.content AS text,
+                COALESCE(a.url, '') AS url,
+                s.cluster_id,
+                s.baseline_component_id,
+                s.assignment_method,
+                s.assignment_parent_news_id::text,
+                s.assignment_similarity,
+                s.attached_to_component_id,
+                e.embedding::text
+            FROM article_pipeline_state s
+            JOIN news_articles a ON a.id = s.article_id
+            JOIN article_pipeline_embeddings e ON e.article_id = a.id
+        """
         async with await AsyncConnection.connect(self._database_url) as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
-                    """
-                    SELECT
-                        a.id::text AS news_id,
-                        a.organization_id::text AS organization_id,
-                        a.published_at,
-                        COALESCE(a.topic, '<missing>') AS topic,
-                        a.title,
-                        a.content AS text,
-                        COALESCE(a.url, '') AS url,
-                        s.cluster_id,
-                        s.baseline_component_id,
-                        s.assignment_method,
-                        s.assignment_parent_news_id::text,
-                        s.assignment_similarity,
-                        s.attached_to_component_id,
-                        e.embedding::text
-                    FROM article_pipeline_state s
-                    JOIN news_articles a ON a.id = s.article_id
-                    JOIN article_pipeline_embeddings e ON e.article_id = a.id
-                    WHERE NOT (a.id = ANY(%s::uuid[]))
-                      AND a.status = %s
-                      AND a.visibility = %s
-                      AND a.organization_id = %s
-                      AND e.model_name = %s
-                      AND e.model_revision = %s
+                    f"""
+                    {select_sql}
+                    WHERE {where_clause}
                     ORDER BY a.published_at, a.id
                     """,
-                    (
-                        exclude_news_ids,
-                        ArticleStatus.PROCESSED.value,
-                        ArticleVisibility.PUBLIC.value,
-                        organization_id,
-                        embedding_model,
-                        embedding_model_revision,
-                    ),
+                    params,
                 )
                 rows = await cursor.fetchall()
                 columns = [column.name for column in cursor.description]
+                if rows and expand_clusters and cluster_expansion_max_rows > len(rows):
+                    cluster_ids = sorted({str(row[7]) for row in rows if row[7] is not None})
+                    if cluster_ids:
+                        expansion_predicates = [
+                            *base_predicates,
+                            "s.cluster_id = ANY(%s::text[])",
+                        ]
+                        expansion_params = [
+                            *base_params,
+                            cluster_ids,
+                        ]
+                        expansion_where_clause = "\n                          AND ".join(
+                            expansion_predicates
+                        )
+                        await cursor.execute(
+                            f"""
+                            {select_sql}
+                            WHERE {expansion_where_clause}
+                            ORDER BY a.published_at, a.id
+                            LIMIT %s
+                            """,
+                            [
+                                *expansion_params,
+                                cluster_expansion_max_rows + 1,
+                            ],
+                        )
+                        expanded_rows = await cursor.fetchall()
+                        if len(expanded_rows) <= cluster_expansion_max_rows:
+                            rows = expanded_rows
         if not rows:
             return (
                 pd.DataFrame(

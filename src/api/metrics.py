@@ -37,6 +37,18 @@ PIPELINE_JOB_MODES = (
     "full",
     "news_search",
 )
+STAGE_DETAIL_EXCLUDED_KEYS = {
+    "article_count",
+    "completed_rows",
+    "total_rows",
+    "elapsed_seconds",
+    "progress_percent",
+    "stage_elapsed_seconds",
+    "pipeline_elapsed_seconds",
+    "history_rows",
+    "historical_rows",
+    "new_rows",
+}
 
 
 class ApiDatabaseCollector:
@@ -112,6 +124,14 @@ class ApiDatabaseCollector:
             "news_flow_pipeline_latest_stage_duration_seconds",
             "Stage duration for child jobs of the latest chunked pipeline parent.",
             labels=["mode", "stage", "job_index", "status"],
+        )
+        pipeline_latest_stage_detail = GaugeMetricFamily(
+            "news_flow_pipeline_latest_stage_detail",
+            (
+                "Numeric details reported by stages for child jobs of the latest "
+                "chunked pipeline parent."
+            ),
+            labels=["mode", "stage", "detail", "job_index", "status"],
         )
 
         with connect(self._database_url) as connection:
@@ -361,6 +381,16 @@ class ApiDatabaseCollector:
                                 [mode, str(stage), job_index, status],
                                 stage_duration,
                             )
+                            for detail, value in stage_result.items():
+                                if detail in STAGE_DETAIL_EXCLUDED_KEYS:
+                                    continue
+                                numeric_value = _float_or_none(value)
+                                if numeric_value is None:
+                                    continue
+                                pipeline_latest_stage_detail.add_metric(
+                                    [mode, str(stage), str(detail), job_index, status],
+                                    numeric_value,
+                                )
 
         yield import_jobs
         yield import_rows
@@ -376,6 +406,7 @@ class ApiDatabaseCollector:
         yield pipeline_latest_batch_throughput
         yield pipeline_latest_batch_history_rows
         yield pipeline_latest_stage_duration
+        yield pipeline_latest_stage_detail
 
 
 def register_api_database_metrics(database_url: str) -> None:
