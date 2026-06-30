@@ -24,7 +24,7 @@ from config import (
     SELECT_COLUMN_WIDTH,
     SOURCE_COLUMN_WIDTH,
 )
-from formatting import format_search_date
+from formatting import display_news_title, display_news_url, format_search_date
 
 
 def render_news(client: ApiClient) -> None:
@@ -494,14 +494,14 @@ def render_drafts(
         draft_rows = [
             {
                 "Выбрать": select_all_drafts,
-                "Заголовок": item.get("title"),
+                "Заголовок": display_news_title(item.get("title")),
                 "Дата публикации": format_search_date(item.get("published_at")),
                 "Проверка": (
                     "Возможный дубликат"
                     if item.get("possible_duplicate")
                     else "—"
                 ),
-                "Источник": item.get("url") or "",
+                "Источник": display_news_url(item.get("url")),
             }
             for item in drafts
         ]
@@ -595,14 +595,14 @@ def render_processing_articles(
 
     processing_rows = [
         {
-            "Заголовок": item.get("title"),
+            "Заголовок": display_news_title(item.get("title")),
             "Дата публикации": format_search_date(item.get("published_at")),
             "Этап": PROCESSING_STAGE_LABELS.get(
                 item.get("processing_stage"),
                 STATUS_LABELS.get(item.get("status"), item.get("status")),
             ),
             "Статус": STATUS_LABELS.get(item.get("status"), item.get("status")),
-            "Источник": item.get("url") or "",
+            "Источник": display_news_url(item.get("url")),
         }
         for item in processing
     ]
@@ -672,7 +672,7 @@ def render_published(
             published_rows.append(
                 {
                     "Выбрать": select_all_published,
-                    "Заголовок": item.get("title"),
+                    "Заголовок": display_news_title(item.get("title")),
                     "Дата публикации": format_search_date(item.get("published_at")),
                     "Обработка": STATUS_LABELS.get(item.get("status"), item.get("status")),
                     "Тип модели": NOVELTY_LABELS.get(
@@ -693,7 +693,7 @@ def render_published(
                         if item.get("novelty_score") is not None
                         else None
                     ),
-                    "Источник": item.get("url") or "",
+                    "Источник": display_news_url(item.get("url")),
                 }
             )
 
@@ -868,13 +868,13 @@ def render_archived(
         archived_rows = [
             {
                 "Выбрать": select_all_archived,
-                "Заголовок": item.get("title"),
+                "Заголовок": display_news_title(item.get("title")),
                 "Дата публикации": format_search_date(item.get("published_at")),
                 "Тип": NOVELTY_LABELS.get(
                     item.get("novelty_label"),
                     item.get("novelty_label") or "—",
                 ),
-                "Источник": item.get("url") or "",
+                "Источник": display_news_url(item.get("url")),
             }
             for item in archived
         ]

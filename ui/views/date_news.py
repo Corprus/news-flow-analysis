@@ -9,11 +9,13 @@ from config import MIN_NEWS_DATE, MOSCOW_TIMEZONE
 from views.search import render_search_result
 
 PAGE_SIZE = 20
+DATE_NEWS_SELECTED_KEY = "date_news_selected_date"
+DATE_NEWS_FORM_KEY = "date_news_form_date"
 
 
 def render_date_news(client: ApiClient) -> None:
     st.header("Новости по дате")
-    if "date_news_selected_date" not in st.session_state:
+    if DATE_NEWS_SELECTED_KEY not in st.session_state:
         try:
             latest = client.get_latest_news_date()
         except ApiError as exc:
@@ -21,23 +23,30 @@ def render_date_news(client: ApiClient) -> None:
             return
         latest_date = _parse_api_date(latest.get("latest_date"))
         if latest_date is not None:
-            st.session_state["date_news_selected_date"] = latest_date
+            st.session_state[DATE_NEWS_SELECTED_KEY] = latest_date
             st.session_state["date_news_page"] = 0
 
+    selected_date = st.session_state.get(DATE_NEWS_SELECTED_KEY)
+    if st.session_state.get(DATE_NEWS_FORM_KEY) != selected_date:
+        st.session_state[DATE_NEWS_FORM_KEY] = selected_date
+
     with st.form("date_news_form"):
-        selected_date = st.date_input(
+        st.date_input(
             "Дата публикации",
-            value=st.session_state.get("date_news_selected_date"),
+            value=selected_date,
             min_value=MIN_NEWS_DATE,
             format="DD.MM.YYYY",
+            key=DATE_NEWS_FORM_KEY,
         )
         submitted = st.form_submit_button("Показать новости", type="primary")
 
     if submitted:
-        st.session_state["date_news_selected_date"] = selected_date
+        st.session_state[DATE_NEWS_SELECTED_KEY] = st.session_state.get(
+            DATE_NEWS_FORM_KEY
+        )
         st.session_state["date_news_page"] = 0
 
-    active_date = st.session_state.get("date_news_selected_date")
+    active_date = st.session_state.get(DATE_NEWS_SELECTED_KEY)
     if not isinstance(active_date, date):
         st.info("Выберите дату, чтобы посмотреть новостные сюжеты.")
         return
@@ -142,6 +151,6 @@ def _parse_api_date(value: object) -> date | None:
 def _select_date(selected_date: date | None) -> None:
     if selected_date is None:
         return
-    st.session_state["date_news_selected_date"] = selected_date
+    st.session_state[DATE_NEWS_SELECTED_KEY] = selected_date
     st.session_state["date_news_page"] = 0
     st.rerun()
