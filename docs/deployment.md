@@ -16,9 +16,9 @@
 
 - приложение: `APP_ENV`, `DEMO_MODE`;
 - хранилище: `POSTGRES_*`;
-- очередь: `RABBITMQ_*`, `NEWS_VECTORIZATION_QUEUE`;
+- очередь: `RABBITMQ_*`, `NEWS_VECTORIZATION_QUEUE`, `NEWS_AGGREGATION_QUEUE`;
 - воркеры: `MODEL_SERVICE_GPU_REPLICAS`, `MODEL_SERVICE_CPU_REPLICAS`;
-- обработка: `PIPELINE_CHUNK_SIZE` для разбиения больших incremental jobs;
+- обработка: `PIPELINE_CHUNK_SIZE` для embeddings-пачек и `PIPELINE_AGGREGATE_BATCH_SIZE` для aggregate-пачек;
 - модель: `MODEL_SERVICE_HF_CACHE`, `HF_TOKEN`;
 - внешний вход: `NGINX_PORT`;
 - мониторинг: `GRAFANA_*`, `PROMETHEUS_*`.
@@ -27,7 +27,7 @@
 
 ```text
 MODEL_SERVICE_GPU_REPLICAS=1
-MODEL_SERVICE_CPU_REPLICAS=0
+MODEL_SERVICE_CPU_REPLICAS=1
 ```
 
 GPU-образ основан на PyTorch `2.7.1`, CUDA `12.8` и cuDNN 9. Базовый registry
@@ -62,10 +62,11 @@ docker compose exec model-service-cpu python -c "import torch; print(torch.__ver
 CPU существенно медленнее GPU. Большой `full` job целиком обрабатывается одним
 consumer; увеличение числа реплик не ускоряет одну задачу.
 
-Большой `incremental` job разбивается только на стадии embeddings. Значение
-`PIPELINE_CHUNK_SIZE` по умолчанию равно `2000`: пачка больше этого порога
-создаёт child jobs `vectorize`, а затем один aggregate job для кластеризации и
-novelty model.
+Большой `incremental` job разбивается на две очереди. `PIPELINE_CHUNK_SIZE`
+по умолчанию равен `5000` и задаёт размер GPU embeddings-пачки `vectorize`.
+После готовности всех embeddings воркер запускает последовательные CPU-пачки
+`aggregate` размером `PIPELINE_AGGREGATE_BATCH_SIZE`, по умолчанию `1000`.
+Так aggregate не держит один RabbitMQ delivery дольше consumer ack timeout.
 
 ## Смешанный режим
 
@@ -74,9 +75,9 @@ MODEL_SERVICE_GPU_REPLICAS=1
 MODEL_SERVICE_CPU_REPLICAS=2
 ```
 
-Воркеры являются competing consumers одной очереди с `prefetch_count=1`.
-RabbitMQ выдаёт задачу первому свободному consumer и не учитывает скорость
-устройства. Для строгой маршрутизации нужны отдельные очереди.
+GPU-воркеры читают `NEWS_VECTORIZATION_QUEUE`, CPU-воркеры читают
+`NEWS_AGGREGATION_QUEUE`. У каждой очереди остаётся `prefetch_count=1`, поэтому
+vectorize и aggregate масштабируются независимо.
 
 Параллельные incremental jobs могут читать одинаковое состояние истории.
 Если обновления должны быть строго последовательными, требуется внешняя

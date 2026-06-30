@@ -114,13 +114,13 @@ versions
 Инкрементальный режим предназначен для небольших поступающих батчей. Он не
 заменяет периодический полный пересчёт: расхождение кластеров накапливается.
 
-В сервисном runtime большая incremental-пачка может быть разбита на
-vectorization chunks. Каждая child job считает только BGE-M3 embeddings для
-своего поднабора и сохраняет их в PostgreSQL. После готовности всех chunks
-aggregate job запускает `IncrementalNewsNoveltyPipeline.process` один раз для
-полной исходной пачки с уже загруженными embeddings. Поэтому порядок
-кластеризации, late arrivals и пересчёт затронутой истории остаются такими же,
-как у одного большого incremental job.
+В сервисном runtime большая incremental-пачка разбивается на vectorization
+chunks и aggregate batches. Каждая `vectorize` child job считает только BGE-M3
+embeddings для своего поднабора и сохраняет их в PostgreSQL. После готовности
+всех chunks `aggregate` child jobs запускают
+`IncrementalNewsNoveltyPipeline.process` последовательно по хронологически
+отсортированным пачкам. Это сохраняет порядок поступления новостей и не держит
+одну RabbitMQ delivery на всю исходную пачку.
 
 ## Артефакты
 

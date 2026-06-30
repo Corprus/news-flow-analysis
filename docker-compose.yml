@@ -110,7 +110,9 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
-      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-2000}
+      NEWS_AGGREGATION_QUEUE: ${NEWS_AGGREGATION_QUEUE:-news_aggregation.jobs}
+      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-5000}
+      PIPELINE_AGGREGATE_BATCH_SIZE: ${PIPELINE_AGGREGATE_BATCH_SIZE:-1000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -148,15 +150,18 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
+      NEWS_AGGREGATION_QUEUE: ${NEWS_AGGREGATION_QUEUE:-news_aggregation.jobs}
       PIPELINE_MODEL_PATH: /app/data/artifacts/models/final_exp10/final_novelty_model.joblib
       PIPELINE_CONFIG_PATH: /app/data/artifacts/models/final_exp10/final_pipeline_config.json
       PIPELINE_DEVICE: cuda
+      MODEL_SERVICE_ROLE: vectorizer
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
       HF_HOME: ${MODEL_SERVICE_HF_HOME:-/app/.cache/huggingface}
       HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
       HF_TOKEN: ${HF_TOKEN:-}
-      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-2000}
+      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-5000}
+      PIPELINE_AGGREGATE_BATCH_SIZE: ${PIPELINE_AGGREGATE_BATCH_SIZE:-1000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -199,13 +204,16 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
+      NEWS_AGGREGATION_QUEUE: ${NEWS_AGGREGATION_QUEUE:-news_aggregation.jobs}
       PIPELINE_MODEL_PATH: /app/data/artifacts/models/final_exp10/final_novelty_model.joblib
       PIPELINE_CONFIG_PATH: /app/data/artifacts/models/final_exp10/final_pipeline_config.json
       PIPELINE_DEVICE: cpu
+      MODEL_SERVICE_ROLE: aggregator
       HF_HOME: ${MODEL_SERVICE_HF_HOME:-/app/.cache/huggingface}
       HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
       HF_TOKEN: ${HF_TOKEN:-}
-      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-2000}
+      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-5000}
+      PIPELINE_AGGREGATE_BATCH_SIZE: ${PIPELINE_AGGREGATE_BATCH_SIZE:-1000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -226,7 +234,7 @@ services:
       retries: 10
       start_period: 30s
     deploy:
-      replicas: ${MODEL_SERVICE_CPU_REPLICAS:-0}
+      replicas: ${MODEL_SERVICE_CPU_REPLICAS:-1}
     restart: unless-stopped
 
   ui:

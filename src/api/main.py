@@ -90,17 +90,25 @@ async def lifespan(app: FastAPI):
         repository.initialize,
     )
     await _run_startup_step_with_retries("connect RabbitMQ publisher", publisher.connect)
+    await _run_startup_step_with_retries(
+        "declare RabbitMQ aggregation queue",
+        lambda: publisher.declare_queue(settings.news_aggregation_queue),
+    )
     if settings.demo_mode:
         await _run_startup_step_with_retries(
             "purge RabbitMQ demo queue",
             publisher.purge_queue,
+        )
+        await _run_startup_step_with_retries(
+            "purge RabbitMQ demo aggregation queue",
+            lambda: publisher.purge_queue(queue_name=settings.news_aggregation_queue),
         )
     app.state.repository = repository
     app.state.publisher = publisher
     if settings.demo_mode:
         with get_session() as session:
             demo = seed_demo(session, settings)
-        await enqueue_demo_pipeline_jobs(repository, publisher, demo)
+        await enqueue_demo_pipeline_jobs(repository, publisher, demo, settings)
     yield
     await publisher.close()
 
@@ -163,6 +171,7 @@ async def create_news_vectorization_job(
         publisher=publisher,
         payload=payload,
         chunk_size=settings.pipeline_chunk_size,
+        aggregate_batch_size=settings.pipeline_aggregate_batch_size,
     )
     return NewsVectorizationJobResponse(job_id=job_id, status="queued")
 
@@ -171,6 +180,7 @@ async def enqueue_demo_pipeline_jobs(
     repository: NewsPipelineJobRepository,
     publisher: RabbitPublisher,
     demo: DemoSeedResult,
+    settings: Settings,
 ) -> None:
     for batch in demo.pipeline_batches:
         if not batch.article_ids_to_process:
@@ -184,6 +194,8 @@ async def enqueue_demo_pipeline_jobs(
             repository=repository,
             publisher=publisher,
             payload=payload,
+            chunk_size=settings.pipeline_chunk_size,
+            aggregate_batch_size=settings.pipeline_aggregate_batch_size,
         )
 
 

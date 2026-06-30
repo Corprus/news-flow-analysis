@@ -22,6 +22,8 @@ from model_service.metrics import (
     PIPELINE_JOBS_IN_PROGRESS,
     PIPELINE_LAST_JOB_DURATION,
     PIPELINE_LAST_JOB_THROUGHPUT,
+    PIPELINE_STAGE_ARTICLES,
+    PIPELINE_STAGE_DURATION,
     PROCESSED_ARTICLES,
 )
 from news.pipeline_jobs import (
@@ -51,7 +53,55 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
     repository: NewsPipelineRepository = app.state.pipeline_repository
     news_ids: list[str] = []
     status = "failed"
+    current_stage: str | None = None
+    current_stage_started_at: float | None = None
     PIPELINE_JOBS_IN_PROGRESS.labels(mode=mode).inc()
+
+    async def mark_stage(
+        stage: str,
+        *,
+        progress_percent: int | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        nonlocal current_stage, current_stage_started_at
+        now = monotonic()
+        if current_stage is not None and current_stage != stage:
+            if current_stage_started_at is not None:
+                previous_stage_elapsed = now - current_stage_started_at
+                PIPELINE_STAGE_DURATION.labels(mode=mode, stage=current_stage).observe(
+                    previous_stage_elapsed
+                )
+                await _update_pipeline_job_stage_duration(
+                    jobs=jobs,
+                    job_id=job_id,
+                    payload=payload,
+                    stage=current_stage,
+                    stage_elapsed_seconds=previous_stage_elapsed,
+                    pipeline_elapsed_seconds=now - started_at,
+                )
+            PIPELINE_STAGE_ARTICLES.labels(mode=mode, stage=current_stage).set(0)
+            current_stage_started_at = now
+        elif current_stage is None:
+            current_stage_started_at = now
+        current_stage = stage
+        PIPELINE_STAGE_ARTICLES.labels(mode=mode, stage=stage).set(len(news_ids))
+        stage_elapsed_seconds = (
+            now - current_stage_started_at
+            if current_stage_started_at is not None
+            else 0.0
+        )
+        await _update_pipeline_job_stage(
+            jobs=jobs,
+            job_id=job_id,
+            payload=payload,
+            stage=stage,
+            article_count=len(news_ids),
+            progress_percent=progress_percent,
+            stage_elapsed_seconds=stage_elapsed_seconds,
+            pipeline_elapsed_seconds=now - started_at,
+            extra=extra,
+        )
+
     try:
         news_ids = list(dict.fromkeys(str(value) for value in payload["news_ids"]))
         if not news_ids:
@@ -68,6 +118,7 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
             organization_id = str(organization_id)
         await jobs.mark_processing(job_id, payload)
         if mode == PIPELINE_MODE_VECTORIZE:
+            await mark_stage("vectorization", progress_percent=None)
             result = await _run_vectorization_stage(
                 app=app,
                 repository=repository,
@@ -75,10 +126,11 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
                 organization_id=organization_id,
             )
             await jobs.mark_done(job_id, result)
-            await _maybe_publish_aggregate_job(app, payload)
+            await _maybe_publish_next_aggregate_job(app, payload)
             PIPELINE_CHUNKS.labels(status="done").inc()
             PIPELINE_CHUNK_ARTICLES.labels(status="done").inc(result["embedded_count"])
         elif mode == PIPELINE_MODE_FULL:
+            await mark_stage("full_pipeline", progress_percent=None)
             requested = await repository.load_articles(news_ids, organization_id)
             await repository.mark_articles_processing(news_ids)
             result = await asyncio.to_thread(app.state.full_pipeline.run, requested)
@@ -87,28 +139,65 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
             PIPELINE_ARTICLES_PROCESSED.labels(mode=mode).inc(len(result.requested_ids))
         else:
             new_embeddings = None
+            process_progress_callback = None
             if mode == PIPELINE_MODE_AGGREGATE:
+                await mark_stage("loading_embeddings", progress_percent=91)
                 new_embeddings = await repository.load_embeddings(
                     article_ids=news_ids,
                     model_name=app.state.config.embedding_model_name,
                     model_revision=app.state.config.embedding_model_revision,
                 )
+                await mark_stage("loading_history", progress_percent=92)
+                loop = asyncio.get_running_loop()
+
+                def process_progress_callback(
+                    stage: str,
+                    details: dict[str, Any],
+                ) -> None:
+                    progress_percent = _aggregate_stage_progress_percent(stage, details)
+                    asyncio.run_coroutine_threadsafe(
+                        mark_stage(
+                            stage,
+                            progress_percent=progress_percent,
+                            extra={"stage_details": details},
+                        ),
+                        loop,
+                    )
+
+            else:
+                await mark_stage("incremental_pipeline", progress_percent=None)
             result = await _run_incremental_stage(
                 app=app,
                 repository=repository,
                 news_ids=news_ids,
                 organization_id=organization_id,
                 new_embeddings=new_embeddings,
+                progress_callback=process_progress_callback,
             )
             result_payload = _pipeline_result_payload(result)
             await jobs.mark_done(job_id, result_payload)
             parent_job_id = payload.get("parent_job_id")
             if mode == PIPELINE_MODE_AGGREGATE and parent_job_id:
+                if payload.get("batch_count"):
+                    await _maybe_publish_next_aggregate_job(app, payload)
+                else:
+                    await jobs.mark_done(str(parent_job_id), result_payload)
+            elif parent_job_id:
                 await jobs.mark_done(str(parent_job_id), result_payload)
             PIPELINE_ARTICLES_PROCESSED.labels(mode=mode).inc(len(result.requested_ids))
         PIPELINE_JOBS.labels(mode=mode, status="done").inc()
         PROCESSED_ARTICLES.set(await repository.count_processed_articles())
         status = "done"
+    except asyncio.CancelledError:
+        error = "Pipeline job was cancelled"
+        await jobs.mark_failed(job_id, error)
+        parent_job_id = payload.get("parent_job_id")
+        if parent_job_id:
+            await jobs.mark_failed(str(parent_job_id), error)
+        if news_ids:
+            await repository.mark_articles_error(news_ids, error)
+        PIPELINE_JOBS.labels(mode=mode, status="failed").inc()
+        raise
     except Exception as exc:
         error = str(exc)
         await jobs.mark_failed(job_id, error)
@@ -129,6 +218,21 @@ async def _handle_pipeline_job(app: FastAPI, message: dict[str, Any]) -> None:
             PIPELINE_LAST_JOB_THROUGHPUT.labels(mode=mode).set(
                 len(news_ids) / duration
             )
+        if current_stage is not None:
+            if current_stage_started_at is not None:
+                final_stage_elapsed = monotonic() - current_stage_started_at
+                PIPELINE_STAGE_DURATION.labels(mode=mode, stage=current_stage).observe(
+                    final_stage_elapsed
+                )
+                await _update_pipeline_job_stage_duration(
+                    jobs=jobs,
+                    job_id=job_id,
+                    payload=payload,
+                    stage=current_stage,
+                    stage_elapsed_seconds=final_stage_elapsed,
+                    pipeline_elapsed_seconds=duration,
+                )
+            PIPELINE_STAGE_ARTICLES.labels(mode=mode, stage=current_stage).set(0)
         PIPELINE_JOBS_IN_PROGRESS.labels(mode=mode).dec()
 
 
@@ -162,6 +266,175 @@ async def _run_vectorization_stage(
     }
 
 
+async def _update_pipeline_job_stage(
+    *,
+    jobs: NewsPipelineJobRepository,
+    job_id: str,
+    payload: dict[str, Any],
+    stage: str,
+    article_count: int,
+    progress_percent: int | None,
+    stage_elapsed_seconds: float,
+    pipeline_elapsed_seconds: float,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    job = await jobs.get(job_id)
+    previous_result = (job or {}).get("result") or {}
+    stage_timings = _stage_timings_payload(
+        previous_result=previous_result,
+        stage=stage,
+        article_count=article_count,
+        progress_percent=progress_percent,
+        stage_elapsed_seconds=stage_elapsed_seconds,
+        pipeline_elapsed_seconds=pipeline_elapsed_seconds,
+        extra=extra,
+    )
+    result = {
+        **previous_result,
+        "stage": stage,
+        "stage_article_count": article_count,
+        "stage_timings": stage_timings,
+        **(extra or {}),
+    }
+    if progress_percent is not None:
+        result["progress_percent"] = progress_percent
+    await jobs.update_result(job_id, result)
+
+    parent_job_id = payload.get("parent_job_id")
+    if not parent_job_id:
+        return
+    parent = await jobs.get(str(parent_job_id))
+    if parent is None:
+        return
+    parent_previous_result = parent.get("result") or {}
+    parent_stage_timings = _stage_timings_payload(
+        previous_result=parent_previous_result,
+        stage=stage,
+        article_count=article_count,
+        progress_percent=progress_percent,
+        stage_elapsed_seconds=stage_elapsed_seconds,
+        pipeline_elapsed_seconds=pipeline_elapsed_seconds,
+        extra=extra,
+    )
+    parent_result = {
+        **parent_previous_result,
+        "stage": stage,
+        "stage_article_count": article_count,
+        "active_child_job_id": job_id,
+        "stage_timings": parent_stage_timings,
+    }
+    if progress_percent is not None:
+        parent_result["progress_percent"] = progress_percent
+    await jobs.update_result(str(parent_job_id), parent_result)
+
+
+async def _update_pipeline_job_stage_duration(
+    *,
+    jobs: NewsPipelineJobRepository,
+    job_id: str,
+    payload: dict[str, Any],
+    stage: str,
+    stage_elapsed_seconds: float,
+    pipeline_elapsed_seconds: float,
+) -> None:
+    job = await jobs.get(job_id)
+    if job is None:
+        return
+    result = _result_with_closed_stage(
+        previous_result=job.get("result") or {},
+        stage=stage,
+        stage_elapsed_seconds=stage_elapsed_seconds,
+        pipeline_elapsed_seconds=pipeline_elapsed_seconds,
+    )
+    await jobs.update_result(job_id, result)
+
+    parent_job_id = payload.get("parent_job_id")
+    if not parent_job_id:
+        return
+    parent = await jobs.get(str(parent_job_id))
+    if parent is None:
+        return
+    parent_result = _result_with_closed_stage(
+        previous_result=parent.get("result") or {},
+        stage=stage,
+        stage_elapsed_seconds=stage_elapsed_seconds,
+        pipeline_elapsed_seconds=pipeline_elapsed_seconds,
+    )
+    await jobs.update_result(str(parent_job_id), parent_result)
+
+
+def _result_with_closed_stage(
+    *,
+    previous_result: dict[str, Any],
+    stage: str,
+    stage_elapsed_seconds: float,
+    pipeline_elapsed_seconds: float,
+) -> dict[str, Any]:
+    result = dict(previous_result)
+    stage_timings = result.get("stage_timings")
+    if not isinstance(stage_timings, dict):
+        stage_timings = {}
+    else:
+        stage_timings = dict(stage_timings)
+    stage_entry = stage_timings.get(stage)
+    if not isinstance(stage_entry, dict):
+        stage_entry = {}
+    else:
+        stage_entry = dict(stage_entry)
+    stage_entry["stage_elapsed_seconds"] = round(stage_elapsed_seconds, 3)
+    stage_entry["pipeline_elapsed_seconds"] = round(pipeline_elapsed_seconds, 3)
+    stage_timings[stage] = stage_entry
+    result["stage_timings"] = stage_timings
+    return result
+
+
+def _stage_timings_payload(
+    *,
+    previous_result: dict[str, Any],
+    stage: str,
+    article_count: int,
+    progress_percent: int | None,
+    stage_elapsed_seconds: float,
+    pipeline_elapsed_seconds: float,
+    extra: dict[str, Any] | None,
+) -> dict[str, Any]:
+    stage_timings = previous_result.get("stage_timings")
+    if not isinstance(stage_timings, dict):
+        stage_timings = {}
+    else:
+        stage_timings = dict(stage_timings)
+    stage_entry = stage_timings.get(stage)
+    if not isinstance(stage_entry, dict):
+        stage_entry = {}
+    else:
+        stage_entry = dict(stage_entry)
+    stage_entry.update(
+        {
+            "article_count": int(article_count),
+            "stage_elapsed_seconds": round(stage_elapsed_seconds, 3),
+            "pipeline_elapsed_seconds": round(pipeline_elapsed_seconds, 3),
+        }
+    )
+    if progress_percent is not None:
+        stage_entry["progress_percent"] = int(progress_percent)
+    stage_details = (extra or {}).get("stage_details")
+    if isinstance(stage_details, dict):
+        for key in (
+            "completed_rows",
+            "total_rows",
+            "elapsed_seconds",
+            "historical_rows",
+            "history_rows",
+            "new_rows",
+            "assigned_to_existing",
+            "created_clusters",
+        ):
+            if key in stage_details:
+                stage_entry[key] = stage_details[key]
+    stage_timings[stage] = stage_entry
+    return stage_timings
+
+
 async def _run_incremental_stage(
     *,
     app: FastAPI,
@@ -169,6 +442,7 @@ async def _run_incremental_stage(
     news_ids: list[str],
     organization_id: str | None,
     new_embeddings,
+    progress_callback=None,
 ):
     requested = await repository.load_articles(news_ids, organization_id)
     resolved_organization_id = str(requested["organization_id"].iloc[0])
@@ -185,9 +459,30 @@ async def _run_incremental_stage(
         historical_embeddings=history_embeddings,
         new_news_df=requested,
         new_embeddings=new_embeddings,
+        progress_callback=progress_callback,
     )
     await repository.save_result(result)
     return result
+
+
+def _aggregate_stage_progress_percent(stage: str, details: dict[str, Any]) -> int:
+    if stage == "prepare_history":
+        return 93
+    if stage == "prepare_new_batch":
+        return 94
+    if stage == "cluster_assignment":
+        total_rows = int(details.get("total_rows") or 0)
+        completed_rows = int(details.get("completed_rows") or 0)
+        if total_rows <= 0:
+            return 95
+        return min(97, 94 + int((completed_rows / total_rows) * 3))
+    if stage == "novelty_prediction":
+        return 98
+    if stage == "novelty_prediction_done":
+        return 99
+    if stage == "result_assembly":
+        return 99
+    return 95
 
 
 def _pipeline_result_payload(result) -> dict[str, Any]:
@@ -201,39 +496,119 @@ def _pipeline_result_payload(result) -> dict[str, Any]:
     }
 
 
-async def _maybe_publish_aggregate_job(app: FastAPI, child_payload: dict[str, Any]) -> None:
+async def _maybe_publish_next_aggregate_job(
+    app: FastAPI,
+    child_payload: dict[str, Any],
+) -> None:
     parent_job_id = child_payload.get("parent_job_id")
-    aggregate_job_id = child_payload.get("aggregate_job_id")
-    if not parent_job_id or not aggregate_job_id:
+    if not parent_job_id:
         return
     jobs: NewsPipelineJobRepository = app.state.jobs
-    children = await jobs.list_children(str(parent_job_id))
-    completed = sum(1 for child in children if child["status"] == "done")
-    failed = [child for child in children if child["status"] == "failed"]
+    vector_children = await jobs.list_children(
+        str(parent_job_id),
+        mode=PIPELINE_MODE_VECTORIZE,
+    )
+    vector_completed = sum(1 for child in vector_children if child["status"] == "done")
+    vector_failed = [child for child in vector_children if child["status"] == "failed"]
     parent = await jobs.get(str(parent_job_id))
+    if parent is None:
+        return
     parent_result = {
-        **((parent or {}).get("result") or {}),
+        **(parent.get("result") or {}),
         "stage": "vectorizing",
-        "completed_chunks": completed,
-        "failed_chunks": len(failed),
-        "chunk_count": len(children),
+        "progress_percent": (
+            int((vector_completed / len(vector_children)) * 60)
+            if vector_children
+            else 0
+        ),
+        "completed_chunks": vector_completed,
+        "failed_chunks": len(vector_failed),
+        "chunk_count": len(vector_children),
     }
-    await jobs.update_result(str(parent_job_id), parent_result)
-    if failed:
+    if vector_failed:
+        await jobs.update_result(str(parent_job_id), parent_result)
         await jobs.mark_failed(str(parent_job_id), "One or more vectorization chunks failed")
         return
-    if completed != len(children):
+    if vector_children and vector_completed != len(vector_children):
+        await jobs.update_result(str(parent_job_id), parent_result)
         return
-    aggregate = await jobs.get(str(aggregate_job_id))
-    if aggregate is None or aggregate["status"] != "queued":
+
+    aggregate_children = await jobs.list_children(
+        str(parent_job_id),
+        mode=PIPELINE_MODE_AGGREGATE,
+    )
+    aggregate_completed = sum(
+        1 for child in aggregate_children if child["status"] == "done"
+    )
+    aggregate_failed = [
+        child for child in aggregate_children if child["status"] == "failed"
+    ]
+    parent_result = {
+        **parent_result,
+        "stage": "aggregating",
+        "progress_percent": (
+            60 + int((aggregate_completed / len(aggregate_children)) * 40)
+            if aggregate_children
+            else 60
+        ),
+        "completed_aggregate_batches": aggregate_completed,
+        "failed_aggregate_batches": len(aggregate_failed),
+        "aggregate_batch_count": len(aggregate_children),
+    }
+    await jobs.update_result(str(parent_job_id), parent_result)
+    if aggregate_failed:
+        await jobs.mark_failed(str(parent_job_id), "One or more aggregate batches failed")
+        return
+    if aggregate_children and aggregate_completed == len(aggregate_children):
+        await jobs.mark_done(
+            str(parent_job_id),
+            _parent_result_payload(parent["request"], aggregate_children),
+        )
+        return
+
+    next_batch = next(
+        (
+            child
+            for child in aggregate_children
+            if child["status"] == "queued"
+            and int(child["request"].get("batch_index") or 0) == aggregate_completed + 1
+        ),
+        None,
+    )
+    if next_batch is None:
+        return
+    if not await jobs.mark_dispatched_if_queued(str(next_batch["job_id"])):
         return
     await app.state.publisher.publish(
         {
-            "job_id": str(aggregate_job_id),
+            "job_id": str(next_batch["job_id"]),
             "type": "news_pipeline",
-            "payload": aggregate["request"],
-        }
+            "payload": next_batch["request"],
+        },
+        queue_name=app.state.aggregation_queue,
     )
+
+
+def _parent_result_payload(
+    parent_payload: dict[str, Any],
+    aggregate_children: list[dict[str, Any]],
+) -> dict[str, Any]:
+    updated_ids: list[str] = []
+    versions: dict[str, Any] = {}
+    diagnostics: dict[str, Any] = {"aggregate_batches": len(aggregate_children)}
+    for child in aggregate_children:
+        result = child.get("result") or {}
+        updated_ids.extend(str(value) for value in result.get("updated_ids") or [])
+        if not versions and isinstance(result.get("versions"), dict):
+            versions = result["versions"]
+    return {
+        "mode": parent_payload.get("mode", PIPELINE_MODE_INCREMENTAL),
+        "requested_ids": list(parent_payload.get("news_ids") or []),
+        "updated_ids": list(dict.fromkeys(updated_ids)),
+        "context_count": 0,
+        "diagnostics": diagnostics,
+        "versions": versions,
+    }
 
 
 async def _handle_search_job(app: FastAPI, message: dict[str, Any]) -> None:
@@ -271,6 +646,21 @@ async def lifespan(app: FastAPI):
     jobs = NewsPipelineJobRepository(settings.database_url)
     repository = NewsPipelineRepository(settings.database_url)
     publisher = RabbitPublisher(settings.rabbitmq_url, settings.news_vectorization_queue)
+    worker_role = settings.model_service_role.lower().strip()
+    if worker_role not in {"all", "vectorizer", "aggregator"}:
+        raise RuntimeError(
+            "MODEL_SERVICE_ROLE must be one of: all, vectorizer, aggregator"
+        )
+    consumer_queue = (
+        settings.news_aggregation_queue
+        if worker_role == "aggregator"
+        else settings.news_vectorization_queue
+    )
+    aggregation_queue = (
+        settings.news_vectorization_queue
+        if worker_role == "all"
+        else settings.news_aggregation_queue
+    )
     config = FinalPipelineConfig.from_json(Path(settings.pipeline_config_path))
     full_pipeline = await asyncio.to_thread(
         load_pipeline,
@@ -287,9 +677,12 @@ async def lifespan(app: FastAPI):
 
     await jobs.initialize()
     await publisher.connect()
+    await publisher.declare_queue(settings.news_aggregation_queue)
     app.state.jobs = jobs
     app.state.pipeline_repository = repository
     app.state.publisher = publisher
+    app.state.worker_role = worker_role
+    app.state.aggregation_queue = aggregation_queue
     app.state.config = config
     app.state.full_pipeline = full_pipeline
     app.state.incremental_pipeline = incremental_pipeline
@@ -315,7 +708,7 @@ async def lifespan(app: FastAPI):
     async def handler(message: dict[str, Any]) -> None:
         await handle_message(app, message)
 
-    consumer = RabbitConsumer(settings.rabbitmq_url, settings.news_vectorization_queue, handler)
+    consumer = RabbitConsumer(settings.rabbitmq_url, consumer_queue, handler)
     await consumer.start()
     app.state.consumer = consumer
     yield
@@ -344,6 +737,7 @@ async def health(request: Request) -> dict[str, str]:
     return {
         "status": "ok",
         "service": "model-service",
+        "role": str(getattr(request.app.state, "worker_role", "all")),
         "pipeline_version": config.pipeline_version,
         "embedding_model": config.embedding_model_name,
     }

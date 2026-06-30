@@ -47,7 +47,11 @@ from news.models import (
     NewsSearchQuery,
     SearchQueryStatus,
 )
-from news.pipeline_jobs import DEFAULT_PIPELINE_CHUNK_SIZE, enqueue_pipeline_job
+from news.pipeline_jobs import (
+    DEFAULT_PIPELINE_AGGREGATE_BATCH_SIZE,
+    DEFAULT_PIPELINE_CHUNK_SIZE,
+    enqueue_pipeline_job,
+)
 from news.search_results import group_search_items
 from news.service import NewsSearchFilters, NewsService
 from settings import Settings, get_settings
@@ -299,18 +303,30 @@ def _pipeline_chunk_size(settings: Settings) -> int:
     return int(getattr(settings, "pipeline_chunk_size", DEFAULT_PIPELINE_CHUNK_SIZE))
 
 
+def _pipeline_aggregate_batch_size(settings: Settings) -> int:
+    return int(
+        getattr(
+            settings,
+            "pipeline_aggregate_batch_size",
+            DEFAULT_PIPELINE_AGGREGATE_BATCH_SIZE,
+        )
+    )
+
+
 async def enqueue_vectorization_job(
     *,
     repository: NewsPipelineJobRepository,
     publisher: RabbitPublisher,
     payload: dict,
     chunk_size: int = MAX_BATCH_ARTICLES,
+    aggregate_batch_size: int = DEFAULT_PIPELINE_AGGREGATE_BATCH_SIZE,
 ) -> UUID:
     return await enqueue_pipeline_job(
         repository=repository,
         publisher=publisher,
         payload=payload,
         chunk_size=chunk_size,
+        aggregate_batch_size=aggregate_batch_size,
     )
 
 
@@ -364,6 +380,7 @@ async def add_news(
         publisher=publisher,
         articles=published,
         chunk_size=_pipeline_chunk_size(settings),
+        aggregate_batch_size=_pipeline_aggregate_batch_size(settings),
     )
     return NewsArticleResponse(
         article_id=UUID(article.id),
@@ -451,6 +468,7 @@ async def import_news(
         publisher=publisher,
         articles=published,
         chunk_size=_pipeline_chunk_size(settings),
+        aggregate_batch_size=_pipeline_aggregate_batch_size(settings),
     )
     return NewsImportResponse(
         format=import_format,
@@ -603,6 +621,7 @@ async def publish_news_batch(
         publisher=publisher,
         articles=articles,
         chunk_size=_pipeline_chunk_size(settings),
+        aggregate_batch_size=_pipeline_aggregate_batch_size(settings),
     )
     assert job_id is not None
     return PublishNewsBatchResponse(
@@ -746,6 +765,7 @@ async def reprocess_news(
         publisher=publisher,
         articles=articles,
         chunk_size=_pipeline_chunk_size(settings),
+        aggregate_batch_size=_pipeline_aggregate_batch_size(settings),
     )
     assert job_id is not None
     return ReprocessNewsResponse(
@@ -811,6 +831,7 @@ async def publish_news(
         publisher=publisher,
         payload=_article_vectorization_payload(article),
         chunk_size=_pipeline_chunk_size(settings),
+        aggregate_batch_size=_pipeline_aggregate_batch_size(settings),
     )
     return NewsArticlePublishResponse(
         article_id=article_id,
@@ -1084,6 +1105,7 @@ async def _enqueue_articles_if_any(
     publisher: RabbitPublisher,
     articles: list[NewsArticle],
     chunk_size: int,
+    aggregate_batch_size: int,
 ) -> UUID | None:
     if not articles:
         return None
@@ -1092,6 +1114,7 @@ async def _enqueue_articles_if_any(
         publisher=publisher,
         payload=_articles_vectorization_payload(articles),
         chunk_size=chunk_size,
+        aggregate_batch_size=aggregate_batch_size,
     )
 
 
@@ -1175,6 +1198,7 @@ async def _run_news_import_job(
                     "mode": "incremental",
                 },
                 chunk_size=_pipeline_chunk_size(settings),
+                aggregate_batch_size=_pipeline_aggregate_batch_size(settings),
             )
         await repository.mark_done(
             import_job_id,

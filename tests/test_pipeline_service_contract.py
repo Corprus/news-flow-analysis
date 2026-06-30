@@ -17,7 +17,7 @@ from news.models import (
     NewsArticle,
     NewsClusterSummary,
 )
-from news.pipeline_jobs import chunk_news_ids
+from news.pipeline_jobs import chunk_news_ids, enqueue_pipeline_job
 from news.pipeline_repository import NewsPipelineRepository
 from news.routes import (
     AddNewsRequest,
@@ -68,6 +68,37 @@ class _Article:
     organization_id = "10000000-0000-0000-0000-000000000001"
 
 
+class _PipelineJobRepositorySpy:
+    def __init__(self, ordered_ids: list[str]) -> None:
+        self.ordered_ids = ordered_ids
+        self.processing: list[tuple[str, dict]] = []
+        self.queued: list[tuple[str, dict]] = []
+
+    async def mark_processing(self, job_id: str, payload: dict) -> None:
+        self.processing.append((job_id, payload))
+
+    async def mark_queued(self, job_id: str, payload: dict) -> None:
+        self.queued.append((job_id, payload))
+
+    async def order_article_ids(
+        self,
+        news_ids: list[str],
+        *,
+        organization_id: str | None,
+    ) -> list[str]:
+        assert set(news_ids) == set(self.ordered_ids)
+        assert organization_id == "10000000-0000-0000-0000-000000000001"
+        return self.ordered_ids
+
+
+class _PipelinePublisherSpy:
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+
+    async def publish(self, message: dict) -> None:
+        self.messages.append(message)
+
+
 def test_pipeline_job_contract_contains_ids_and_mode() -> None:
     request = NewsVectorizationRequest(
         news_ids=[
@@ -107,6 +138,55 @@ def test_large_incremental_pipeline_job_is_split_into_chunks() -> None:
     chunks = chunk_news_ids(["news-1", "news-2", "news-3", "news-4", "news-5"], 2)
 
     assert chunks == [["news-1", "news-2"], ["news-3", "news-4"], ["news-5"]]
+
+
+def test_large_incremental_pipeline_job_plans_ordered_aggregate_batches() -> None:
+    repository = _PipelineJobRepositorySpy(
+        ["news-2", "news-4", "news-1", "news-3", "news-5"]
+    )
+    publisher = _PipelinePublisherSpy()
+
+    job_id = asyncio.run(
+        enqueue_pipeline_job(
+            repository=repository,  # type: ignore[arg-type]
+            publisher=publisher,  # type: ignore[arg-type]
+            payload={
+                "news_ids": ["news-1", "news-2", "news-3", "news-4", "news-5"],
+                "organization_id": "10000000-0000-0000-0000-000000000001",
+                "mode": "incremental",
+            },
+            chunk_size=2,
+            aggregate_batch_size=3,
+        )
+    )
+
+    parent_payload = repository.processing[0][1]
+    queued_payloads = [payload for _, payload in repository.queued]
+    aggregate_payloads = [
+        payload for payload in queued_payloads if payload["mode"] == "aggregate"
+    ]
+    vectorize_payloads = [
+        payload for payload in queued_payloads if payload["mode"] == "vectorize"
+    ]
+
+    assert str(job_id) == repository.processing[0][0]
+    assert parent_payload["news_ids"] == ["news-2", "news-4", "news-1", "news-3", "news-5"]
+    assert parent_payload["aggregate_batch_count"] == 2
+    assert [payload["news_ids"] for payload in aggregate_payloads] == [
+        ["news-2", "news-4", "news-1"],
+        ["news-3", "news-5"],
+    ]
+    assert [payload["batch_index"] for payload in aggregate_payloads] == [1, 2]
+    assert [payload["news_ids"] for payload in vectorize_payloads] == [
+        ["news-2", "news-4"],
+        ["news-1", "news-3"],
+        ["news-5"],
+    ]
+    assert [message["payload"]["mode"] for message in publisher.messages] == [
+        "vectorize",
+        "vectorize",
+        "vectorize",
+    ]
 
 
 def test_pipeline_job_rejects_more_than_50k_article_ids() -> None:

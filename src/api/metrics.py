@@ -29,6 +29,14 @@ IMPORT_ROWS = Counter(
 
 _database_collector_registered = False
 IMPORT_JOB_STATUSES = ("queued", "processing", "done", "failed")
+PIPELINE_JOB_STATUSES = ("queued", "processing", "done", "failed")
+PIPELINE_JOB_MODES = (
+    "incremental",
+    "vectorize",
+    "aggregate",
+    "full",
+    "news_search",
+)
 
 
 class ApiDatabaseCollector:
@@ -64,6 +72,46 @@ class ApiDatabaseCollector:
             "news_flow_pipeline_queue_jobs",
             "Number of pipeline jobs by status and mode.",
             labels=["status", "mode"],
+        )
+        pipeline_stage_rows = GaugeMetricFamily(
+            "news_flow_pipeline_stage_rows",
+            "Number of rows reported by active pipeline stage details.",
+            labels=["mode", "stage", "kind"],
+        )
+        pipeline_stage_progress = GaugeMetricFamily(
+            "news_flow_pipeline_stage_progress_percent",
+            "Progress percent reported by active pipeline stage details.",
+            labels=["mode", "stage"],
+        )
+        pipeline_stage_elapsed = GaugeMetricFamily(
+            "news_flow_pipeline_stage_elapsed_seconds",
+            "Elapsed seconds reported by active pipeline stage details.",
+            labels=["mode", "stage"],
+        )
+        pipeline_job_duration_db = GaugeMetricFamily(
+            "news_flow_pipeline_job_duration_db_seconds",
+            "Persisted pipeline job duration statistics from PostgreSQL.",
+            labels=["mode", "status", "stat"],
+        )
+        pipeline_latest_batch_duration = GaugeMetricFamily(
+            "news_flow_pipeline_latest_batch_duration_seconds",
+            "Duration of child jobs for the latest chunked pipeline parent.",
+            labels=["mode", "job_index", "status"],
+        )
+        pipeline_latest_batch_throughput = GaugeMetricFamily(
+            "news_flow_pipeline_latest_batch_throughput",
+            "Throughput of child jobs for the latest chunked pipeline parent.",
+            labels=["mode", "job_index", "status"],
+        )
+        pipeline_latest_batch_history_rows = GaugeMetricFamily(
+            "news_flow_pipeline_latest_batch_history_rows",
+            "History rows seen by aggregate child jobs for the latest chunked parent.",
+            labels=["mode", "job_index", "status"],
+        )
+        pipeline_latest_stage_duration = GaugeMetricFamily(
+            "news_flow_pipeline_latest_stage_duration_seconds",
+            "Stage duration for child jobs of the latest chunked pipeline parent.",
+            labels=["mode", "stage", "job_index", "status"],
         )
 
         with connect(self._database_url) as connection:
@@ -137,10 +185,182 @@ class ApiDatabaseCollector:
                     GROUP BY status, mode
                     """
                 )
-                for status, mode, jobs, articles in cursor.fetchall():
+                pipeline_counts = {
+                    (status, mode): (int(jobs), int(articles))
+                    for status, mode, jobs, articles in cursor.fetchall()
+                }
+                for status in PIPELINE_JOB_STATUSES:
+                    for mode in PIPELINE_JOB_MODES:
+                        jobs, articles = pipeline_counts.get((status, mode), (0, 0))
+                        labels = [status, mode]
+                        pipeline_queue_jobs.add_metric(labels, jobs)
+                        pipeline_queue_articles.add_metric(labels, articles)
+
+                for (status, mode), (jobs, articles) in pipeline_counts.items():
+                    if status in PIPELINE_JOB_STATUSES and mode in PIPELINE_JOB_MODES:
+                        continue
                     labels = [str(status), str(mode)]
-                    pipeline_queue_jobs.add_metric(labels, int(jobs))
-                    pipeline_queue_articles.add_metric(labels, int(articles))
+                    pipeline_queue_jobs.add_metric(labels, jobs)
+                    pipeline_queue_articles.add_metric(labels, articles)
+
+                cursor.execute(
+                    """
+                    WITH active_stages AS (
+                        SELECT
+                            COALESCE(request->>'mode', request->>'type', 'unknown') AS mode,
+                            COALESCE(result->>'stage', 'unknown') AS stage,
+                            result->'stage_details' AS details
+                        FROM news_pipeline_jobs
+                        WHERE (
+                                status = 'processing'
+                                OR (
+                                    status = 'done'
+                                    AND updated_at >= now() - interval '2 minutes'
+                                )
+                            )
+                          AND result ? 'stage_details'
+                          AND jsonb_typeof(result->'stage_details') = 'object'
+                    )
+                    SELECT
+                        mode,
+                        stage,
+                        SUM(
+                            CASE
+                                WHEN (details->>'completed_rows') ~ '^[0-9]+(\\.[0-9]+)?$'
+                                THEN (details->>'completed_rows')::double precision
+                                ELSE 0
+                            END
+                        ) AS completed_rows,
+                        SUM(
+                            CASE
+                                WHEN (details->>'total_rows') ~ '^[0-9]+(\\.[0-9]+)?$'
+                                THEN (details->>'total_rows')::double precision
+                                ELSE 0
+                            END
+                        ) AS total_rows,
+                        MAX(
+                            CASE
+                                WHEN (details->>'elapsed_seconds') ~ '^[0-9]+(\\.[0-9]+)?$'
+                                THEN (details->>'elapsed_seconds')::double precision
+                                ELSE 0
+                            END
+                        ) AS elapsed_seconds
+                    FROM active_stages
+                    GROUP BY mode, stage
+                    """
+                )
+                for mode, stage, completed, total, elapsed in cursor.fetchall():
+                    completed = float(completed or 0)
+                    total = float(total or 0)
+                    elapsed = float(elapsed or 0)
+                    labels = [str(mode), str(stage)]
+                    pipeline_stage_rows.add_metric([*labels, "completed"], completed)
+                    pipeline_stage_rows.add_metric([*labels, "total"], total)
+                    pipeline_stage_elapsed.add_metric(labels, elapsed)
+                    if total > 0:
+                        pipeline_stage_progress.add_metric(labels, completed / total * 100)
+
+                cursor.execute(
+                    """
+                    SELECT
+                        COALESCE(request->>'mode', request->>'type', 'unknown') AS mode,
+                        status,
+                        EXTRACT(EPOCH FROM updated_at - created_at)::double precision
+                            AS duration_seconds
+                    FROM news_pipeline_jobs
+                    WHERE status IN ('done', 'failed')
+                      AND updated_at IS NOT NULL
+                      AND created_at IS NOT NULL
+                    """
+                )
+                duration_values: dict[tuple[str, str], list[float]] = {}
+                for mode, status, duration in cursor.fetchall():
+                    if duration is None:
+                        continue
+                    duration_values.setdefault((str(mode), str(status)), []).append(
+                        float(duration)
+                    )
+                for (mode, status), values in duration_values.items():
+                    for stat, value in _duration_stats(values).items():
+                        pipeline_job_duration_db.add_metric(
+                            [mode, status, stat],
+                            value,
+                        )
+
+                cursor.execute(
+                    """
+                    SELECT id::text
+                    FROM news_pipeline_jobs
+                    WHERE request->>'mode' = 'incremental_chunked'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """
+                )
+                latest_parent = cursor.fetchone()
+                if latest_parent is not None:
+                    parent_id = str(latest_parent[0])
+                    cursor.execute(
+                        """
+                        SELECT
+                            COALESCE(request->>'mode', 'unknown') AS mode,
+                            COALESCE(
+                                request->>'batch_index',
+                                request->>'chunk_index',
+                                '0'
+                            ) AS job_index,
+                            status,
+                            request,
+                            result,
+                            EXTRACT(EPOCH FROM updated_at - created_at)::double precision
+                                AS duration_seconds
+                        FROM news_pipeline_jobs
+                        WHERE request->>'parent_job_id' = %s
+                          AND request->>'mode' IN ('vectorize', 'aggregate')
+                        ORDER BY
+                            COALESCE(
+                                (request->>'batch_index')::int,
+                                (request->>'chunk_index')::int,
+                                0
+                            )
+                        """,
+                        (parent_id,),
+                    )
+                    for mode, job_index, status, request, result, duration in cursor.fetchall():
+                        mode = str(mode)
+                        job_index = str(job_index)
+                        status = str(status)
+                        request = _coerce_json(request)
+                        result = _coerce_json(result)
+                        duration = float(duration or 0)
+                        labels = [mode, job_index, status]
+                        pipeline_latest_batch_duration.add_metric(labels, duration)
+                        article_count = len(request.get("news_ids") or [])
+                        if duration > 0 and article_count > 0:
+                            pipeline_latest_batch_throughput.add_metric(
+                                labels,
+                                article_count / duration,
+                            )
+                        stage_timings = result.get("stage_timings")
+                        if not isinstance(stage_timings, dict):
+                            stage_timings = {}
+                        history_rows = _history_rows_from_stage_timings(stage_timings)
+                        if history_rows is not None:
+                            pipeline_latest_batch_history_rows.add_metric(
+                                labels,
+                                float(history_rows),
+                            )
+                        for stage, stage_result in stage_timings.items():
+                            if not isinstance(stage_result, dict):
+                                continue
+                            stage_duration = _float_or_none(
+                                stage_result.get("stage_elapsed_seconds")
+                            )
+                            if stage_duration is None:
+                                continue
+                            pipeline_latest_stage_duration.add_metric(
+                                [mode, str(stage), job_index, status],
+                                stage_duration,
+                            )
 
         yield import_jobs
         yield import_rows
@@ -148,6 +368,14 @@ class ApiDatabaseCollector:
         yield import_progress
         yield pipeline_queue_jobs
         yield pipeline_queue_articles
+        yield pipeline_stage_rows
+        yield pipeline_stage_progress
+        yield pipeline_stage_elapsed
+        yield pipeline_job_duration_db
+        yield pipeline_latest_batch_duration
+        yield pipeline_latest_batch_throughput
+        yield pipeline_latest_batch_history_rows
+        yield pipeline_latest_stage_duration
 
 
 def register_api_database_metrics(database_url: str) -> None:
@@ -166,3 +394,46 @@ def _coerce_json(value) -> dict:
     if isinstance(value, str):
         return json.loads(value)
     return dict(value)
+
+
+def _duration_stats(values: list[float]) -> dict[str, float]:
+    if not values:
+        return {}
+    ordered = sorted(values)
+    return {
+        "avg": sum(ordered) / len(ordered),
+        "max": ordered[-1],
+        "p50": _quantile(ordered, 0.5),
+        "p95": _quantile(ordered, 0.95),
+    }
+
+
+def _quantile(ordered_values: list[float], quantile: float) -> float:
+    if len(ordered_values) == 1:
+        return ordered_values[0]
+    position = (len(ordered_values) - 1) * quantile
+    lower = int(position)
+    upper = min(lower + 1, len(ordered_values) - 1)
+    fraction = position - lower
+    return ordered_values[lower] * (1 - fraction) + ordered_values[upper] * fraction
+
+
+def _float_or_none(value) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _history_rows_from_stage_timings(stage_timings: dict) -> float | None:
+    for stage in ("cluster_assignment", "prepare_history"):
+        stage_result = stage_timings.get(stage)
+        if not isinstance(stage_result, dict):
+            continue
+        for key in ("history_rows", "historical_rows"):
+            value = _float_or_none(stage_result.get(key))
+            if value is not None:
+                return value
+    return None

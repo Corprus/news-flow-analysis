@@ -99,6 +99,7 @@ class NewsPipelineRepository:
                 "News articles are not ready for pipeline; missing required fields: "
                 + "; ".join(invalid[:10])
             )
+        frame = frame.sort_values(["published_at", "news_id"]).reset_index(drop=True)
         return frame
 
     async def load_history(

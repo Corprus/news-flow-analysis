@@ -86,6 +86,14 @@ class _JobRepositorySpy:
     async def mark_queued(self, job_id: str, payload: dict) -> None:
         self.queued.append((job_id, payload))
 
+    async def order_article_ids(
+        self,
+        news_ids: list[str],
+        *,
+        organization_id: str | None,
+    ) -> list[str]:
+        return news_ids
+
 
 class _PublisherSpy:
     def __init__(self) -> None:
@@ -118,7 +126,9 @@ def test_demo_pipeline_jobs_are_queued_per_organization() -> None:
         imported_article_count=2,
     )
 
-    asyncio.run(enqueue_demo_pipeline_jobs(repository, publisher, demo))
+    settings = make_settings()
+
+    asyncio.run(enqueue_demo_pipeline_jobs(repository, publisher, demo, settings))
 
     assert [payload for _, payload in repository.queued] == [
         {

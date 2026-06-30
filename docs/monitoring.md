@@ -42,6 +42,10 @@ docker compose up --build -d
 - длительность последнего завершённого pipeline job;
 - количество import jobs, импортированных строк и длительность импорта;
 - количество vectorization chunks и статей, прошедших embeddings-стадию;
+- текущий этап активного pipeline job через `news_flow_pipeline_stage_articles`;
+- длительность child jobs последнего большого pipeline, throughput, рост истории
+  по aggregate-пачкам и длительность отдельных стадий через DB-backed метрики
+  `news_flow_pipeline_latest_*`;
 - количество статей, находящихся в queued/processing pipeline jobs;
 - CPU и RAM по сервисам Docker Compose;
 - загрузку GPU, использование видеопамяти и температуру.
@@ -69,7 +73,7 @@ CPU и GPU utilization отображаются на одном временно
 - `metrics-exporter`;
 - `rabbitmq`;
 - `api`;
-- `model-service-gpu` или `model-service-cpu`, в зависимости от режима;
+- `model-service-gpu` и/или `model-service-cpu`, в зависимости от режима;
 - `prometheus`.
 
 Prometheus использует DNS service discovery и автоматически обнаруживает

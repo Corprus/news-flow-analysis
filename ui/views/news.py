@@ -29,14 +29,18 @@ from formatting import format_search_date
 
 def render_news(client: ApiClient) -> None:
     st.header("Мои новости")
-    my_news_tab, manual_tab, file_tab = st.tabs(
-        ["Список", "Публикация новости", "Импорт новостей"]
+    active_tab = st.radio(
+        "Раздел новостей",
+        ["Список", "Публикация новости", "Импорт новостей"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="news-section",
     )
-    with my_news_tab:
+    if active_tab == "Список":
         render_my_news(client, show_header=False)
-    with manual_tab:
+    elif active_tab == "Публикация новости":
         render_manual_news_form(client)
-    with file_tab:
+    else:
         render_news_file_import(client)
 
 
@@ -361,38 +365,37 @@ def render_my_news_content(client: ApiClient) -> None:
         st.info("Вы пока не добавили ни одной новости.")
         return
 
-    render_history_section_with_pager(
-        "draft",
-        drafts_page,
-        drafts_has_next,
+    render_drafts(
+        client,
+        drafts,
         draft_total,
-        lambda: render_drafts(client, drafts, draft_total),
+        page_key="draft",
+        page=drafts_page,
+        has_next=drafts_has_next,
     )
-    render_history_section_with_pager(
-        "public_processing",
-        processing_page,
-        processing_has_next,
+    render_processing_articles(
+        processing,
         processing_total,
-        lambda: render_processing_articles(processing, processing_total),
+        page_key="public_processing",
+        page=processing_page,
+        has_next=processing_has_next,
     )
-    render_history_section_with_pager(
-        "public_ready",
-        published_page,
-        published_has_next,
+    render_published(
+        client,
+        published,
         published_ready_total,
-        lambda: render_published(
-            client,
-            published,
-            published_ready_total,
-            published_ready_status_counts,
-        ),
+        published_ready_status_counts,
+        page_key="public_ready",
+        page=published_page,
+        has_next=published_has_next,
     )
-    render_history_section_with_pager(
-        "archived",
-        archived_page,
-        archived_has_next,
+    render_archived(
+        client,
+        archived,
         archived_total,
-        lambda: render_archived(client, archived, archived_total),
+        page_key="archived",
+        page=archived_page,
+        has_next=archived_has_next,
     )
 
 
@@ -417,18 +420,27 @@ def _load_history_page(
     return items, page, len(items) == HISTORY_PAGE_SIZE
 
 
-def render_history_section_with_pager(
+PAGER_COLUMN_WIDTH = 92
+
+
+def render_table_with_pager(
     page_key: str,
     page: int,
     has_next: bool,
     total: int,
-    render_section,
-) -> None:
-    content_col, pager_col = st.columns([20, 1], vertical_alignment="top")
-    with content_col:
-        render_section()
-    with pager_col:
-        render_history_pager(page_key, page, has_next, total)
+    render_table,
+):
+    with st.container(width=NEWS_TABLE_WIDTH + PAGER_COLUMN_WIDTH):
+        table_col, pager_col = st.columns(
+            [NEWS_TABLE_WIDTH, PAGER_COLUMN_WIDTH],
+            gap="small",
+            vertical_alignment="center",
+        )
+        with table_col:
+            result = render_table()
+        with pager_col:
+            render_history_pager(page_key, page, has_next, total)
+        return result
 
 
 def render_history_pager(
@@ -462,7 +474,15 @@ def render_history_pager(
         st.rerun()
 
 
-def render_drafts(client: ApiClient, drafts: list[dict], total: int) -> None:
+def render_drafts(
+    client: ApiClient,
+    drafts: list[dict],
+    total: int,
+    *,
+    page_key: str,
+    page: int,
+    has_next: bool,
+) -> None:
     render_history_section_header("Черновики", drafts, total)
     if drafts:
         if st.session_state.pop("reset-my-news-drafts-select-all", False):
@@ -485,40 +505,46 @@ def render_drafts(client: ApiClient, drafts: list[dict], total: int) -> None:
             }
             for item in drafts
         ]
-        edited_drafts = st.data_editor(
-            pd.DataFrame(draft_rows),
-            hide_index=True,
-            width=NEWS_TABLE_WIDTH,
-            disabled=["Заголовок", "Дата публикации", "Проверка", "Источник"],
-            column_config={
-                "Выбрать": st.column_config.CheckboxColumn(
-                    "✓",
-                    help="Отметьте черновики для публикации или удаления",
-                    width=SELECT_COLUMN_WIDTH,
-                ),
-                "Заголовок": st.column_config.TextColumn(
-                    "Заголовок",
-                    width=DRAFT_TITLE_COLUMN_WIDTH,
-                ),
-                "Дата публикации": st.column_config.TextColumn(
-                    "Дата публикации",
-                    width=DATE_COLUMN_WIDTH,
-                ),
-                "Проверка": st.column_config.TextColumn(
-                    "Проверка",
-                    help=(
-                        "Предварительное совпадение по ссылке или тексту. "
-                        "Окончательный тип появится после обработки."
+        edited_drafts = render_table_with_pager(
+            page_key,
+            page,
+            has_next,
+            total,
+            lambda: st.data_editor(
+                pd.DataFrame(draft_rows),
+                hide_index=True,
+                width=NEWS_TABLE_WIDTH,
+                disabled=["Заголовок", "Дата публикации", "Проверка", "Источник"],
+                column_config={
+                    "Выбрать": st.column_config.CheckboxColumn(
+                        "✓",
+                        help="Отметьте черновики для публикации или удаления",
+                        width=SELECT_COLUMN_WIDTH,
                     ),
-                    width=DRAFT_REVIEW_COLUMN_WIDTH,
-                ),
-                "Источник": st.column_config.LinkColumn(
-                    "Источник",
-                    display_text="Открыть",
-                    width=SOURCE_COLUMN_WIDTH,
-                ),
-            },
-            key=f"my-news-drafts-editor-{int(select_all_drafts)}",
+                    "Заголовок": st.column_config.TextColumn(
+                        "Заголовок",
+                        width=DRAFT_TITLE_COLUMN_WIDTH,
+                    ),
+                    "Дата публикации": st.column_config.TextColumn(
+                        "Дата публикации",
+                        width=DATE_COLUMN_WIDTH,
+                    ),
+                    "Проверка": st.column_config.TextColumn(
+                        "Проверка",
+                        help=(
+                            "Предварительное совпадение по ссылке или тексту. "
+                            "Окончательный тип появится после обработки."
+                        ),
+                        width=DRAFT_REVIEW_COLUMN_WIDTH,
+                    ),
+                    "Источник": st.column_config.LinkColumn(
+                        "Источник",
+                        display_text="Открыть",
+                        width=SOURCE_COLUMN_WIDTH,
+                    ),
+                },
+                key=f"my-news-drafts-editor-{int(select_all_drafts)}",
+            ),
         )
         selected_article_ids = [
             drafts[index]["article_id"]
@@ -554,7 +580,14 @@ def render_drafts(client: ApiClient, drafts: list[dict], total: int) -> None:
         st.caption("Черновиков нет.")
 
 
-def render_processing_articles(processing: list[dict], total: int) -> None:
+def render_processing_articles(
+    processing: list[dict],
+    total: int,
+    *,
+    page_key: str,
+    page: int,
+    has_next: bool,
+) -> None:
     render_history_section_header("В обработке", processing, total)
     if not processing:
         st.caption("Новостей в обработке нет.")
@@ -573,33 +606,39 @@ def render_processing_articles(processing: list[dict], total: int) -> None:
         }
         for item in processing
     ]
-    st.dataframe(
-        pd.DataFrame(processing_rows),
-        hide_index=True,
-        width=NEWS_TABLE_WIDTH,
-        column_config={
-            "Заголовок": st.column_config.TextColumn(
-                "Заголовок",
-                width=PUBLISHED_TITLE_COLUMN_WIDTH,
-            ),
-            "Дата публикации": st.column_config.TextColumn(
-                "Дата публикации",
-                width=DATE_COLUMN_WIDTH,
-            ),
-            "Этап": st.column_config.TextColumn(
-                "Этап",
-                width=PUBLISHED_STATUS_COLUMN_WIDTH,
-            ),
-            "Статус": st.column_config.TextColumn(
-                "Статус",
-                width=PUBLISHED_STATUS_COLUMN_WIDTH,
-            ),
-            "Источник": st.column_config.LinkColumn(
-                "Источник",
-                display_text="Открыть",
-                width=SOURCE_COLUMN_WIDTH,
-            ),
-        },
+    render_table_with_pager(
+        page_key,
+        page,
+        has_next,
+        total,
+        lambda: st.dataframe(
+            pd.DataFrame(processing_rows),
+            hide_index=True,
+            width=NEWS_TABLE_WIDTH,
+            column_config={
+                "Заголовок": st.column_config.TextColumn(
+                    "Заголовок",
+                    width=PUBLISHED_TITLE_COLUMN_WIDTH,
+                ),
+                "Дата публикации": st.column_config.TextColumn(
+                    "Дата публикации",
+                    width=DATE_COLUMN_WIDTH,
+                ),
+                "Этап": st.column_config.TextColumn(
+                    "Этап",
+                    width=PUBLISHED_STATUS_COLUMN_WIDTH,
+                ),
+                "Статус": st.column_config.TextColumn(
+                    "Статус",
+                    width=PUBLISHED_STATUS_COLUMN_WIDTH,
+                ),
+                "Источник": st.column_config.LinkColumn(
+                    "Источник",
+                    display_text="Открыть",
+                    width=SOURCE_COLUMN_WIDTH,
+                ),
+            },
+        ),
     )
 
 
@@ -608,6 +647,10 @@ def render_published(
     published: list[dict],
     total: int,
     status_counts: dict,
+    *,
+    page_key: str,
+    page: int,
+    has_next: bool,
 ) -> None:
     render_history_section_header("Опубликованные", published, total)
     render_published_status_summary(status_counts)
@@ -654,73 +697,79 @@ def render_published(
                 }
             )
 
-        edited_published = st.data_editor(
-            pd.DataFrame(published_rows),
-            hide_index=True,
-            width=NEWS_TABLE_WIDTH,
-            disabled=[
-                "Заголовок",
-                "Дата публикации",
-                "Обработка",
-                "Тип модели",
-                "Итоговый тип",
-                "Оценка модели, %",
-                "Источник",
-            ],
-            column_config={
-                "Выбрать": st.column_config.CheckboxColumn(
-                    "✓",
-                    help="Отметьте новости для повторной обработки или архивирования",
-                    width=SELECT_COLUMN_WIDTH,
-                ),
-                "Заголовок": st.column_config.TextColumn(
+        edited_published = render_table_with_pager(
+            page_key,
+            page,
+            has_next,
+            total,
+            lambda: st.data_editor(
+                pd.DataFrame(published_rows),
+                hide_index=True,
+                width=NEWS_TABLE_WIDTH,
+                disabled=[
                     "Заголовок",
-                    width=PUBLISHED_TITLE_COLUMN_WIDTH,
-                ),
-                "Дата публикации": st.column_config.TextColumn(
                     "Дата публикации",
-                    width=DATE_COLUMN_WIDTH,
-                ),
-                "Обработка": st.column_config.TextColumn(
                     "Обработка",
-                    width=PUBLISHED_STATUS_COLUMN_WIDTH,
-                ),
-                "Тип модели": st.column_config.TextColumn(
                     "Тип модели",
-                    width=PUBLISHED_MODEL_TYPE_COLUMN_WIDTH,
-                ),
-                "Оценка модели, %": st.column_config.NumberColumn(
-                    help=(
-                        "Автоматическая оценка модели: насколько вероятно, что "
-                        "новость содержит важное обновление сюжета. "
-                        "От 50% новость считается важной."
-                    ),
-                    min_value=0,
-                    max_value=100,
-                    format="%d%%",
-                    width=PUBLISHED_IMPORTANCE_COLUMN_WIDTH,
-                ),
-                "Редакторская метка": st.column_config.SelectboxColumn(
-                    "Редакторская метка",
-                    help=(
-                        "Заменяет результат модели в поиске. "
-                        "«Автоматически» сбрасывает ручную коррекцию."
-                    ),
-                    options=list(MANUAL_LABEL_VALUES),
-                    required=True,
-                    width=PUBLISHED_EDITOR_LABEL_COLUMN_WIDTH,
-                ),
-                "Итоговый тип": st.column_config.TextColumn(
                     "Итоговый тип",
-                    width=PUBLISHED_EFFECTIVE_TYPE_COLUMN_WIDTH,
-                ),
-                "Источник": st.column_config.LinkColumn(
+                    "Оценка модели, %",
                     "Источник",
-                    display_text="Открыть",
-                    width=SOURCE_COLUMN_WIDTH,
-                ),
-            },
-            key=f"my-news-published-editor-{int(select_all_published)}",
+                ],
+                column_config={
+                    "Выбрать": st.column_config.CheckboxColumn(
+                        "✓",
+                        help="Отметьте новости для повторной обработки или архивирования",
+                        width=SELECT_COLUMN_WIDTH,
+                    ),
+                    "Заголовок": st.column_config.TextColumn(
+                        "Заголовок",
+                        width=PUBLISHED_TITLE_COLUMN_WIDTH,
+                    ),
+                    "Дата публикации": st.column_config.TextColumn(
+                        "Дата публикации",
+                        width=DATE_COLUMN_WIDTH,
+                    ),
+                    "Обработка": st.column_config.TextColumn(
+                        "Обработка",
+                        width=PUBLISHED_STATUS_COLUMN_WIDTH,
+                    ),
+                    "Тип модели": st.column_config.TextColumn(
+                        "Тип модели",
+                        width=PUBLISHED_MODEL_TYPE_COLUMN_WIDTH,
+                    ),
+                    "Оценка модели, %": st.column_config.NumberColumn(
+                        help=(
+                            "Автоматическая оценка модели: насколько вероятно, что "
+                            "новость содержит важное обновление сюжета. "
+                            "От 50% новость считается важной."
+                        ),
+                        min_value=0,
+                        max_value=100,
+                        format="%d%%",
+                        width=PUBLISHED_IMPORTANCE_COLUMN_WIDTH,
+                    ),
+                    "Редакторская метка": st.column_config.SelectboxColumn(
+                        "Редакторская метка",
+                        help=(
+                            "Заменяет результат модели в поиске. "
+                            "«Автоматически» сбрасывает ручную коррекцию."
+                        ),
+                        options=list(MANUAL_LABEL_VALUES),
+                        required=True,
+                        width=PUBLISHED_EDITOR_LABEL_COLUMN_WIDTH,
+                    ),
+                    "Итоговый тип": st.column_config.TextColumn(
+                        "Итоговый тип",
+                        width=PUBLISHED_EFFECTIVE_TYPE_COLUMN_WIDTH,
+                    ),
+                    "Источник": st.column_config.LinkColumn(
+                        "Источник",
+                        display_text="Открыть",
+                        width=SOURCE_COLUMN_WIDTH,
+                    ),
+                },
+                key=f"my-news-published-editor-{int(select_all_published)}",
+            ),
         )
         selected_published_ids = [
             published[index]["article_id"]
@@ -799,7 +848,15 @@ def render_published(
         st.caption("Опубликованных новостей пока нет.")
 
 
-def render_archived(client: ApiClient, archived: list[dict], total: int) -> None:
+def render_archived(
+    client: ApiClient,
+    archived: list[dict],
+    total: int,
+    *,
+    page_key: str,
+    page: int,
+    has_next: bool,
+) -> None:
     render_history_section_header("Архивные", archived, total)
     if archived:
         if st.session_state.pop("reset-my-news-archived-select-all", False):
@@ -821,36 +878,42 @@ def render_archived(client: ApiClient, archived: list[dict], total: int) -> None
             }
             for item in archived
         ]
-        edited_archived = st.data_editor(
-            pd.DataFrame(archived_rows),
-            hide_index=True,
-            width=NEWS_TABLE_WIDTH,
-            disabled=["Заголовок", "Дата публикации", "Тип", "Источник"],
-            column_config={
-                "Выбрать": st.column_config.CheckboxColumn(
-                    "✓",
-                    help="Отметьте новости для возврата в публикацию",
-                    width=SELECT_COLUMN_WIDTH,
-                ),
-                "Заголовок": st.column_config.TextColumn(
-                    "Заголовок",
-                    width=ARCHIVE_TITLE_COLUMN_WIDTH,
-                ),
-                "Дата публикации": st.column_config.TextColumn(
-                    "Дата публикации",
-                    width=DATE_COLUMN_WIDTH,
-                ),
-                "Тип": st.column_config.TextColumn(
-                    "Тип",
-                    width=ARCHIVE_TYPE_COLUMN_WIDTH,
-                ),
-                "Источник": st.column_config.LinkColumn(
-                    "Источник",
-                    display_text="Открыть",
-                    width=SOURCE_COLUMN_WIDTH,
-                ),
-            },
-            key=f"my-news-archived-editor-{int(select_all_archived)}",
+        edited_archived = render_table_with_pager(
+            page_key,
+            page,
+            has_next,
+            total,
+            lambda: st.data_editor(
+                pd.DataFrame(archived_rows),
+                hide_index=True,
+                width=NEWS_TABLE_WIDTH,
+                disabled=["Заголовок", "Дата публикации", "Тип", "Источник"],
+                column_config={
+                    "Выбрать": st.column_config.CheckboxColumn(
+                        "✓",
+                        help="Отметьте новости для возврата в публикацию",
+                        width=SELECT_COLUMN_WIDTH,
+                    ),
+                    "Заголовок": st.column_config.TextColumn(
+                        "Заголовок",
+                        width=ARCHIVE_TITLE_COLUMN_WIDTH,
+                    ),
+                    "Дата публикации": st.column_config.TextColumn(
+                        "Дата публикации",
+                        width=DATE_COLUMN_WIDTH,
+                    ),
+                    "Тип": st.column_config.TextColumn(
+                        "Тип",
+                        width=ARCHIVE_TYPE_COLUMN_WIDTH,
+                    ),
+                    "Источник": st.column_config.LinkColumn(
+                        "Источник",
+                        display_text="Открыть",
+                        width=SOURCE_COLUMN_WIDTH,
+                    ),
+                },
+                key=f"my-news-archived-editor-{int(select_all_archived)}",
+            ),
         )
         selected_archived_ids = [
             archived[index]["article_id"]

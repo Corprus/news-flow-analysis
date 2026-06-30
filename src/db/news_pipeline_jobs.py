@@ -68,10 +68,43 @@ class NewsPipelineJobRepository:
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
                 """
+                WITH incoming AS (
+                    SELECT %s::jsonb AS payload
+                )
                 UPDATE news_pipeline_jobs
                 SET status = 'done',
-                    result = %s::jsonb,
+                    result = CASE
+                        WHEN (
+                            COALESCE(news_pipeline_jobs.result, '{}'::jsonb)
+                            || incoming.payload
+                        ) ? 'stage_details'
+                        THEN jsonb_set(
+                            jsonb_set(
+                                COALESCE(news_pipeline_jobs.result, '{}'::jsonb)
+                                    || incoming.payload,
+                                '{stage_details,completed_rows}',
+                                COALESCE(
+                                    (
+                                        COALESCE(news_pipeline_jobs.result, '{}'::jsonb)
+                                        || incoming.payload
+                                    )#>'{stage_details,total_rows}',
+                                    (
+                                        COALESCE(news_pipeline_jobs.result, '{}'::jsonb)
+                                        || incoming.payload
+                                    )#>'{stage_details,completed_rows}',
+                                    '0'::jsonb
+                                ),
+                                true
+                            ),
+                            '{progress_percent}',
+                            '100'::jsonb,
+                            true
+                        )
+                        ELSE COALESCE(news_pipeline_jobs.result, '{}'::jsonb)
+                            || incoming.payload
+                    END,
                     updated_at = now()
+                FROM incoming
                 WHERE id = %s
                 """,
                 (json.dumps(result), job_id),
@@ -90,18 +123,52 @@ class NewsPipelineJobRepository:
                 (json.dumps({"error": error}), job_id),
             )
 
-    async def list_children(self, parent_job_id: str) -> list[dict[str, Any]]:
+    async def mark_dispatched_if_queued(self, job_id: str) -> bool:
         async with await AsyncConnection.connect(self._database_url) as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
                     """
+                    UPDATE news_pipeline_jobs
+                    SET result = jsonb_set(
+                            COALESCE(result, '{}'::jsonb),
+                            '{dispatched_at}',
+                            to_jsonb(now()::text),
+                            true
+                        ),
+                        updated_at = now()
+                    WHERE id = %s
+                      AND status = 'queued'
+                      AND NOT (COALESCE(result, '{}'::jsonb) ? 'dispatched_at')
+                    RETURNING id
+                    """,
+                    (job_id,),
+                )
+                row = await cursor.fetchone()
+        return row is not None
+
+    async def list_children(
+        self,
+        parent_job_id: str,
+        *,
+        mode: str | None = None,
+    ) -> list[dict[str, Any]]:
+        mode_filter = "AND request->>'mode' = %s" if mode is not None else ""
+        params: tuple[Any, ...] = (
+            (parent_job_id, mode) if mode is not None else (parent_job_id,)
+        )
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    f"""
                     SELECT id::text, status, request, result, created_at, updated_at
                     FROM news_pipeline_jobs
                     WHERE request->>'parent_job_id' = %s
-                      AND request->>'mode' = 'vectorize'
-                    ORDER BY (request->>'chunk_index')::int, created_at
+                      {mode_filter}
+                    ORDER BY
+                        COALESCE((request->>'chunk_index')::int, (request->>'batch_index')::int, 0),
+                        created_at
                     """,
-                    (parent_job_id,),
+                    params,
                 )
                 rows = await cursor.fetchall()
 
@@ -116,6 +183,38 @@ class NewsPipelineJobRepository:
             }
             for row in rows
         ]
+
+    async def order_article_ids(
+        self,
+        news_ids: list[str],
+        *,
+        organization_id: str | None,
+    ) -> list[str]:
+        if not news_ids:
+            return []
+        conditions = ["id = ANY(%s::uuid[])"]
+        params: list[Any] = [news_ids]
+        if organization_id is not None:
+            conditions.append("organization_id = %s")
+            params.append(organization_id)
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    f"""
+                    SELECT id::text
+                    FROM news_articles
+                    WHERE {" AND ".join(conditions)}
+                    ORDER BY published_at, id
+                    """,
+                    params,
+                )
+                rows = await cursor.fetchall()
+        ordered_ids = [str(row[0]) for row in rows]
+        found = set(ordered_ids)
+        missing = [news_id for news_id in news_ids if news_id not in found]
+        if missing:
+            raise ValueError(f"News articles not found for pipeline job: {missing[:10]}")
+        return ordered_ids
 
     async def get(self, job_id: str) -> dict[str, Any] | None:
         async with await AsyncConnection.connect(self._database_url) as connection:

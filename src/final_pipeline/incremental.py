@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -44,6 +47,7 @@ class IncrementalPipelineConfig:
 
 
 IncrementalPipelineResult = PipelineResult
+ProgressCallback = Callable[[str, dict[str, Any]], None]
 
 
 class IncrementalNewsNoveltyPipeline:
@@ -92,7 +96,21 @@ class IncrementalNewsNoveltyPipeline:
         historical_embeddings: np.ndarray,
         new_news_df: pd.DataFrame,
         new_embeddings: np.ndarray | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> IncrementalPipelineResult:
+        process_started_at = perf_counter()
+
+        def report_progress(stage: str, **details: Any) -> None:
+            if progress_callback is None:
+                return
+            progress_callback(
+                stage,
+                {
+                    "elapsed_seconds": round(perf_counter() - process_started_at, 3),
+                    **details,
+                },
+            )
+
         cfg = self.config
         historical_news, historical_embeddings = self._prepare_with_embeddings(
             historical_news_df,
@@ -100,6 +118,10 @@ class IncrementalNewsNoveltyPipeline:
             frame_name="historical_news_df",
         )
         self._validate_history(historical_news)
+        report_progress(
+            "prepare_history",
+            historical_rows=int(len(historical_news)),
+        )
 
         if new_embeddings is None:
             new_news = self._prepare_without_embeddings(new_news_df)
@@ -117,6 +139,10 @@ class IncrementalNewsNoveltyPipeline:
                 new_embeddings,
                 frame_name="new_news_df",
             )
+        report_progress(
+            "prepare_new_batch",
+            new_rows=int(len(new_news)),
+        )
 
         if new_news.empty:
             raise ValueError("new_news_df must contain at least one article")
@@ -136,6 +162,13 @@ class IncrementalNewsNoveltyPipeline:
         assignment_rows: list[dict] = []
         merged_cluster_count = 0
         merged_component_count = 0
+        progress_interval = max(1, min(1_000, max(len(new_news) // 20, 1)))
+        report_progress(
+            "cluster_assignment",
+            completed_rows=0,
+            total_rows=int(len(new_news)),
+            history_rows=int(len(history)),
+        )
 
         for new_position, current in new_news.iterrows():
             current_embedding = normalized_new_embeddings[new_position]
@@ -242,6 +275,28 @@ class IncrementalNewsNoveltyPipeline:
             history_row[cfg.baseline_component_column] = baseline_component_id
             history = pd.concat([history, pd.DataFrame([history_row])], ignore_index=True)
             history_embeddings = np.vstack([history_embeddings, current_embedding])
+            completed_rows = len(assignment_rows)
+            if completed_rows % progress_interval == 0 or completed_rows == len(new_news):
+                report_progress(
+                    "cluster_assignment",
+                    completed_rows=int(completed_rows),
+                    total_rows=int(len(new_news)),
+                    history_rows=int(len(history)),
+                    assigned_to_existing=int(
+                        sum(
+                            row["update_method"]
+                            in {"baseline", "baseline_merge", "attach"}
+                            for row in assignment_rows
+                        )
+                    ),
+                    created_clusters=int(
+                        sum(
+                            row["update_method"]
+                            in {"new_cluster", "new_cluster_ambiguous"}
+                            for row in assignment_rows
+                        )
+                    ),
+                )
 
         assignments = pd.DataFrame(assignment_rows)
         final_cluster_by_id = history.set_index(cfg.id_column)[cfg.cluster_column].astype(str)
@@ -267,6 +322,12 @@ class IncrementalNewsNoveltyPipeline:
         combined_news = pd.concat([historical_clustered, new_clustered], ignore_index=True)
         combined_embeddings = np.vstack([historical_embeddings, new_embeddings]).astype(np.float32)
 
+        report_progress(
+            "novelty_prediction",
+            combined_rows=int(len(combined_news)),
+            new_rows=int(len(new_clustered)),
+            historical_rows=int(len(historical_clustered)),
+        )
         all_predictions = self.novelty_model.predict_clustered_with_fallback(
             news_df=combined_news,
             embeddings=combined_embeddings,
@@ -276,6 +337,10 @@ class IncrementalNewsNoveltyPipeline:
             date_column=cfg.date_column,
             title_column=cfg.title_column,
             text_column=cfg.text_column,
+        )
+        report_progress(
+            "novelty_prediction_done",
+            prediction_rows=int(len(all_predictions)),
         )
         new_ids = set(new_clustered[cfg.id_column].astype(str))
         predictions = all_predictions[
@@ -336,6 +401,12 @@ class IncrementalNewsNoveltyPipeline:
             [assignments, pd.DataFrame(reassigned_historical_rows)],
             ignore_index=True,
             sort=False,
+        )
+        report_progress(
+            "result_assembly",
+            requested_rows=int(len(requested_ids)),
+            updated_rows=int(len(updated_ids)),
+            recalculated_historical_rows=int(len(affected_historical_ids)),
         )
 
         diagnostics = {

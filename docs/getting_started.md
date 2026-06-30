@@ -23,7 +23,9 @@ CPU-вариант описан в [развёртывании](deployment.md).
 ```text
 DEMO_MODE=true
 MODEL_SERVICE_GPU_REPLICAS=1
-MODEL_SERVICE_CPU_REPLICAS=0
+MODEL_SERVICE_CPU_REPLICAS=1
+PIPELINE_CHUNK_SIZE=5000
+PIPELINE_AGGREGATE_BATCH_SIZE=1000
 ```
 
 Если BGE-M3 уже загружена на хост, укажите в MODEL_SERVICE_HF_CACHE` абсолютный путь к существующему кешу в  формате вашей операционной системы.

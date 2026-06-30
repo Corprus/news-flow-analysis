@@ -94,11 +94,11 @@ GET  /api/news-pipeline/{job_id}
 `mode` принимает `incremental` или `full`. Статус задачи:
 `queued`, `processing`, `done` или `failed`.
 
-Большой `incremental` job автоматически разбивается на child jobs режима
-`vectorize`. Они считают и сохраняют embeddings пачками, после чего aggregate
-job запускает кластеризацию и модель один раз на всей исходной пачке. Клиенту
-возвращается ID parent job; его статус становится `done` после завершения
-aggregate job.
+Большой `incremental` job автоматически разбивается на child jobs режимов
+`vectorize` и `aggregate`. `vectorize` считает и сохраняет embeddings пачками,
+после чего `aggregate` обрабатывает исходную пачку последовательными
+хронологическими batch jobs. Клиенту возвращается ID parent job; его статус
+становится `done` после завершения всех child jobs.
 
 ## Семантический поиск
 

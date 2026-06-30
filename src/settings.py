@@ -36,6 +36,10 @@ class Settings(BaseSettings):
         default="news_vectorization.jobs",
         alias="NEWS_VECTORIZATION_QUEUE",
     )
+    news_aggregation_queue: str = Field(
+        default="news_aggregation.jobs",
+        alias="NEWS_AGGREGATION_QUEUE",
+    )
     sqlalchemy_echo: bool = Field(default=False, alias="SQLALCHEMY_ECHO")
     password_hash_secret: str = Field(
         default="change-me-local-password-secret",
@@ -61,10 +65,16 @@ class Settings(BaseSettings):
     )
     pipeline_device: str | None = Field(default=None, alias="PIPELINE_DEVICE")
     pipeline_chunk_size: int = Field(
-        default=2_000,
+        default=5_000,
         ge=1,
         alias="PIPELINE_CHUNK_SIZE",
     )
+    pipeline_aggregate_batch_size: int = Field(
+        default=1_000,
+        ge=1,
+        alias="PIPELINE_AGGREGATE_BATCH_SIZE",
+    )
+    model_service_role: str = Field(default="all", alias="MODEL_SERVICE_ROLE")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
