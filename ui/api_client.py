@@ -322,14 +322,25 @@ class ApiClient:
         self,
         *,
         visibility: str,
+        statuses: list[str] | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict]:
+        params: dict[str, Any] = {
+            "visibility": visibility,
+            "limit": limit,
+            "offset": offset,
+        }
+        if statuses:
+            params["status"] = statuses
         return self._request(
             "GET",
             "/news/me/history",
-            params={"visibility": visibility, "limit": limit, "offset": offset},
+            params=params,
         )
+
+    def get_news_history_summary(self) -> dict:
+        return self._request("GET", "/news/me/history-summary")
 
     def list_news_feed(
         self,

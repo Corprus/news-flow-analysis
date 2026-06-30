@@ -90,6 +90,11 @@ async def lifespan(app: FastAPI):
         repository.initialize,
     )
     await _run_startup_step_with_retries("connect RabbitMQ publisher", publisher.connect)
+    if settings.demo_mode:
+        await _run_startup_step_with_retries(
+            "purge RabbitMQ demo queue",
+            publisher.purge_queue,
+        )
     app.state.repository = repository
     app.state.publisher = publisher
     if settings.demo_mode:

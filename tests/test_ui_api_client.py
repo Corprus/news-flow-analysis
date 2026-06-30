@@ -99,3 +99,43 @@ def test_list_news_history_page_filters_visibility() -> None:
         "limit": 100,
         "offset": 200,
     }
+
+
+def test_list_news_history_page_filters_statuses() -> None:
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = [{"article_id": "public-1"}]
+
+    with patch("ui.api_client.requests.request", return_value=response) as request:
+        history = ApiClient("http://api").list_news_history_page(
+            visibility="public",
+            statuses=["pending", "processing"],
+            limit=100,
+            offset=0,
+        )
+
+    assert history == [{"article_id": "public-1"}]
+    assert request.call_args.kwargs["params"] == {
+        "visibility": "public",
+        "limit": 100,
+        "offset": 0,
+        "status": ["pending", "processing"],
+    }
+
+
+def test_get_news_history_summary() -> None:
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = {
+        "visibility_counts": {"draft": 0, "public": 50_050, "archived": 0},
+        "status_counts": {"pending": 32_000, "processing": 18_000},
+        "status_counts_by_visibility": {
+            "public": {"pending": 32_000, "processing": 18_000}
+        },
+    }
+
+    with patch("ui.api_client.requests.request", return_value=response) as request:
+        summary = ApiClient("http://api").get_news_history_summary()
+
+    assert summary["visibility_counts"]["public"] == 50_050
+    assert request.call_args.args[:2] == ("GET", "http://api/news/me/history-summary")

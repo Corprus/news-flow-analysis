@@ -48,6 +48,19 @@ class RabbitPublisher:
         finally:
             await channel.close()
 
+    async def purge_queue(self) -> int:
+        if self._connection is None:
+            await self.connect()
+
+        assert self._connection is not None
+        channel = await self._connection.channel()
+        try:
+            queue = await channel.declare_queue(self._queue_name, durable=True)
+            result = await queue.purge()
+            return int(getattr(result, "message_count", 0))
+        finally:
+            await channel.close()
+
     async def close(self) -> None:
         if self._connection is not None:
             await self._connection.close()

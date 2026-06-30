@@ -540,13 +540,20 @@ class NewsService:
         limit: int = 50,
         offset: int = 0,
         visibility: ArticleVisibility | None = None,
+        statuses: Iterable[ArticleStatus] | None = None,
     ) -> list[NewsArticle]:
         filters = [NewsArticleSubmission.user_id == str(user_id)]
         if visibility is not None:
             filters.append(NewsArticle.visibility == visibility.value)
+        status_values = [status.value for status in statuses or []]
+        if status_values:
+            filters.append(NewsArticle.status.in_(status_values))
         statement = (
             select(NewsArticle)
-            .options(selectinload(NewsArticle.pipeline_state))
+            .options(
+                selectinload(NewsArticle.pipeline_state),
+                selectinload(NewsArticle.embeddings),
+            )
             .join(NewsArticleSubmission, NewsArticleSubmission.article_id == NewsArticle.id)
             .where(*filters)
             .order_by(NewsArticleSubmission.created_at.desc())
@@ -554,6 +561,25 @@ class NewsService:
             .offset(offset)
         )
         return list(self._session.execute(statement).scalars().all())
+
+    def count_user_articles_by_visibility_and_status(
+        self,
+        user_id: UUID,
+    ) -> list[tuple[str, str, int]]:
+        statement = (
+            select(
+                NewsArticle.visibility,
+                NewsArticle.status,
+                func.count(func.distinct(NewsArticle.id)),
+            )
+            .join(NewsArticleSubmission, NewsArticleSubmission.article_id == NewsArticle.id)
+            .where(NewsArticleSubmission.user_id == str(user_id))
+            .group_by(NewsArticle.visibility, NewsArticle.status)
+        )
+        return [
+            (str(visibility), str(status), int(count))
+            for visibility, status, count in self._session.execute(statement).all()
+        ]
 
     def list_public_articles_by_period(
         self,

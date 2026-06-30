@@ -184,6 +184,7 @@ class NewsArticleHistoryItem(BaseModel):
     title: str
     visibility: ArticleVisibility
     status: ArticleStatus
+    processing_stage: str | None
     origin: ArticleOrigin
     language: str | None
     novelty_score: float | None
@@ -201,6 +202,12 @@ class NewsArticleHistoryItem(BaseModel):
     published_at: datetime
     fetched_at: datetime
     url: str | None
+
+
+class NewsArticleHistorySummary(BaseModel):
+    visibility_counts: dict[ArticleVisibility, int]
+    status_counts: dict[ArticleStatus, int]
+    status_counts_by_visibility: dict[ArticleVisibility, dict[ArticleStatus, int]]
 
 
 class NewsFeedResponse(BaseModel):
@@ -820,14 +827,45 @@ def get_my_news_history(
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     visibility: ArticleVisibility | None = None,
+    status_filter: Annotated[
+        list[ArticleStatus] | None,
+        Query(alias="status"),
+    ] = None,
 ) -> list[NewsArticleHistoryItem]:
     articles = news.list_user_articles(
         current_user.id,
         limit,
         offset,
         visibility=visibility,
+        statuses=status_filter,
     )
     return [_article_history_item(article) for article in articles]
+
+
+@router.get("/me/history-summary", response_model=NewsArticleHistorySummary)
+def get_my_news_history_summary(
+    current_user: CurrentUserDep,
+    news: Annotated[NewsService, Depends(get_news_service)],
+) -> NewsArticleHistorySummary:
+    visibility_counts = dict.fromkeys(ArticleVisibility, 0)
+    status_counts = dict.fromkeys(ArticleStatus, 0)
+    status_counts_by_visibility = {
+        visibility: dict.fromkeys(ArticleStatus, 0) for visibility in ArticleVisibility
+    }
+    for visibility_value, status_value, count in (
+        news.count_user_articles_by_visibility_and_status(current_user.id)
+    ):
+        visibility = ArticleVisibility(visibility_value)
+        article_status = ArticleStatus(status_value)
+        visibility_counts[visibility] += count
+        status_counts[article_status] += count
+        status_counts_by_visibility[visibility][article_status] += count
+
+    return NewsArticleHistorySummary(
+        visibility_counts=visibility_counts,
+        status_counts=status_counts,
+        status_counts_by_visibility=status_counts_by_visibility,
+    )
 
 
 @router.get("/feed", response_model=NewsFeedResponse)
@@ -1288,6 +1326,7 @@ def _article_history_item(article: NewsArticle) -> NewsArticleHistoryItem:
         title=article.title,
         visibility=article.visibility,
         status=article.status,
+        processing_stage=_article_processing_stage(article),
         origin=article.origin,
         language=article.language,
         novelty_score=article.novelty_score,
@@ -1314,6 +1353,18 @@ def _article_history_item(article: NewsArticle) -> NewsArticleHistoryItem:
         fetched_at=article.fetched_at,
         url=article.url,
     )
+
+
+def _article_processing_stage(article: NewsArticle) -> str | None:
+    if article.status == ArticleStatus.PENDING.value:
+        return "queued_for_vectorization"
+    if article.status != ArticleStatus.PROCESSING.value:
+        return None
+    if article.pipeline_state is not None:
+        return "saving_result"
+    if article.embeddings:
+        return "clustering_and_novelty"
+    return "vectorization"
 
 
 def _search_history_item(search_query: NewsSearchQuery) -> NewsSearchHistoryItem:

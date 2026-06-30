@@ -146,31 +146,32 @@ def render_news_file_import(client: ApiClient) -> None:
         return
 
     format_by_label = {item["label"]: item for item in formats}
-    with st.form("import_news_form"):
-        file_col, format_col = st.columns([4, 1], vertical_alignment="top")
-        with format_col:
-            label = st.selectbox("Формат", list(format_by_label))
-            selected_format = format_by_label[label]
-        extensions = [
-            extension.lstrip(".")
-            for extension in selected_format.get("file_extensions", [])
-        ]
-        with file_col:
-            uploaded_file = st.file_uploader(
-                "Файл с новостями",
-                type=extensions or None,
-                key="import-news-file",
-            )
-        st.caption("Не более 200 МБ на файл")
-        publish_immediately = st.checkbox(
-            "Опубликовать сразу",
-            key="import-publish-immediately",
+    file_col, format_col = st.columns([4, 1], vertical_alignment="top")
+    with format_col:
+        label = st.selectbox("Формат", list(format_by_label))
+        selected_format = format_by_label[label]
+    extensions = [
+        extension.lstrip(".") for extension in selected_format.get("file_extensions", [])
+    ]
+    with file_col:
+        uploaded_file = st.file_uploader(
+            "Файл с новостями",
+            type=extensions or None,
+            key="import-news-file",
         )
-        submitted = st.form_submit_button(
-            "Импортировать и опубликовать"
+    st.caption("Не более 200 МБ на файл")
+    publish_immediately = st.checkbox(
+        "Опубликовать сразу",
+        key="import-publish-immediately",
+    )
+    submitted = st.button(
+        (
+            "Загрузить и опубликовать"
             if publish_immediately
-            else "Импортировать черновики"
-        )
+            else "Загрузить в черновики"
+        ),
+        type="primary",
+    )
 
     if submitted:
         if uploaded_file is None:
@@ -298,6 +299,12 @@ STATUS_LABELS = {
     "processed": "Готова",
     "error": "Ошибка",
 }
+PROCESSING_STAGE_LABELS = {
+    "queued_for_vectorization": "В очереди на векторизацию",
+    "vectorization": "Векторизация",
+    "clustering_and_novelty": "Кластеризация и новизна",
+    "saving_result": "Сохранение результата",
+}
 NOVELTY_LABELS = {
     "significant": "Важная",
     "minor": "Второстепенная",
@@ -314,23 +321,79 @@ MANUAL_LABEL_VALUES = {
 
 def render_my_news_content(client: ApiClient) -> None:
     try:
+        summary = client.get_news_history_summary()
         drafts, drafts_page, drafts_has_next = _load_history_page(client, "draft")
-        published, published_page, published_has_next = _load_history_page(client, "public")
+        processing, processing_page, processing_has_next = _load_history_page(
+            client,
+            "public_processing",
+            visibility="public",
+            statuses=["pending", "processing"],
+        )
+        published, published_page, published_has_next = _load_history_page(
+            client,
+            "public_ready",
+            visibility="public",
+            statuses=["processed", "error"],
+        )
         archived, archived_page, archived_has_next = _load_history_page(client, "archived")
     except ApiError as exc:
         st.error(str(exc))
         return
 
-    if not drafts and not published and not archived:
+    visibility_counts = summary.get("visibility_counts") or {}
+    status_counts_by_visibility = summary.get("status_counts_by_visibility") or {}
+    draft_total = int(visibility_counts.get("draft") or 0)
+    published_total = int(visibility_counts.get("public") or 0)
+    archived_total = int(visibility_counts.get("archived") or 0)
+    public_status_counts = status_counts_by_visibility.get("public") or {}
+    processing_total = sum(
+        int(public_status_counts.get(status) or 0)
+        for status in ("pending", "processing")
+    )
+    published_ready_total = max(published_total - processing_total, 0)
+    published_ready_status_counts = {
+        status: count
+        for status, count in public_status_counts.items()
+        if status in {"processed", "error"}
+    }
+
+    if draft_total == 0 and published_total == 0 and archived_total == 0:
         st.info("Вы пока не добавили ни одной новости.")
         return
 
-    render_history_pager("draft", drafts_page, drafts_has_next)
-    render_drafts(client, drafts)
-    render_history_pager("public", published_page, published_has_next)
-    render_published(client, published)
-    render_history_pager("archived", archived_page, archived_has_next)
-    render_archived(client, archived)
+    render_history_section_with_pager(
+        "draft",
+        drafts_page,
+        drafts_has_next,
+        draft_total,
+        lambda: render_drafts(client, drafts, draft_total),
+    )
+    render_history_section_with_pager(
+        "public_processing",
+        processing_page,
+        processing_has_next,
+        processing_total,
+        lambda: render_processing_articles(processing, processing_total),
+    )
+    render_history_section_with_pager(
+        "public_ready",
+        published_page,
+        published_has_next,
+        published_ready_total,
+        lambda: render_published(
+            client,
+            published,
+            published_ready_total,
+            published_ready_status_counts,
+        ),
+    )
+    render_history_section_with_pager(
+        "archived",
+        archived_page,
+        archived_has_next,
+        archived_total,
+        lambda: render_archived(client, archived, archived_total),
+    )
 
 
 HISTORY_PAGE_SIZE = 100
@@ -338,46 +401,69 @@ HISTORY_PAGE_SIZE = 100
 
 def _load_history_page(
     client: ApiClient,
-    visibility: str,
+    page_key: str,
+    *,
+    visibility: str | None = None,
+    statuses: list[str] | None = None,
 ) -> tuple[list[dict], int, bool]:
-    page = int(st.session_state.get(f"my-news-{visibility}-page", 0))
+    resolved_visibility = visibility or page_key
+    page = int(st.session_state.get(f"my-news-{page_key}-page", 0))
     items = client.list_news_history_page(
-        visibility=visibility,
+        visibility=resolved_visibility,
+        statuses=statuses,
         limit=HISTORY_PAGE_SIZE,
         offset=page * HISTORY_PAGE_SIZE,
     )
     return items, page, len(items) == HISTORY_PAGE_SIZE
 
 
-def render_history_pager(visibility: str, page: int, has_next: bool) -> None:
-    previous_col, page_col, next_col = st.columns([1, 2, 1])
-    with previous_col:
-        if st.button(
-            "Назад",
-            key=f"my-news-{visibility}-previous",
-            disabled=page <= 0,
-            width="stretch",
-        ):
-            st.session_state[f"my-news-{visibility}-page"] = max(page - 1, 0)
-            st.rerun()
-    with page_col:
-        st.caption(
-            f"Страница {page + 1}, по {HISTORY_PAGE_SIZE} записей. "
-            "Выбор действует только на текущую страницу."
-        )
-    with next_col:
-        if st.button(
-            "Вперёд",
-            key=f"my-news-{visibility}-next",
-            disabled=not has_next,
-            width="stretch",
-        ):
-            st.session_state[f"my-news-{visibility}-page"] = page + 1
-            st.rerun()
+def render_history_section_with_pager(
+    page_key: str,
+    page: int,
+    has_next: bool,
+    total: int,
+    render_section,
+) -> None:
+    content_col, pager_col = st.columns([20, 1], vertical_alignment="top")
+    with content_col:
+        render_section()
+    with pager_col:
+        render_history_pager(page_key, page, has_next, total)
 
 
-def render_drafts(client: ApiClient, drafts: list[dict]) -> None:
-    st.subheader(f"Черновики · {len(drafts)}")
+def render_history_pager(
+    page_key: str,
+    page: int,
+    has_next: bool,
+    total: int,
+) -> None:
+    if page == 0 and not has_next:
+        return
+    if st.button(
+        "↑",
+        key=f"my-news-{page_key}-previous",
+        disabled=page <= 0,
+        width="stretch",
+        help="Предыдущая страница",
+    ):
+        st.session_state[f"my-news-{page_key}-page"] = max(page - 1, 0)
+        st.rerun()
+    page_count = max((total + HISTORY_PAGE_SIZE - 1) // HISTORY_PAGE_SIZE, 1)
+    st.caption(f"{page + 1}/{page_count}")
+    st.caption(f"{total} всего")
+    if st.button(
+        "↓",
+        key=f"my-news-{page_key}-next",
+        disabled=not has_next,
+        width="stretch",
+        help="Следующая страница",
+    ):
+        st.session_state[f"my-news-{page_key}-page"] = page + 1
+        st.rerun()
+
+
+def render_drafts(client: ApiClient, drafts: list[dict], total: int) -> None:
+    render_history_section_header("Черновики", drafts, total)
     if drafts:
         if st.session_state.pop("reset-my-news-drafts-select-all", False):
             st.session_state["my-news-drafts-select-all"] = False
@@ -468,8 +554,63 @@ def render_drafts(client: ApiClient, drafts: list[dict]) -> None:
         st.caption("Черновиков нет.")
 
 
-def render_published(client: ApiClient, published: list[dict]) -> None:
-    st.subheader(f"Опубликованные · {len(published)}")
+def render_processing_articles(processing: list[dict], total: int) -> None:
+    render_history_section_header("В обработке", processing, total)
+    if not processing:
+        st.caption("Новостей в обработке нет.")
+        return
+
+    processing_rows = [
+        {
+            "Заголовок": item.get("title"),
+            "Дата публикации": format_search_date(item.get("published_at")),
+            "Этап": PROCESSING_STAGE_LABELS.get(
+                item.get("processing_stage"),
+                STATUS_LABELS.get(item.get("status"), item.get("status")),
+            ),
+            "Статус": STATUS_LABELS.get(item.get("status"), item.get("status")),
+            "Источник": item.get("url") or "",
+        }
+        for item in processing
+    ]
+    st.dataframe(
+        pd.DataFrame(processing_rows),
+        hide_index=True,
+        width=NEWS_TABLE_WIDTH,
+        column_config={
+            "Заголовок": st.column_config.TextColumn(
+                "Заголовок",
+                width=PUBLISHED_TITLE_COLUMN_WIDTH,
+            ),
+            "Дата публикации": st.column_config.TextColumn(
+                "Дата публикации",
+                width=DATE_COLUMN_WIDTH,
+            ),
+            "Этап": st.column_config.TextColumn(
+                "Этап",
+                width=PUBLISHED_STATUS_COLUMN_WIDTH,
+            ),
+            "Статус": st.column_config.TextColumn(
+                "Статус",
+                width=PUBLISHED_STATUS_COLUMN_WIDTH,
+            ),
+            "Источник": st.column_config.LinkColumn(
+                "Источник",
+                display_text="Открыть",
+                width=SOURCE_COLUMN_WIDTH,
+            ),
+        },
+    )
+
+
+def render_published(
+    client: ApiClient,
+    published: list[dict],
+    total: int,
+    status_counts: dict,
+) -> None:
+    render_history_section_header("Опубликованные", published, total)
+    render_published_status_summary(status_counts)
     if published:
         if st.session_state.pop("reset-my-news-published-select-all", False):
             st.session_state["my-news-published-select-all"] = False
@@ -658,8 +799,8 @@ def render_published(client: ApiClient, published: list[dict]) -> None:
         st.caption("Опубликованных новостей пока нет.")
 
 
-def render_archived(client: ApiClient, archived: list[dict]) -> None:
-    st.subheader(f"Архивные · {len(archived)}")
+def render_archived(client: ApiClient, archived: list[dict], total: int) -> None:
+    render_history_section_header("Архивные", archived, total)
     if archived:
         if st.session_state.pop("reset-my-news-archived-select-all", False):
             st.session_state["my-news-archived-select-all"] = False
@@ -731,3 +872,21 @@ def render_archived(client: ApiClient, archived: list[dict]) -> None:
                 st.error(str(exc))
     else:
         st.caption("Архивных новостей нет.")
+
+
+def render_history_section_header(title: str, items: list[dict], total: int) -> None:
+    st.subheader(f"{title} · {total} всего")
+    if total:
+        st.caption(f"Показано на странице: {len(items)}.")
+
+
+def render_published_status_summary(status_counts: dict) -> None:
+    if not status_counts:
+        return
+    parts = []
+    for status, label in STATUS_LABELS.items():
+        count = int(status_counts.get(status) or 0)
+        if count:
+            parts.append(f"{label}: {count}")
+    if parts:
+        st.caption(" · ".join(parts))

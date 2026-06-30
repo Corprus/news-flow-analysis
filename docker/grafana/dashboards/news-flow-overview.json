@@ -567,7 +567,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 13
       },
@@ -598,14 +598,97 @@
           "expr": "sum(rabbitmq_queue_messages_unacked) or vector(0)",
           "legendFormat": "in progress",
           "refId": "B"
+        }
+      ],
+      "title": "RabbitMQ messages",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
         },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 13
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
         {
           "expr": "sum by (status, mode) (news_flow_pipeline_queue_articles{status=~\"queued|processing\"})",
           "legendFormat": "{{status}} news {{mode}}",
-          "refId": "C"
+          "refId": "A"
         }
       ],
-      "title": "RabbitMQ queue",
+      "title": "Pipeline news in jobs",
       "type": "timeseries"
     },
     {
@@ -665,8 +748,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 16,
         "y": 13
       },
       "id": 8,
@@ -851,11 +934,11 @@
         },
         {
           "expr": "max by (status) (news_flow_import_latest_progress_percent)",
-          "legendFormat": "latest progress {{status}}",
+          "legendFormat": "latest progress {{status}}, %",
           "refId": "C"
         }
       ],
-      "title": "Import jobs",
+      "title": "Import jobs and latest progress",
       "type": "timeseries"
     },
     {
