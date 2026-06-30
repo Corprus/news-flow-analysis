@@ -45,6 +45,23 @@ class IncrementalPipelineConfig:
     text_column: str = "text"
     text_embedding_column: str = "model_text"
 
+    @classmethod
+    def from_final_config(
+        cls,
+        final_config: FinalPipelineConfig,
+    ) -> IncrementalPipelineConfig:
+        base = final_config.base_clustering
+        attach = final_config.attach_clustering
+        return cls(
+            baseline_similarity=base.story_threshold,
+            baseline_window_days=base.story_window_days,
+            attach_similarity=attach.min_similarity,
+            attach_window_days=attach.max_days,
+            min_margin=attach.min_margin,
+            title_jaccard_threshold=attach.title_jaccard_threshold,
+            min_shared_numbers=attach.min_shared_numbers,
+        )
+
 
 IncrementalPipelineResult = PipelineResult
 ProgressCallback = Callable[[str, dict[str, Any]], None]

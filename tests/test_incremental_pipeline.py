@@ -13,7 +13,12 @@ except ModuleNotFoundError:
     catboost_stub.CatBoostClassifier = type("CatBoostClassifier", (), {})
     sys.modules["catboost"] = catboost_stub
 
-from final_pipeline import IncrementalNewsNoveltyPipeline
+from final_pipeline import (
+    FinalPipelineConfig,
+    IncrementalNewsNoveltyPipeline,
+    IncrementalPipelineConfig,
+)
+from model.attach_clustering import AttachClusteringConfig, BaselineClusteringConfig
 
 
 class _UnusedEncoder:
@@ -77,6 +82,32 @@ def _pipeline() -> tuple[IncrementalNewsNoveltyPipeline, _RecordingNoveltyModel]
         novelty_model=novelty_model,
     )
     return pipeline, novelty_model
+
+
+def test_incremental_config_can_be_built_from_final_clustering_config() -> None:
+    final_config = FinalPipelineConfig(
+        base_clustering=BaselineClusteringConfig(
+            story_threshold=0.8,
+            story_window_days=10,
+        ),
+        attach_clustering=AttachClusteringConfig(
+            min_similarity=0.74,
+            max_days=9,
+            min_margin=0.04,
+            title_jaccard_threshold=0.12,
+            min_shared_numbers=2,
+        ),
+    )
+
+    incremental_config = IncrementalPipelineConfig.from_final_config(final_config)
+
+    assert incremental_config.baseline_similarity == 0.8
+    assert incremental_config.baseline_window_days == 10
+    assert incremental_config.attach_similarity == 0.74
+    assert incremental_config.attach_window_days == 9
+    assert incremental_config.min_margin == 0.04
+    assert incremental_config.title_jaccard_threshold == 0.12
+    assert incremental_config.min_shared_numbers == 2
 
 
 def test_assigns_new_article_to_existing_cluster_by_baseline_similarity() -> None:

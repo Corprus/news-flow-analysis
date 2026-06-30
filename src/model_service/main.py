@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import Future
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from time import monotonic
@@ -12,7 +13,12 @@ from fastapi import FastAPI, HTTPException, Request, status
 from prometheus_client import REGISTRY, make_asgi_app
 
 from db.news_pipeline_jobs import NewsPipelineJobRepository
-from final_pipeline import FinalPipelineConfig, IncrementalNewsNoveltyPipeline, load_pipeline
+from final_pipeline import (
+    FinalPipelineConfig,
+    IncrementalNewsNoveltyPipeline,
+    IncrementalPipelineConfig,
+    load_pipeline,
+)
 from messaging.rabbitmq import RabbitConsumer, RabbitPublisher
 from model.significance_model import CatBoostSignificanceModel
 from model_service.gpu_metrics import NvidiaGpuCollector
@@ -36,7 +42,7 @@ from news.pipeline_jobs import (
     PIPELINE_MODE_VECTORIZE,
 )
 from news.pipeline_repository import NewsPipelineRepository
-from settings import get_settings
+from settings import Settings, get_settings
 
 
 async def handle_message(app: FastAPI, message: dict[str, Any]) -> None:
@@ -662,6 +668,47 @@ def _parent_result_payload(
     }
 
 
+def _apply_pipeline_config_overrides(
+    config: FinalPipelineConfig,
+    settings: Settings,
+) -> FinalPipelineConfig:
+    base_updates = {}
+    attach_updates = {}
+
+    if settings.pipeline_base_story_threshold is not None:
+        base_updates["story_threshold"] = settings.pipeline_base_story_threshold
+    if settings.pipeline_base_story_window_days is not None:
+        base_updates["story_window_days"] = settings.pipeline_base_story_window_days
+    if settings.pipeline_attach_min_similarity is not None:
+        attach_updates["min_similarity"] = settings.pipeline_attach_min_similarity
+    if settings.pipeline_attach_max_days is not None:
+        attach_updates["max_days"] = settings.pipeline_attach_max_days
+    if settings.pipeline_attach_min_margin is not None:
+        attach_updates["min_margin"] = settings.pipeline_attach_min_margin
+    if settings.pipeline_attach_source_max_cluster_size is not None:
+        attach_updates["source_max_cluster_size"] = (
+            settings.pipeline_attach_source_max_cluster_size
+        )
+    if settings.pipeline_attach_title_jaccard_threshold is not None:
+        attach_updates["title_jaccard_threshold"] = (
+            settings.pipeline_attach_title_jaccard_threshold
+        )
+    if settings.pipeline_attach_min_shared_numbers is not None:
+        attach_updates["min_shared_numbers"] = settings.pipeline_attach_min_shared_numbers
+    if settings.pipeline_attach_require_evidence is not None:
+        attach_updates["require_evidence"] = settings.pipeline_attach_require_evidence
+
+    if not base_updates and not attach_updates:
+        return config
+
+    return replace(
+        config,
+        base_clustering=replace(config.base_clustering, **base_updates),
+        attach_clustering=replace(config.attach_clustering, **attach_updates),
+        config_version=f"{config.config_version}+runtime-overrides",
+    )
+
+
 async def _handle_search_job(app: FastAPI, message: dict[str, Any]) -> None:
     job_id = str(message["job_id"])
     payload = message["payload"]
@@ -713,6 +760,7 @@ async def lifespan(app: FastAPI):
         else settings.news_aggregation_queue
     )
     config = FinalPipelineConfig.from_json(Path(settings.pipeline_config_path))
+    config = _apply_pipeline_config_overrides(config, settings)
     full_pipeline = None
     if worker_role in {"all", "vectorizer"}:
         full_pipeline = await asyncio.to_thread(
@@ -733,6 +781,7 @@ async def lifespan(app: FastAPI):
     incremental_pipeline = IncrementalNewsNoveltyPipeline(
         encoder=encoder,
         novelty_model=novelty_model,
+        config=IncrementalPipelineConfig.from_final_config(config),
         final_config=config,
     )
 

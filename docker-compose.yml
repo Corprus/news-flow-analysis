@@ -1,3 +1,14 @@
+x-model-service-clustering-env: &model-service-clustering-env
+  PIPELINE_BASE_STORY_THRESHOLD: ${PIPELINE_BASE_STORY_THRESHOLD:-0.82}
+  PIPELINE_BASE_STORY_WINDOW_DAYS: ${PIPELINE_BASE_STORY_WINDOW_DAYS:-14}
+  PIPELINE_ATTACH_MIN_SIMILARITY: ${PIPELINE_ATTACH_MIN_SIMILARITY:-0.75}
+  PIPELINE_ATTACH_MAX_DAYS: ${PIPELINE_ATTACH_MAX_DAYS:-7}
+  PIPELINE_ATTACH_MIN_MARGIN: ${PIPELINE_ATTACH_MIN_MARGIN:-0.03}
+  PIPELINE_ATTACH_SOURCE_MAX_CLUSTER_SIZE: ${PIPELINE_ATTACH_SOURCE_MAX_CLUSTER_SIZE:-2}
+  PIPELINE_ATTACH_TITLE_JACCARD_THRESHOLD: ${PIPELINE_ATTACH_TITLE_JACCARD_THRESHOLD:-0.15}
+  PIPELINE_ATTACH_MIN_SHARED_NUMBERS: ${PIPELINE_ATTACH_MIN_SHARED_NUMBERS:-1}
+  PIPELINE_ATTACH_REQUIRE_EVIDENCE: ${PIPELINE_ATTACH_REQUIRE_EVIDENCE:-true}
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -139,6 +150,7 @@ services:
       args:
         PYTORCH_IMAGE: ${PYTORCH_IMAGE:-mirror.gcr.io/pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime}
     environment:
+      <<: *model-service-clustering-env
       APP_ENV: ${APP_ENV:-local}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -194,6 +206,7 @@ services:
       context: .
       dockerfile: docker/model-service.vectorizer-cpu.Dockerfile
     environment:
+      <<: *model-service-clustering-env
       APP_ENV: ${APP_ENV:-local}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -246,6 +259,7 @@ services:
       context: .
       dockerfile: docker/model-service.processor.Dockerfile
     environment:
+      <<: *model-service-clustering-env
       APP_ENV: ${APP_ENV:-local}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432

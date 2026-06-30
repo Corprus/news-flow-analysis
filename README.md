@@ -126,6 +126,9 @@ PIPELINE_HISTORY_EXPAND_CLUSTERS=true
 PIPELINE_HISTORY_CLUSTER_EXPANSION_MAX_ROWS=20000
 ```
 
+Настройки силы кластеризации (`PIPELINE_BASE_*` и `PIPELINE_ATTACH_*`) находятся
+в `.env.example` и описаны в [развёртывании](docs/deployment.md#настройка-силы-кластеризации).
+
 Запуск:
 
 ```console

@@ -56,3 +56,29 @@ def test_settings_accepts_pipeline_runtime_overrides() -> None:
     assert settings.pipeline_model_path == "/app/model.joblib"
     assert settings.pipeline_config_path == "/app/config.json"
     assert settings.pipeline_device == "cuda"
+
+
+def test_settings_accepts_clustering_runtime_overrides() -> None:
+    settings = Settings(
+        POSTGRES_PASSWORD="secret",
+        RABBITMQ_PASSWORD="secret",
+        PIPELINE_BASE_STORY_THRESHOLD=0.8,
+        PIPELINE_BASE_STORY_WINDOW_DAYS=10,
+        PIPELINE_ATTACH_MIN_SIMILARITY=0.74,
+        PIPELINE_ATTACH_MAX_DAYS=9,
+        PIPELINE_ATTACH_MIN_MARGIN=0.04,
+        PIPELINE_ATTACH_SOURCE_MAX_CLUSTER_SIZE=3,
+        PIPELINE_ATTACH_TITLE_JACCARD_THRESHOLD=0.12,
+        PIPELINE_ATTACH_MIN_SHARED_NUMBERS=2,
+        PIPELINE_ATTACH_REQUIRE_EVIDENCE=False,
+    )
+
+    assert settings.pipeline_base_story_threshold == 0.8
+    assert settings.pipeline_base_story_window_days == 10
+    assert settings.pipeline_attach_min_similarity == 0.74
+    assert settings.pipeline_attach_max_days == 9
+    assert settings.pipeline_attach_min_margin == 0.04
+    assert settings.pipeline_attach_source_max_cluster_size == 3
+    assert settings.pipeline_attach_title_jaccard_threshold == 0.12
+    assert settings.pipeline_attach_min_shared_numbers == 2
+    assert settings.pipeline_attach_require_evidence is False

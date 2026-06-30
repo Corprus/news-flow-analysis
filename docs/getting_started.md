@@ -32,6 +32,10 @@ PIPELINE_HISTORY_EXPAND_CLUSTERS=true
 PIPELINE_HISTORY_CLUSTER_EXPANSION_MAX_ROWS=20000
 ```
 
+Параметры силы кластеризации (`PIPELINE_BASE_*` и `PIPELINE_ATTACH_*`) уже
+заданы в `.env.example`. Их смысл и направление изменения описаны в разделе
+[настройки кластеризации](deployment.md#настройка-силы-кластеризации).
+
 Если BGE-M3 уже загружена на хост, укажите в `MODEL_SERVICE_HF_CACHE`
 абсолютный путь к существующему кешу в формате вашей операционной системы.
 По умолчанию используется именованный Docker volume `model_cache`.

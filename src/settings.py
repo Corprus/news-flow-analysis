@@ -88,6 +88,54 @@ class Settings(BaseSettings):
         ge=0,
         alias="PIPELINE_HISTORY_CLUSTER_EXPANSION_MAX_ROWS",
     )
+    pipeline_base_story_threshold: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        alias="PIPELINE_BASE_STORY_THRESHOLD",
+    )
+    pipeline_base_story_window_days: int | None = Field(
+        default=None,
+        ge=0,
+        alias="PIPELINE_BASE_STORY_WINDOW_DAYS",
+    )
+    pipeline_attach_min_similarity: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        alias="PIPELINE_ATTACH_MIN_SIMILARITY",
+    )
+    pipeline_attach_max_days: int | None = Field(
+        default=None,
+        ge=0,
+        alias="PIPELINE_ATTACH_MAX_DAYS",
+    )
+    pipeline_attach_min_margin: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        alias="PIPELINE_ATTACH_MIN_MARGIN",
+    )
+    pipeline_attach_source_max_cluster_size: int | None = Field(
+        default=None,
+        ge=1,
+        alias="PIPELINE_ATTACH_SOURCE_MAX_CLUSTER_SIZE",
+    )
+    pipeline_attach_title_jaccard_threshold: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        alias="PIPELINE_ATTACH_TITLE_JACCARD_THRESHOLD",
+    )
+    pipeline_attach_min_shared_numbers: int | None = Field(
+        default=None,
+        ge=0,
+        alias="PIPELINE_ATTACH_MIN_SHARED_NUMBERS",
+    )
+    pipeline_attach_require_evidence: bool | None = Field(
+        default=None,
+        alias="PIPELINE_ATTACH_REQUIRE_EVIDENCE",
+    )
     model_service_role: str = Field(default="all", alias="MODEL_SERVICE_ROLE")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
