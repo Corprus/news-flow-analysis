@@ -4,7 +4,12 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import aio_pika
-from aio_pika.abc import AbstractIncomingMessage, AbstractRobustConnection
+from aio_pika.abc import (
+    AbstractIncomingMessage,
+    AbstractQueue,
+    AbstractRobustChannel,
+    AbstractRobustConnection,
+)
 
 MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -55,13 +60,26 @@ class RabbitConsumer:
         self._queue_name = queue_name
         self._handler = handler
         self._connection: AbstractRobustConnection | None = None
+        self._channel: AbstractRobustChannel | None = None
+        self._queue: AbstractQueue | None = None
+        self._consumer_tag: str | None = None
 
     async def start(self) -> None:
         self._connection = await _connect_with_retry(self._url)
-        channel = await self._connection.channel()
-        await channel.set_qos(prefetch_count=1)
-        queue = await channel.declare_queue(self._queue_name, durable=True)
-        await queue.consume(self._process_message)
+        self._channel = await self._connection.channel()
+        await self._channel.set_qos(prefetch_count=1)
+        self._queue = await self._channel.declare_queue(self._queue_name, durable=True)
+        self._consumer_tag = await self._queue.consume(self._process_message)
+
+    @property
+    def is_connected(self) -> bool:
+        return (
+            self._connection is not None
+            and not self._connection.is_closed
+            and self._channel is not None
+            and not self._channel.is_closed
+            and self._consumer_tag is not None
+        )
 
     async def _process_message(self, message: AbstractIncomingMessage) -> None:
         async with message.process(requeue=True):
@@ -69,6 +87,13 @@ class RabbitConsumer:
             await self._handler(payload)
 
     async def close(self) -> None:
+        if self._queue is not None and self._consumer_tag is not None:
+            await self._queue.cancel(self._consumer_tag)
+            self._consumer_tag = None
+        if self._channel is not None:
+            await self._channel.close()
+            self._channel = None
+            self._queue = None
         if self._connection is not None:
             await self._connection.close()
             self._connection = None

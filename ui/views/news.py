@@ -258,27 +258,12 @@ def render_my_news(client: ApiClient, *, show_header: bool = True) -> None:
     if notice:
         st.toast(notice, icon="✅")
 
-    try:
-        news = client.list_news_history()
-    except ApiError as exc:
-        st.error(str(exc))
-        return
-    if any(item.get("status") in {"pending", "processing"} for item in news):
-        render_processing_my_news(client)
-        return
-    render_my_news_content(client, news)
+    render_processing_my_news(client)
 
 
 @st.fragment(run_every=2)
 def render_processing_my_news(client: ApiClient) -> None:
-    try:
-        news = client.list_news_history()
-    except ApiError as exc:
-        st.error(str(exc))
-        return
-    render_my_news_content(client, news)
-    if not any(item.get("status") in {"pending", "processing"} for item in news):
-        st.rerun()
+    render_my_news_content(client)
 
 
 @st.dialog("Безвозвратно удалить черновики?")
@@ -327,18 +312,68 @@ MANUAL_LABEL_VALUES = {
 }
 
 
-def render_my_news_content(client: ApiClient, news: list[dict]) -> None:
-    if not news:
+def render_my_news_content(client: ApiClient) -> None:
+    try:
+        drafts, drafts_page, drafts_has_next = _load_history_page(client, "draft")
+        published, published_page, published_has_next = _load_history_page(client, "public")
+        archived, archived_page, archived_has_next = _load_history_page(client, "archived")
+    except ApiError as exc:
+        st.error(str(exc))
+        return
+
+    if not drafts and not published and not archived:
         st.info("Вы пока не добавили ни одной новости.")
         return
 
-    drafts = [item for item in news if item.get("visibility") == "draft"]
-    published = [item for item in news if item.get("visibility") == "public"]
-    archived = [item for item in news if item.get("visibility") == "archived"]
-
+    render_history_pager("draft", drafts_page, drafts_has_next)
     render_drafts(client, drafts)
+    render_history_pager("public", published_page, published_has_next)
     render_published(client, published)
+    render_history_pager("archived", archived_page, archived_has_next)
     render_archived(client, archived)
+
+
+HISTORY_PAGE_SIZE = 100
+
+
+def _load_history_page(
+    client: ApiClient,
+    visibility: str,
+) -> tuple[list[dict], int, bool]:
+    page = int(st.session_state.get(f"my-news-{visibility}-page", 0))
+    items = client.list_news_history_page(
+        visibility=visibility,
+        limit=HISTORY_PAGE_SIZE,
+        offset=page * HISTORY_PAGE_SIZE,
+    )
+    return items, page, len(items) == HISTORY_PAGE_SIZE
+
+
+def render_history_pager(visibility: str, page: int, has_next: bool) -> None:
+    previous_col, page_col, next_col = st.columns([1, 2, 1])
+    with previous_col:
+        if st.button(
+            "Назад",
+            key=f"my-news-{visibility}-previous",
+            disabled=page <= 0,
+            width="stretch",
+        ):
+            st.session_state[f"my-news-{visibility}-page"] = max(page - 1, 0)
+            st.rerun()
+    with page_col:
+        st.caption(
+            f"Страница {page + 1}, по {HISTORY_PAGE_SIZE} записей. "
+            "Выбор действует только на текущую страницу."
+        )
+    with next_col:
+        if st.button(
+            "Вперёд",
+            key=f"my-news-{visibility}-next",
+            disabled=not has_next,
+            width="stretch",
+        ):
+            st.session_state[f"my-news-{visibility}-page"] = page + 1
+            st.rerun()
 
 
 def render_drafts(client: ApiClient, drafts: list[dict]) -> None:

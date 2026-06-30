@@ -5,18 +5,21 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated, Any, Literal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import HTTPException
 from fastapi.middleware.gzip import GZipMiddleware
+from prometheus_client import make_asgi_app
 from pydantic import BaseModel, ConfigDict, Field
 
 from accounting.routes import router as accounting_router
 from api.demo import DemoSeedResult, seed_demo, validate_demo_settings
+from api.metrics import register_api_database_metrics
 from db.database import create_tables, drop_tables, get_session, init_db
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
+from news.pipeline_jobs import enqueue_pipeline_job
 from news.routes import router as news_router
 from news.routes import search_router as news_search_router
 from settings import Settings, get_settings
@@ -29,6 +32,16 @@ STARTUP_RETRY_ATTEMPTS = 12
 STARTUP_RETRY_DELAY_SECONDS = 5
 
 logger = logging.getLogger(__name__)
+
+
+class ApiGZipMiddleware(GZipMiddleware):
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") == "http" and str(scope.get("path", "")).startswith(
+            "/metrics"
+        ):
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
 
 
 class NewsVectorizationRequest(BaseModel):
@@ -64,6 +77,7 @@ def get_repository(request: Request) -> NewsPipelineJobRepository:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    register_api_database_metrics(settings.database_url)
     validate_demo_settings(settings)
     init_db(settings)
     if settings.demo_mode:
@@ -111,7 +125,7 @@ async def _run_startup_step_with_retries(
 
 
 app = FastAPI(title="Semantic News Novelty API", version="0.1.0", lifespan=lifespan)
-app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.add_middleware(ApiGZipMiddleware, minimum_size=1024)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(organization_router)
@@ -119,6 +133,7 @@ app.include_router(admin_router)
 app.include_router(accounting_router)
 app.include_router(news_router)
 app.include_router(news_search_router)
+app.mount("/metrics", make_asgi_app())
 
 
 @app.get("/health")
@@ -135,18 +150,16 @@ async def create_news_vectorization_job(
     request: NewsVectorizationRequest,
     publisher: Annotated[RabbitPublisher, Depends(get_publisher)],
     repository: Annotated[NewsPipelineJobRepository, Depends(get_repository)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> NewsVectorizationJobResponse:
-    job_id = str(uuid4())
     payload = request.model_dump(mode="json")
-    await repository.mark_queued(job_id, payload)
-    await publisher.publish(
-        {
-            "job_id": job_id,
-            "type": "news_pipeline",
-            "payload": payload,
-        }
+    job_id = await enqueue_pipeline_job(
+        repository=repository,
+        publisher=publisher,
+        payload=payload,
+        chunk_size=settings.pipeline_chunk_size,
     )
-    return NewsVectorizationJobResponse(job_id=UUID(job_id), status="queued")
+    return NewsVectorizationJobResponse(job_id=job_id, status="queued")
 
 
 async def enqueue_demo_pipeline_jobs(
@@ -157,19 +170,15 @@ async def enqueue_demo_pipeline_jobs(
     for batch in demo.pipeline_batches:
         if not batch.article_ids_to_process:
             continue
-        job_id = str(uuid4())
         payload = {
             "news_ids": batch.article_ids_to_process,
             "organization_id": str(batch.organization_id),
             "mode": "incremental",
         }
-        await repository.mark_queued(job_id, payload)
-        await publisher.publish(
-            {
-                "job_id": job_id,
-                "type": "news_pipeline",
-                "payload": payload,
-            }
+        await enqueue_pipeline_job(
+            repository=repository,
+            publisher=publisher,
+            payload=payload,
         )
 
 

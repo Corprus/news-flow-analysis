@@ -5,6 +5,16 @@ PIPELINE_ARTICLES_PROCESSED = Counter(
     "Number of news articles successfully processed by the pipeline.",
     ("mode",),
 )
+PIPELINE_CHUNK_ARTICLES = Counter(
+    "news_flow_pipeline_chunk_articles_total",
+    "Number of articles embedded by vectorization chunks.",
+    ("status",),
+)
+PIPELINE_CHUNKS = Counter(
+    "news_flow_pipeline_chunks_total",
+    "Number of completed vectorization chunks.",
+    ("status",),
+)
 PIPELINE_JOBS = Counter(
     "news_flow_pipeline_jobs_total",
     "Number of completed pipeline jobs.",

@@ -6,3 +6,4 @@ pydantic-settings==2.14.2
 aio-pika==9.6.2
 SQLAlchemy==2.0.51
 psycopg[binary]==3.3.4
+prometheus-client==0.22.1

@@ -17,6 +17,7 @@ from news.models import (
     NewsArticle,
     NewsClusterSummary,
 )
+from news.pipeline_jobs import chunk_news_ids
 from news.pipeline_repository import NewsPipelineRepository
 from news.routes import (
     AddNewsRequest,
@@ -100,6 +101,12 @@ def test_pipeline_job_accepts_50k_article_ids() -> None:
     )
 
     assert len(request.news_ids) == 50_000
+
+
+def test_large_incremental_pipeline_job_is_split_into_chunks() -> None:
+    chunks = chunk_news_ids(["news-1", "news-2", "news-3", "news-4", "news-5"], 2)
+
+    assert chunks == [["news-1", "news-2"], ["news-3", "news-4"], ["news-5"]]
 
 
 def test_pipeline_job_rejects_more_than_50k_article_ids() -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterable
 from datetime import datetime
+from time import monotonic
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
@@ -23,6 +24,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from accounting.exceptions import InsufficientBalanceError, UserAccountNotFoundError
 from accounting.models import TransactionReason
 from accounting.service import AccountingService
+from api.metrics import (
+    IMPORT_JOB_DURATION,
+    IMPORT_JOBS,
+    IMPORT_JOBS_IN_PROGRESS,
+    IMPORT_ROWS,
+)
 from db.database import get_session
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
@@ -40,6 +47,7 @@ from news.models import (
     NewsSearchQuery,
     SearchQueryStatus,
 )
+from news.pipeline_jobs import DEFAULT_PIPELINE_CHUNK_SIZE, enqueue_pipeline_job
 from news.search_results import group_search_items
 from news.service import NewsSearchFilters, NewsService
 from settings import Settings, get_settings
@@ -280,26 +288,23 @@ def get_job_repository(request: Request) -> NewsPipelineJobRepository:
     return request.app.state.repository
 
 
+def _pipeline_chunk_size(settings: Settings) -> int:
+    return int(getattr(settings, "pipeline_chunk_size", DEFAULT_PIPELINE_CHUNK_SIZE))
+
+
 async def enqueue_vectorization_job(
     *,
     repository: NewsPipelineJobRepository,
     publisher: RabbitPublisher,
     payload: dict,
+    chunk_size: int = MAX_BATCH_ARTICLES,
 ) -> UUID:
-    job_id = uuid4()
-    await repository.mark_queued(str(job_id), payload)
-    await publisher.publish(
-        {
-            "job_id": str(job_id),
-            "type": (
-                "news_search"
-                if payload.get("target_type") == "news_search_query"
-                else "news_pipeline"
-            ),
-            "payload": payload,
-        }
+    return await enqueue_pipeline_job(
+        repository=repository,
+        publisher=publisher,
+        payload=payload,
+        chunk_size=chunk_size,
     )
-    return job_id
 
 
 @router.post("", response_model=NewsArticleResponse, status_code=status.HTTP_201_CREATED)
@@ -351,6 +356,7 @@ async def add_news(
         repository=repository,
         publisher=publisher,
         articles=published,
+        chunk_size=_pipeline_chunk_size(settings),
     )
     return NewsArticleResponse(
         article_id=UUID(article.id),
@@ -437,6 +443,7 @@ async def import_news(
         repository=repository,
         publisher=publisher,
         articles=published,
+        chunk_size=_pipeline_chunk_size(settings),
     )
     return NewsImportResponse(
         format=import_format,
@@ -588,6 +595,7 @@ async def publish_news_batch(
         repository=repository,
         publisher=publisher,
         articles=articles,
+        chunk_size=_pipeline_chunk_size(settings),
     )
     assert job_id is not None
     return PublishNewsBatchResponse(
@@ -730,6 +738,7 @@ async def reprocess_news(
         repository=repository,
         publisher=publisher,
         articles=articles,
+        chunk_size=_pipeline_chunk_size(settings),
     )
     assert job_id is not None
     return ReprocessNewsResponse(
@@ -794,6 +803,7 @@ async def publish_news(
         repository=repository,
         publisher=publisher,
         payload=_article_vectorization_payload(article),
+        chunk_size=_pipeline_chunk_size(settings),
     )
     return NewsArticlePublishResponse(
         article_id=article_id,
@@ -807,10 +817,16 @@ async def publish_news(
 def get_my_news_history(
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],
-    limit: Annotated[int, Query(ge=1, le=10_000)] = 50,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    visibility: ArticleVisibility | None = None,
 ) -> list[NewsArticleHistoryItem]:
-    articles = news.list_user_articles(current_user.id, limit, offset)
+    articles = news.list_user_articles(
+        current_user.id,
+        limit,
+        offset,
+        visibility=visibility,
+    )
     return [_article_history_item(article) for article in articles]
 
 
@@ -1029,6 +1045,7 @@ async def _enqueue_articles_if_any(
     repository: NewsPipelineJobRepository,
     publisher: RabbitPublisher,
     articles: list[NewsArticle],
+    chunk_size: int,
 ) -> UUID | None:
     if not articles:
         return None
@@ -1036,6 +1053,7 @@ async def _enqueue_articles_if_any(
         repository=repository,
         publisher=publisher,
         payload=_articles_vectorization_payload(articles),
+        chunk_size=chunk_size,
     )
 
 
@@ -1059,6 +1077,9 @@ async def _run_news_import_job(
     publisher: RabbitPublisher,
     repository: NewsPipelineJobRepository,
 ) -> None:
+    started_at = monotonic()
+    metric_status = "failed"
+    IMPORT_JOBS_IN_PROGRESS.inc()
     await repository.mark_processing(import_job_id, payload)
     try:
         await repository.update_result(
@@ -1115,6 +1136,7 @@ async def _run_news_import_job(
                     "organization_id": str(current_user.organization_id),
                     "mode": "incremental",
                 },
+                chunk_size=_pipeline_chunk_size(settings),
             )
         await repository.mark_done(
             import_job_id,
@@ -1125,8 +1147,17 @@ async def _run_news_import_job(
                 "file_name": payload.get("file_name"),
             },
         )
+        IMPORT_ROWS.labels(kind="total").inc(result.total_rows)
+        IMPORT_ROWS.labels(kind="created").inc(result.created_count)
+        IMPORT_ROWS.labels(kind="duplicate").inc(result.duplicate_count)
+        IMPORT_ROWS.labels(kind="published").inc(result.published_count)
+        metric_status = "done"
     except Exception as exc:
         await repository.mark_failed(import_job_id, str(exc))
+    finally:
+        IMPORT_JOBS.labels(status=metric_status).inc()
+        IMPORT_JOB_DURATION.labels(status=metric_status).observe(monotonic() - started_at)
+        IMPORT_JOBS_IN_PROGRESS.dec()
 
 
 def _news_import_result_payload(result: NewsImportResponse) -> dict:

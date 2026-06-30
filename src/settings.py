@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     demo_admin_login: str = Field(default="admin", alias="DEMO_ADMIN_LOGIN")
     demo_admin_password: str = Field(default="admin12345", alias="DEMO_ADMIN_PASSWORD")
     demo_initial_credit: Decimal = Field(
-        default=Decimal("100.00"),
+        default=Decimal("100000.00"),
         ge=0,
         alias="DEMO_INITIAL_CREDIT",
     )
@@ -60,6 +60,11 @@ class Settings(BaseSettings):
         alias="PIPELINE_CONFIG_PATH",
     )
     pipeline_device: str | None = Field(default=None, alias="PIPELINE_DEVICE")
+    pipeline_chunk_size: int = Field(
+        default=2_000,
+        ge=1,
+        alias="PIPELINE_CHUNK_SIZE",
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

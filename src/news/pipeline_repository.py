@@ -194,6 +194,73 @@ class NewsPipelineRepository:
                 ),
             )
 
+    async def save_embeddings(
+        self,
+        *,
+        article_ids: list[str],
+        embeddings: np.ndarray,
+        model_name: str,
+        model_revision: str,
+    ) -> None:
+        if len(article_ids) != len(embeddings):
+            raise ValueError(
+                "article_ids and embeddings must have the same length: "
+                f"{len(article_ids)} != {len(embeddings)}"
+            )
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            for article_id, embedding in zip(article_ids, embeddings, strict=True):
+                await connection.execute(
+                    """
+                    INSERT INTO article_pipeline_embeddings (
+                        id, article_id, model_name, model_revision, embedding, created_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s::vector, now())
+                    ON CONFLICT (article_id, model_name, model_revision) DO UPDATE
+                    SET embedding = EXCLUDED.embedding, created_at = now()
+                    """,
+                    (
+                        str(uuid4()),
+                        article_id,
+                        model_name,
+                        model_revision,
+                        _vector_literal(embedding),
+                    ),
+                )
+
+    async def load_embeddings(
+        self,
+        *,
+        article_ids: list[str],
+        model_name: str,
+        model_revision: str,
+    ) -> np.ndarray:
+        if not article_ids:
+            return np.empty((0, 1024), dtype=np.float32)
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    SELECT article_id::text, embedding::text
+                    FROM article_pipeline_embeddings
+                    WHERE article_id = ANY(%s::uuid[])
+                      AND model_name = %s
+                      AND model_revision = %s
+                    """,
+                    (article_ids, model_name, model_revision),
+                )
+                rows = await cursor.fetchall()
+        embeddings_by_id = {
+            str(article_id): json.loads(embedding)
+            for article_id, embedding in rows
+        }
+        missing = [article_id for article_id in article_ids if article_id not in embeddings_by_id]
+        if missing:
+            raise ValueError(f"Missing embeddings for requested news: {missing[:10]}")
+        return np.asarray(
+            [embeddings_by_id[article_id] for article_id in article_ids],
+            dtype=np.float32,
+        )
+
     async def save_result(self, result: PipelineResult) -> None:
         prediction_by_id = (
             result.predictions.assign(news_id=result.predictions["news_id"].astype(str))
@@ -227,26 +294,14 @@ class NewsPipelineRepository:
             embedding_by_id=embedding_by_id,
         )
 
-        async with await AsyncConnection.connect(self._database_url) as connection:
-            for news_id, embedding in embedding_by_id.items():
-                await connection.execute(
-                    """
-                    INSERT INTO article_pipeline_embeddings (
-                        id, article_id, model_name, model_revision, embedding, created_at
-                    )
-                    VALUES (%s, %s, %s, %s, %s::vector, now())
-                    ON CONFLICT (article_id, model_name, model_revision) DO UPDATE
-                    SET embedding = EXCLUDED.embedding, created_at = now()
-                    """,
-                    (
-                        str(uuid4()),
-                        news_id,
-                        result.versions.embedding_model,
-                        result.versions.embedding_model_revision,
-                        _vector_literal(embedding),
-                    ),
-                )
+        await self.save_embeddings(
+            article_ids=list(embedding_by_id.keys()),
+            embeddings=np.asarray(list(embedding_by_id.values()), dtype=np.float32),
+            model_name=result.versions.embedding_model,
+            model_revision=result.versions.embedding_model_revision,
+        )
 
+        async with await AsyncConnection.connect(self._database_url) as connection:
             existing = await self._load_existing_state(connection, persisted_ids)
             affected_cluster_ids = self._collect_affected_cluster_ids(
                 existing=existing,

@@ -30,7 +30,7 @@ def make_settings(**overrides) -> Settings:
         "RABBITMQ_PASSWORD": "rabbit-secret",
         **overrides,
     }
-    return Settings(**values)
+    return Settings(_env_file=None, **values)
 
 
 @pytest.mark.parametrize("app_env", ["prod", "production", "PRODUCTION"])
@@ -47,7 +47,7 @@ def test_demo_defaults_are_usable_locally() -> None:
     validate_demo_settings(settings)
 
     assert settings.demo_user_login == "demo"
-    assert settings.demo_initial_credit == Decimal("100.00")
+    assert settings.demo_initial_credit == Decimal("100000.00")
 
 
 def test_user_service_can_create_multiple_users_in_one_organization() -> None:

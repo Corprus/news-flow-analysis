@@ -47,6 +47,8 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
   grafana:
@@ -108,6 +110,7 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
+      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-2000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -153,6 +156,7 @@ services:
       HF_HOME: ${MODEL_SERVICE_HF_HOME:-/app/.cache/huggingface}
       HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
       HF_TOKEN: ${HF_TOKEN:-}
+      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-2000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -201,6 +205,7 @@ services:
       HF_HOME: ${MODEL_SERVICE_HF_HOME:-/app/.cache/huggingface}
       HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
       HF_TOKEN: ${HF_TOKEN:-}
+      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-2000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -245,6 +250,12 @@ services:
       - "8501"
     volumes:
       - ./ui:/app
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health').read()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
     restart: unless-stopped
 
   nginx:
@@ -253,7 +264,7 @@ services:
       api:
         condition: service_healthy
       ui:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "${NGINX_PORT:-80}:80"
     volumes:

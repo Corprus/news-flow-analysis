@@ -18,6 +18,7 @@
 - хранилище: `POSTGRES_*`;
 - очередь: `RABBITMQ_*`, `NEWS_VECTORIZATION_QUEUE`;
 - воркеры: `MODEL_SERVICE_GPU_REPLICAS`, `MODEL_SERVICE_CPU_REPLICAS`;
+- обработка: `PIPELINE_CHUNK_SIZE` для разбиения больших incremental jobs;
 - модель: `MODEL_SERVICE_HF_CACHE`, `HF_TOKEN`;
 - внешний вход: `NGINX_PORT`;
 - мониторинг: `GRAFANA_*`, `PROMETHEUS_*`.
@@ -60,6 +61,11 @@ docker compose exec model-service-cpu python -c "import torch; print(torch.__ver
 
 CPU существенно медленнее GPU. Большой `full` job целиком обрабатывается одним
 consumer; увеличение числа реплик не ускоряет одну задачу.
+
+Большой `incremental` job разбивается только на стадии embeddings. Значение
+`PIPELINE_CHUNK_SIZE` по умолчанию равно `2000`: пачка больше этого порога
+создаёт child jobs `vectorize`, а затем один aggregate job для кластеризации и
+novelty model.
 
 ## Смешанный режим
 

@@ -68,6 +68,23 @@ class IncrementalNewsNoveltyPipeline:
         self.config = config or IncrementalPipelineConfig()
         self.final_config = final_config or FinalPipelineConfig()
 
+    def encode_new_embeddings(self, news_df: pd.DataFrame) -> tuple[list[str], np.ndarray]:
+        cfg = self.config
+        news = self._prepare_without_embeddings(news_df)
+        if news.empty:
+            raise ValueError("news_df must contain at least one article")
+        embeddings = self.encoder.encode_dataframe(
+            news,
+            text_column=cfg.text_embedding_column,
+            id_column=cfg.id_column,
+            cache_path=None,
+            force_recompute=True,
+        )
+        return (
+            news[cfg.id_column].astype(str).tolist(),
+            np.asarray(embeddings, dtype=np.float32),
+        )
+
     def process(
         self,
         *,

@@ -90,6 +90,33 @@ class NewsPipelineJobRepository:
                 (json.dumps({"error": error}), job_id),
             )
 
+    async def list_children(self, parent_job_id: str) -> list[dict[str, Any]]:
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    SELECT id::text, status, request, result, created_at, updated_at
+                    FROM news_pipeline_jobs
+                    WHERE request->>'parent_job_id' = %s
+                      AND request->>'mode' = 'vectorize'
+                    ORDER BY (request->>'chunk_index')::int, created_at
+                    """,
+                    (parent_job_id,),
+                )
+                rows = await cursor.fetchall()
+
+        return [
+            {
+                "job_id": row[0],
+                "status": row[1],
+                "request": row[2],
+                "result": row[3],
+                "created_at": row[4],
+                "updated_at": row[5],
+            }
+            for row in rows
+        ]
+
     async def get(self, job_id: str) -> dict[str, Any] | None:
         async with await AsyncConnection.connect(self._database_url) as connection:
             async with connection.cursor() as cursor:

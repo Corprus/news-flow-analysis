@@ -539,12 +539,16 @@ class NewsService:
         user_id: UUID,
         limit: int = 50,
         offset: int = 0,
+        visibility: ArticleVisibility | None = None,
     ) -> list[NewsArticle]:
+        filters = [NewsArticleSubmission.user_id == str(user_id)]
+        if visibility is not None:
+            filters.append(NewsArticle.visibility == visibility.value)
         statement = (
             select(NewsArticle)
             .options(selectinload(NewsArticle.pipeline_state))
             .join(NewsArticleSubmission, NewsArticleSubmission.article_id == NewsArticle.id)
-            .where(NewsArticleSubmission.user_id == str(user_id))
+            .where(*filters)
             .order_by(NewsArticleSubmission.created_at.desc())
             .limit(limit)
             .offset(offset)
