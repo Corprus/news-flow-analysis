@@ -14,6 +14,7 @@ from config import (
     DRAFT_REVIEW_COLUMN_WIDTH,
     DRAFT_TITLE_COLUMN_WIDTH,
     MOSCOW_TIMEZONE,
+    NEWS_IMPORT_MAX_FILE_MIB,
     NEWS_TABLE_WIDTH,
     PUBLISHED_EDITOR_LABEL_COLUMN_WIDTH,
     PUBLISHED_EFFECTIVE_TYPE_COLUMN_WIDTH,
@@ -163,7 +164,7 @@ def render_news_file_import(client: ApiClient) -> None:
             type=extensions or None,
             key="import-news-file",
         )
-    st.caption("Не более 200 МБ на файл")
+    st.caption(f"Не более {NEWS_IMPORT_MAX_FILE_MIB} MiB на файл")
     publish_immediately = st.checkbox(
         "Опубликовать сразу",
         key="import-publish-immediately",

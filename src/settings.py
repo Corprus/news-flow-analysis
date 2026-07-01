@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     )
     news_add_cost: Decimal = Field(default=Decimal("1.00"), ge=0, alias="NEWS_ADD_COST")
     news_search_cost: Decimal = Field(default=Decimal("0.00"), ge=0, alias="NEWS_SEARCH_COST")
+    news_import_max_file_mib: int = Field(
+        default=512,
+        ge=1,
+        alias="NEWS_IMPORT_MAX_FILE_MIB",
+    )
+    news_import_max_rows: int = Field(
+        default=1_000_000,
+        ge=1,
+        alias="NEWS_IMPORT_MAX_ROWS",
+    )
     pipeline_model_path: str = Field(
         default="data/artifacts/models/final_exp10/final_novelty_model.joblib",
         alias="PIPELINE_MODEL_PATH",

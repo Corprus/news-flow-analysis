@@ -6,6 +6,11 @@ from typing import Any
 
 import requests
 
+try:
+    from config import NEWS_IMPORT_UPLOAD_TIMEOUT_SECONDS
+except ModuleNotFoundError:
+    from ui.config import NEWS_IMPORT_UPLOAD_TIMEOUT_SECONDS
+
 ERROR_TRANSLATIONS = {
     "Invalid login or password": "Неверный логин или пароль",
     "User already exists": "Пользователь с таким логином уже существует",
@@ -220,7 +225,7 @@ class ApiClient:
                 "publish_immediately": str(publish_immediately).lower(),
             },
             files={"file": (file_name, content, _news_import_content_type(file_name))},
-            timeout=120,
+            timeout=NEWS_IMPORT_UPLOAD_TIMEOUT_SECONDS,
         )
 
     def create_news_import_job(
@@ -239,7 +244,7 @@ class ApiClient:
                 "publish_immediately": str(publish_immediately).lower(),
             },
             files={"file": (file_name, content, _news_import_content_type(file_name))},
-            timeout=120,
+            timeout=NEWS_IMPORT_UPLOAD_TIMEOUT_SECONDS,
         )
 
     def get_news_import_job(self, import_job_id: str) -> dict:
@@ -387,6 +392,9 @@ class ApiClient:
 
 
 def _news_import_content_type(file_name: str) -> str:
-    if Path(file_name).suffix.lower() == ".zip":
+    suffixes = [suffix.lower() for suffix in Path(file_name).suffixes]
+    if suffixes[-1:] == [".zip"]:
         return "application/zip"
+    if suffixes[-1:] == [".bz2"]:
+        return "application/x-bzip2"
     return "text/csv"

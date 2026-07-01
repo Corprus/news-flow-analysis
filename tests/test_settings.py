@@ -44,6 +44,16 @@ def test_search_is_free_by_default() -> None:
     assert settings.news_search_cost == 0
 
 
+def test_news_import_limits_have_large_demo_defaults() -> None:
+    settings = Settings(
+        POSTGRES_PASSWORD="secret",
+        RABBITMQ_PASSWORD="secret",
+    )
+
+    assert settings.news_import_max_file_mib == 512
+    assert settings.news_import_max_rows == 1_000_000
+
+
 def test_settings_accepts_pipeline_runtime_overrides() -> None:
     settings = Settings(
         POSTGRES_PASSWORD="secret",

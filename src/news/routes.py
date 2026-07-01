@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from time import monotonic
 from typing import Annotated, Literal
@@ -34,11 +35,11 @@ from db.database import get_session
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
 from news.importers import (
-    MAX_IMPORT_FILE_BYTES,
     ImportedNews,
     NewsImportError,
     news_importers,
 )
+from news.import_limits import MAX_IMPORT_FILE_BYTES, format_import_file_size_limit
 from news.models import (
     ArticleOrigin,
     ArticleStatus,
@@ -50,7 +51,10 @@ from news.models import (
 from news.pipeline_jobs import (
     DEFAULT_PIPELINE_AGGREGATE_BATCH_SIZE,
     DEFAULT_PIPELINE_CHUNK_SIZE,
+    enqueue_streaming_vectorize_chunk,
     enqueue_pipeline_job,
+    finalize_streaming_incremental_job,
+    start_streaming_incremental_job,
 )
 from news.search_results import group_search_items
 from news.service import NewsSearchFilters, NewsService
@@ -61,6 +65,18 @@ from users.models import UserRole
 router = APIRouter(prefix="/news", tags=["news"])
 search_router = APIRouter(prefix="/news-search", tags=["news-search"])
 MAX_BATCH_ARTICLES = 50_000
+
+
+@dataclass
+class ImportPrepayment:
+    import_job_id: UUID
+    expected_count: int
+    published_count: int = 0
+    refunded_count: int = 0
+
+
+def _format_import_file_size_limit() -> str:
+    return format_import_file_size_limit()
 
 CurrentUserDep = Annotated[CurrentUser, Depends(authenticate)]
 
@@ -427,7 +443,10 @@ async def import_news(
     if len(content) > MAX_IMPORT_FILE_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Файл с новостями превышает допустимый размер 200 МБ",
+            detail=(
+                "Файл с новостями превышает допустимый размер "
+                f"{_format_import_file_size_limit()}"
+            ),
         )
     try:
         articles = news_importers.parse(import_format, content)
@@ -437,25 +456,41 @@ async def import_news(
             detail=str(exc),
         ) from exc
     try:
+        prepayment = _prepay_import_publication_or_raise(
+            accounting=accounting,
+            user_id=current_user.id,
+            amount_per_article=settings.news_add_cost,
+            expected_count=len(articles) if publish_immediately else 0,
+            import_job_id=uuid4(),
+        )
         result = news.import_user_articles(
             user_id=current_user.id,
             organization_id=current_user.organization_id,
             format_id=import_format,
             articles=articles,
         )
-        published: list[NewsArticle] = []
+        published_ids: list[str] = []
         if publish_immediately:
-            published = news.publish_user_articles(
-                [UUID(article_id) for article_id in result.article_ids],
+            published_ids = news.publish_user_article_ids_batched(
+                result.article_ids,
                 current_user.id,
                 allow_already_public=True,
             )
-            _withdraw_for_articles_or_raise(
-                accounting=accounting,
-                user_id=current_user.id,
-                amount_per_article=settings.news_add_cost,
-                articles=published,
-            )
+            if prepayment is None:
+                _withdraw_for_article_ids_or_raise(
+                    accounting=accounting,
+                    user_id=current_user.id,
+                    amount_per_article=settings.news_add_cost,
+                    article_ids=published_ids,
+                )
+            else:
+                prepayment.published_count = len(published_ids)
+                _refund_import_prepayment_or_raise(
+                    accounting=accounting,
+                    user_id=current_user.id,
+                    amount_per_article=settings.news_add_cost,
+                    prepayment=prepayment,
+                )
         news.commit()
     except ValueError as exc:
         news.rollback()
@@ -463,10 +498,11 @@ async def import_news(
     except Exception:
         news.rollback()
         raise
-    job_id = await _enqueue_articles_if_any(
+    job_id = await _enqueue_article_ids_if_any(
         repository=repository,
         publisher=publisher,
-        articles=published,
+        article_ids=published_ids,
+        organization_id=current_user.organization_id,
         chunk_size=_pipeline_chunk_size(settings),
         aggregate_batch_size=_pipeline_aggregate_batch_size(settings),
     )
@@ -476,7 +512,7 @@ async def import_news(
         created_count=result.created_count,
         duplicate_count=result.duplicate_count,
         article_ids=[UUID(article_id) for article_id in result.article_ids],
-        published_count=len(published),
+        published_count=len(published_ids),
         job_id=job_id,
     )
 
@@ -501,7 +537,10 @@ async def create_news_import_job(
     if len(content) > MAX_IMPORT_FILE_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Uploaded news file exceeds the 200 MB limit",
+            detail=(
+                "Uploaded news file exceeds the "
+                f"{_format_import_file_size_limit()} limit"
+            ),
         )
 
     import_job_id = uuid4()
@@ -1140,6 +1179,8 @@ async def _run_news_import_job(
 ) -> None:
     started_at = monotonic()
     metric_status = "failed"
+    pipeline_job_id: UUID | None = None
+    prepayment: ImportPrepayment | None = None
     IMPORT_JOBS_IN_PROGRESS.inc()
     await repository.mark_processing(import_job_id, payload)
     try:
@@ -1165,8 +1206,28 @@ async def _run_news_import_job(
                 "total_rows": len(articles),
             },
         )
-        result = await asyncio.to_thread(
-            _import_parsed_news_in_new_session,
+        prepayment = await asyncio.to_thread(
+            _prepay_import_publication_in_new_session,
+            current_user.id,
+            settings.news_add_cost,
+            len(articles) if payload["publish_immediately"] else 0,
+            UUID(import_job_id),
+        )
+        pipeline_payload = None
+        if payload["publish_immediately"]:
+            pipeline_payload = {
+                "news_ids": [],
+                "organization_id": str(current_user.organization_id),
+                "mode": "incremental",
+            }
+            pipeline_job_id = await start_streaming_incremental_job(
+                repository=repository,
+                payload=pipeline_payload,
+                chunk_size=_pipeline_chunk_size(settings),
+                aggregate_batch_size=_pipeline_aggregate_batch_size(settings),
+            )
+
+        result = await _import_parsed_news_in_batches(
             articles,
             current_user,
             settings,
@@ -1178,7 +1239,21 @@ async def _run_news_import_job(
                 payload=payload,
                 total_rows=len(articles),
             ),
+            repository=repository,
+            publisher=publisher,
+            pipeline_job_id=pipeline_job_id,
+            pipeline_payload=pipeline_payload,
+            vectorize_chunk_size=_pipeline_chunk_size(settings),
+            prepayment=prepayment,
         )
+        if prepayment is not None:
+            prepayment.published_count = result.published_count
+            await asyncio.to_thread(
+                _refund_import_prepayment_in_new_session,
+                current_user.id,
+                settings.news_add_cost,
+                prepayment,
+            )
         if result.published_count:
             await repository.update_result(
                 import_job_id,
@@ -1189,17 +1264,27 @@ async def _run_news_import_job(
                     "file_name": payload.get("file_name"),
                 },
             )
-            result.job_id = await enqueue_vectorization_job(
-                repository=repository,
-                publisher=publisher,
-                payload={
-                    "news_ids": [str(article_id) for article_id in result.article_ids],
-                    "organization_id": str(current_user.organization_id),
-                    "mode": "incremental",
-                },
-                chunk_size=_pipeline_chunk_size(settings),
-                aggregate_batch_size=_pipeline_aggregate_batch_size(settings),
-            )
+            if pipeline_job_id is not None and pipeline_payload is not None:
+                result.job_id = await finalize_streaming_incremental_job(
+                    repository=repository,
+                    publisher=publisher,
+                    parent_job_id=pipeline_job_id,
+                    parent_payload=pipeline_payload,
+                    aggregate_batch_size=_pipeline_aggregate_batch_size(settings),
+                    aggregation_queue_name=settings.news_aggregation_queue,
+                )
+            else:
+                result.job_id = await enqueue_vectorization_job(
+                    repository=repository,
+                    publisher=publisher,
+                    payload={
+                        "news_ids": [str(article_id) for article_id in result.article_ids],
+                        "organization_id": str(current_user.organization_id),
+                        "mode": "incremental",
+                    },
+                    chunk_size=_pipeline_chunk_size(settings),
+                    aggregate_batch_size=_pipeline_aggregate_batch_size(settings),
+                )
         await repository.mark_done(
             import_job_id,
             {
@@ -1215,6 +1300,15 @@ async def _run_news_import_job(
         IMPORT_ROWS.labels(kind="published").inc(result.published_count)
         metric_status = "done"
     except Exception as exc:
+        if prepayment is not None:
+            await asyncio.to_thread(
+                _refund_import_prepayment_in_new_session,
+                current_user.id,
+                settings.news_add_cost,
+                prepayment,
+            )
+        if pipeline_job_id is not None:
+            await repository.mark_failed(str(pipeline_job_id), str(exc))
         await repository.mark_failed(import_job_id, str(exc))
     finally:
         IMPORT_JOBS.labels(status=metric_status).inc()
@@ -1261,14 +1355,89 @@ def _news_import_progress_callback(
     return update_progress
 
 
-def _import_parsed_news_in_new_session(
+async def _import_parsed_news_in_batches(
     articles: list[ImportedNews],
     current_user: CurrentUser,
     settings: Settings,
     import_format: str,
     publish_immediately: bool,
     progress_callback,
+    repository: NewsPipelineJobRepository | None = None,
+    publisher: RabbitPublisher | None = None,
+    pipeline_job_id: UUID | None = None,
+    pipeline_payload: dict | None = None,
+    vectorize_chunk_size: int = DEFAULT_PIPELINE_CHUNK_SIZE,
+    batch_size: int = 5_000,
+    prepayment: ImportPrepayment | None = None,
 ) -> NewsImportResponse:
+    total_rows = 0
+    created_count = 0
+    duplicate_count = 0
+    article_ids: list[str] = []
+    published_count = 0
+
+    for batch in _chunks_list(articles, batch_size):
+        processed_before = total_rows
+        created_before = created_count
+        duplicates_before = duplicate_count
+        result, batch_published_ids = await asyncio.to_thread(
+            _import_one_news_batch_in_new_session,
+            batch,
+            current_user,
+            settings,
+            import_format,
+            publish_immediately,
+            prepayment is None,
+            _offset_import_progress(
+                progress_callback,
+                processed_before=processed_before,
+                created_before=created_before,
+                duplicates_before=duplicates_before,
+            ),
+        )
+        total_rows += result.total_rows
+        created_count += result.created_count
+        duplicate_count += result.duplicate_count
+        article_ids.extend(result.article_ids)
+        published_count += len(batch_published_ids)
+        if prepayment is not None:
+            prepayment.published_count = published_count
+        if (
+            batch_published_ids
+            and repository is not None
+            and publisher is not None
+            and pipeline_job_id is not None
+            and pipeline_payload is not None
+        ):
+            for vectorize_chunk in _chunks_list(batch_published_ids, vectorize_chunk_size):
+                await enqueue_streaming_vectorize_chunk(
+                    repository=repository,
+                    publisher=publisher,
+                    parent_job_id=pipeline_job_id,
+                    parent_payload=pipeline_payload,
+                    news_ids=vectorize_chunk,
+                )
+
+    return NewsImportResponse(
+        format=import_format,
+        total_rows=total_rows,
+        created_count=created_count,
+        duplicate_count=duplicate_count,
+        article_ids=[UUID(article_id) for article_id in article_ids],
+        published_count=published_count,
+        job_id=None,
+    )
+
+
+def _import_one_news_batch_in_new_session(
+    articles: list[ImportedNews],
+    current_user: CurrentUser,
+    settings: Settings,
+    import_format: str,
+    publish_immediately: bool,
+    charge_publication: bool,
+    progress_callback,
+) -> tuple[NewsImportResult, list[str]]:
     with get_session() as session:
         news = NewsService(session)
         accounting = AccountingService(session)
@@ -1280,32 +1449,79 @@ def _import_parsed_news_in_new_session(
                 articles=articles,
                 progress_callback=progress_callback,
             )
-            published: list[NewsArticle] = []
+            published_ids: list[str] = []
             if publish_immediately:
-                published = news.publish_user_articles(
-                    [UUID(article_id) for article_id in result.article_ids],
+                published_ids = news.publish_user_article_ids_batched(
+                    result.article_ids,
                     current_user.id,
                     allow_already_public=True,
                 )
-                _withdraw_for_articles_or_raise(
-                    accounting=accounting,
-                    user_id=current_user.id,
-                    amount_per_article=settings.news_add_cost,
-                    articles=published,
-                )
+                if charge_publication:
+                    _withdraw_for_article_ids_or_raise(
+                        accounting=accounting,
+                        user_id=current_user.id,
+                        amount_per_article=settings.news_add_cost,
+                        article_ids=published_ids,
+                    )
             news.commit()
         except Exception:
             news.rollback()
             raise
+    return result, published_ids
 
-    return NewsImportResponse(
-        format=import_format,
-        total_rows=result.total_rows,
-        created_count=result.created_count,
-        duplicate_count=result.duplicate_count,
-        article_ids=[UUID(article_id) for article_id in result.article_ids],
-        published_count=len(published),
-        job_id=None,
+
+def _offset_import_progress(
+    progress_callback,
+    *,
+    processed_before: int,
+    created_before: int,
+    duplicates_before: int,
+):
+    if progress_callback is None:
+        return None
+
+    def update_progress(
+        processed_rows: int,
+        created_count: int,
+        duplicate_count: int,
+    ) -> None:
+        progress_callback(
+            processed_before + processed_rows,
+            created_before + created_count,
+            duplicates_before + duplicate_count,
+        )
+
+    return update_progress
+
+
+def _chunks_list(values: list, chunk_size: int):
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be positive")
+    for position in range(0, len(values), chunk_size):
+        yield values[position : position + chunk_size]
+
+
+async def _enqueue_article_ids_if_any(
+    *,
+    repository: NewsPipelineJobRepository,
+    publisher: RabbitPublisher,
+    article_ids: list[str],
+    organization_id: UUID | None,
+    chunk_size: int,
+    aggregate_batch_size: int,
+) -> UUID | None:
+    if not article_ids:
+        return None
+    return await enqueue_vectorization_job(
+        repository=repository,
+        publisher=publisher,
+        payload={
+            "news_ids": article_ids,
+            "organization_id": str(organization_id) if organization_id is not None else None,
+            "mode": "incremental",
+        },
+        chunk_size=chunk_size,
+        aggregate_batch_size=aggregate_batch_size,
     )
 
 
@@ -1448,4 +1664,111 @@ def _withdraw_for_articles_or_raise(
             reason=reason,
             reference_id=UUID(article.id),
             batch_id=batch_id,
+        )
+
+
+def _withdraw_for_article_ids_or_raise(
+    *,
+    accounting: AccountingService,
+    user_id: UUID,
+    amount_per_article,
+    article_ids: Iterable[str | UUID],
+    reason: TransactionReason = TransactionReason.NEWS_ADD,
+    batch_id: UUID | None = None,
+) -> None:
+    if amount_per_article == 0:
+        return
+    for article_id in article_ids:
+        _withdraw_or_raise(
+            accounting=accounting,
+            user_id=user_id,
+            amount=amount_per_article,
+            reason=reason,
+            reference_id=UUID(str(article_id)),
+            batch_id=batch_id,
+        )
+
+
+def _prepay_import_publication_or_raise(
+    *,
+    accounting: AccountingService,
+    user_id: UUID,
+    amount_per_article,
+    expected_count: int,
+    import_job_id: UUID,
+) -> ImportPrepayment | None:
+    if amount_per_article == 0 or expected_count <= 0:
+        return None
+    _withdraw_or_raise(
+        accounting=accounting,
+        user_id=user_id,
+        amount=amount_per_article * expected_count,
+        reason=TransactionReason.NEWS_ADD,
+        reference_id=import_job_id,
+        batch_id=import_job_id,
+    )
+    return ImportPrepayment(
+        import_job_id=import_job_id,
+        expected_count=expected_count,
+    )
+
+
+def _refund_import_prepayment_or_raise(
+    *,
+    accounting: AccountingService,
+    user_id: UUID,
+    amount_per_article,
+    prepayment: ImportPrepayment,
+) -> None:
+    if amount_per_article == 0:
+        return
+    refundable_count = (
+        prepayment.expected_count
+        - prepayment.published_count
+        - prepayment.refunded_count
+    )
+    if refundable_count <= 0:
+        return
+    try:
+        accounting.refund_credit(
+            user_id,
+            amount_per_article * refundable_count,
+            reason=TransactionReason.NEWS_IMPORT_REFUND,
+            reference_id=prepayment.import_job_id,
+        )
+    except UserAccountNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User account not found",
+        ) from exc
+    prepayment.refunded_count += refundable_count
+
+
+def _prepay_import_publication_in_new_session(
+    user_id: UUID,
+    amount_per_article,
+    expected_count: int,
+    import_job_id: UUID,
+) -> ImportPrepayment | None:
+    with get_session() as session:
+        return _prepay_import_publication_or_raise(
+            accounting=AccountingService(session),
+            user_id=user_id,
+            amount_per_article=amount_per_article,
+            expected_count=expected_count,
+            import_job_id=import_job_id,
+        )
+
+
+def _refund_import_prepayment_in_new_session(
+    user_id: UUID,
+    amount_per_article,
+    prepayment: ImportPrepayment,
+) -> None:
+    with get_session() as session:
+        _refund_import_prepayment_or_raise(
+            accounting=AccountingService(session),
+            user_id=user_id,
+            amount_per_article=amount_per_article,
+            prepayment=prepayment,
         )

@@ -146,6 +146,47 @@ CPU-часть aggregate:
 он считает весь корпус совместно и не эквивалентен production-сценарию
 `incremental_chunked`.
 
+## Сервисный streaming incremental 200 000 публикаций
+
+Измерение 1 июля 2026 года на том же Docker/GPU-стеке. Конфигурация:
+`PIPELINE_CHUNK_SIZE=5000`, `PIPELINE_AGGREGATE_BATCH_SIZE=5000`,
+асинхронный import job с публикацией сразу и streaming-векторизацией по мере
+импорта. Входной файл:
+`data/import/lenta_import_sample_200000.zip`.
+
+| Этап | Результат |
+|---|---:|
+| HTTP import job, 200 000 публикаций | 9:56 |
+| `incremental_chunked` parent job | 2:30:27 |
+| End-to-end от старта import до конца pipeline | 2:30:36 |
+| End-to-end throughput | 22.1 публикации/с |
+| `vectorize` child jobs | 40 x 5 000 |
+| Окно выполнения `vectorize` | 1:23:07 |
+| `aggregate` child jobs | 40 x 5 000 |
+| Aggregate tail после завершения vectorize | ≈ 1:07:06 |
+| Окно `aggregate` jobs в БД | 2:20:41 |
+| Итоговый статус публикаций в БД | 200 050 `processed` |
+
+
+Ресурсы после завершения прогона:
+
+| Контейнер | RAM |
+|---|---:|
+| api | 1.239 GiB |
+| model-service-vectorizer-gpu | 1.7 GiB |
+| model-service-processor | 688 MiB |
+| postgres | 4.455 GiB |
+| ui | 478 MiB |
+| rabbitmq | 212 MiB |
+| prometheus | 82 MiB |
+| grafana | 109 MiB |
+
+Практический вывод: 200k не упирается в лимит API или RabbitMQ. Узкое место
+остаётся вычислительным: один GPU-векторизатор и последовательная CPU-часть
+`aggregate`. Увеличение `PIPELINE_AGGREGATE_BATCH_SIZE` до 5 000 сократило
+количество aggregate jobs с потенциальных 200 до 40, но не отменило
+хронологическую последовательность novelty-расчёта.
+
 ## CPU
 
 Измерения 22 июня 2026 года на AMD Ryzen 9 5900X и поднаборе 1 000 публикаций:

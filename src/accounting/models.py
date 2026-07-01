@@ -16,6 +16,7 @@ class TransactionReason(StrEnum):
     NEWS_ADD = "news_add"
     NEWS_REPROCESS = "news_reprocess"
     NEWS_SEARCH = "news_search"
+    NEWS_IMPORT_REFUND = "news_import_refund"
     CREDIT_ADD = "credit_add"
     CREDIT_WITHDRAW = "credit_withdraw"
 

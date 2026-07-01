@@ -1,147 +1,89 @@
 from __future__ import annotations
 
 import argparse
+import bz2
 import csv
-import hashlib
-import os
-import subprocess
+import io
+import zipfile
 from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "data" / "prepared" / "lenta_clean_news.csv"
-OUTPUT = ROOT / "data" / "import" / "lenta_import_sample_1000.csv"
-OUTPUT_COLUMNS = [
-    "news_id",
-    "url",
-    "title",
-    "text",
-    "topic",
-    "tags",
-    "published_at",
-    "language",
-]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a unique Lenta import fixture, excluding rows already in DB."
+        description="Build a ZIP Lenta import sample from the raw CSV.bz2 dataset.",
     )
-    parser.add_argument("--limit", type=int, default=1000)
-    parser.add_argument("--source", type=Path, default=SOURCE)
-    parser.add_argument("--output", type=Path, default=OUTPUT)
+    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--target", type=Path, required=True)
+    parser.add_argument("--rows", type=int, required=True)
+    parser.add_argument("--skip-valid", type=int, default=0)
     return parser.parse_args()
-
-
-def load_existing_keys() -> tuple[set[str], set[str], set[str]]:
-    env = os.environ.copy()
-    env.setdefault("POSTGRES_PASSWORD", "demo_postgres_change_me")
-    env.setdefault("RABBITMQ_PASSWORD", "demo_rabbitmq_change_me")
-    command = [
-        "docker",
-        "compose",
-        "exec",
-        "-T",
-        "postgres",
-        "psql",
-        "-U",
-        "semantic_news_novelty",
-        "-d",
-        "semantic_news_novelty",
-        "-At",
-        "-F",
-        "\t",
-        "-c",
-        (
-            "SELECT COALESCE(external_id,''), COALESCE(canonical_url,''), "
-            "COALESCE(url,''), COALESCE(content_hash,'') FROM news_articles"
-        ),
-    ]
-    result = subprocess.run(
-        command,
-        cwd=ROOT,
-        env=env,
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    external_ids: set[str] = set()
-    urls: set[str] = set()
-    content_hashes: set[str] = set()
-    for line in result.stdout.splitlines():
-        external_id, canonical_url, url, content_hash = line.split("\t", 3)
-        if external_id:
-            external_ids.add(external_id)
-        if canonical_url:
-            urls.add(canonical_url)
-        if url:
-            urls.add(url)
-        if content_hash:
-            content_hashes.add(content_hash)
-    return external_ids, urls, content_hashes
 
 
 def main() -> None:
     args = parse_args()
-    external_ids, urls, content_hashes = load_existing_keys()
-    selected: list[dict[str, str]] = []
-    selected_ids: set[str] = set()
-    selected_urls: set[str] = set()
-    selected_hashes: set[str] = set()
+    if args.rows < 1:
+        raise SystemExit("--rows must be positive")
+    if args.skip_valid < 0:
+        raise SystemExit("--skip-valid must be >= 0")
 
-    source_path = args.source if args.source.is_absolute() else ROOT / args.source
-    output_path = args.output if args.output.is_absolute() else ROOT / args.output
+    args.target.parent.mkdir(parents=True, exist_ok=True)
+    inner_name = args.target.with_suffix(".csv").name
+    source_rows_seen = 0
+    valid_rows_skipped = 0
+    invalid_rows_skipped = 0
+    written = 0
 
-    with source_path.open("r", encoding="utf-8-sig", newline="") as source:
-        for row in csv.DictReader(source):
-            news_id = (row.get("news_id") or "").strip()
-            url = (row.get("url") or "").strip()
-            title = (row.get("title") or "").strip()
-            text = (row.get("text") or "").strip()
-            published_at = (row.get("published_at") or "").strip()
-            content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-            if not news_id or not title or not text or not published_at:
-                continue
-            if (
-                news_id in external_ids
-                or news_id in selected_ids
-                or url in urls
-                or url in selected_urls
-                or content_hash in content_hashes
-                or content_hash in selected_hashes
-            ):
-                continue
-            selected.append(
-                {
-                    "news_id": news_id,
-                    "url": url,
-                    "title": title,
-                    "text": text,
-                    "topic": (row.get("topic") or "").strip(),
-                    "tags": (row.get("tags") or "").strip(),
-                    "published_at": published_at,
-                    "language": "ru",
-                }
+    with (
+        bz2.open(args.source, "rt", encoding="utf-8-sig", newline="") as source,
+        zipfile.ZipFile(
+            args.target,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+        ) as archive,
+    ):
+        reader = csv.DictReader(source)
+        if reader.fieldnames is None:
+            raise SystemExit("source has no CSV header")
+        with archive.open(inner_name, "w") as raw_target:
+            target = io.TextIOWrapper(raw_target, encoding="utf-8", newline="")
+            writer = csv.DictWriter(
+                target,
+                fieldnames=reader.fieldnames,
+                lineterminator="\n",
             )
-            selected_ids.add(news_id)
-            selected_urls.add(url)
-            selected_hashes.add(content_hash)
-            if len(selected) == args.limit:
-                break
+            writer.writeheader()
+            for row in reader:
+                source_rows_seen += 1
+                if not _is_valid_import_row(row):
+                    invalid_rows_skipped += 1
+                    continue
+                if valid_rows_skipped < args.skip_valid:
+                    valid_rows_skipped += 1
+                    continue
+                writer.writerow(row)
+                written += 1
+                if written >= args.rows:
+                    break
+            target.flush()
 
-    if len(selected) != args.limit:
-        raise RuntimeError(f"Expected {args.limit} unique rows, found {len(selected)}")
+    if written != args.rows:
+        raise SystemExit(f"only wrote {written} rows, expected {args.rows}")
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8-sig", newline="") as output:
-        writer = csv.DictWriter(output, fieldnames=OUTPUT_COLUMNS)
-        writer.writeheader()
-        writer.writerows(selected)
+    print(f"target={args.target}")
+    print(f"inner_name={inner_name}")
+    print(f"source_rows_seen={source_rows_seen}")
+    print(f"valid_rows_skipped={valid_rows_skipped}")
+    print(f"invalid_rows_skipped={invalid_rows_skipped}")
+    print(f"valid_rows_written={written}")
+    print(f"target_bytes={args.target.stat().st_size}")
 
-    print(output_path)
-    print(f"rows={len(selected)}")
-    print(f"first_news_id={selected[0]['news_id']}")
-    print(f"last_news_id={selected[-1]['news_id']}")
+
+def _is_valid_import_row(row: dict[str, str | None]) -> bool:
+    title = (row.get("title") or "").strip()
+    text = (row.get("text") or "").strip()
+    published_at = (row.get("published_at") or row.get("date") or "").strip()
+    return bool(title and text and published_at)
 
 
 if __name__ == "__main__":

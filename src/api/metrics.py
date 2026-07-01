@@ -161,6 +161,7 @@ class ApiDatabaseCollector:
                     SELECT result
                     FROM news_pipeline_jobs
                     WHERE request->>'type' = 'news_import'
+                      AND status <> 'failed'
                       AND result IS NOT NULL
                     """
                 )

@@ -95,6 +95,24 @@ class AccountingService:
         )
         return UUID(transaction.id)
 
+    def refund_credit(
+        self,
+        user_id: UUID,
+        amount: Decimal,
+        reason: TransactionReason,
+        reference_id: UUID | None = None,
+    ) -> UUID:
+        if amount <= 0:
+            raise ValueError("amount must be > 0")
+        user = self._get_user(user_id)
+        return self.add_credit(
+            UUID(user.organization_id),
+            user_id,
+            amount,
+            reason,
+            reference_id,
+        )
+
     def get_balance(self, organization_id: UUID) -> Decimal:
         account = self._session.get(Account, str(organization_id))
         return account.balance if account is not None else Decimal("0.00")

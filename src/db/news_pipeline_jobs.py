@@ -116,7 +116,7 @@ class NewsPipelineJobRepository:
                 """
                 UPDATE news_pipeline_jobs
                 SET status = 'failed',
-                    result = %s::jsonb,
+                    result = COALESCE(result, '{}'::jsonb) || %s::jsonb,
                     updated_at = now()
                 WHERE id = %s
                 """,

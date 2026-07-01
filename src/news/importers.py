@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bz2
 import csv
 import io
 import zipfile
@@ -8,11 +9,14 @@ from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Protocol
 
-MAX_IMPORT_ROWS = 50_000
-MAX_IMPORT_FILE_BYTES = 200 * 1024 * 1024
+from .import_limits import MAX_IMPORT_FILE_BYTES, MAX_IMPORT_ROWS
 
 
 class NewsImportError(ValueError):
+    pass
+
+
+class NewsImportSkipRow(ValueError):
     pass
 
 
@@ -46,13 +50,15 @@ class LentaCsvImporter:
     format = NewsImportFormat(
         id="lenta",
         label="Lenta.ru CSV",
-        file_extensions=(".csv", ".zip"),
+        file_extensions=(".csv", ".zip", ".bz2", ".csv.bz2"),
         media_types=(
             "text/csv",
             "application/csv",
             "application/vnd.ms-excel",
             "application/zip",
             "application/x-zip-compressed",
+            "application/x-bzip2",
+            "application/octet-stream",
         ),
     )
 
@@ -61,7 +67,23 @@ class LentaCsvImporter:
     def parse(self, content: bytes) -> list[ImportedNews]:
         if _looks_like_zip(content):
             return self._parse_zip(content)
+        if _looks_like_bzip2(content):
+            return self._parse_bzip2(content)
         return self._parse_csv(content)
+
+    def _parse_bzip2(self, content: bytes) -> list[ImportedNews]:
+        if not content:
+            raise NewsImportError("Uploaded file is empty")
+        for encoding in ("utf-8-sig", "cp1251"):
+            try:
+                with bz2.BZ2File(io.BytesIO(content)) as compressed:
+                    text_stream = io.TextIOWrapper(compressed, encoding=encoding, newline="")
+                    return self._parse_csv_stream(text_stream)
+            except UnicodeDecodeError:
+                continue
+            except (EOFError, OSError) as exc:
+                raise NewsImportError("BZip2 archive is invalid") from exc
+        raise NewsImportError("CSV must use UTF-8 or Windows-1251 encoding")
 
     def _parse_zip(self, content: bytes) -> list[ImportedNews]:
         if not content:
@@ -92,7 +114,10 @@ class LentaCsvImporter:
 
     def _parse_csv(self, content: bytes) -> list[ImportedNews]:
         text = _decode_csv(content)
-        reader = csv.DictReader(io.StringIO(text))
+        return self._parse_csv_stream(io.StringIO(text))
+
+    def _parse_csv_stream(self, text_stream: io.TextIOBase) -> list[ImportedNews]:
+        reader = csv.DictReader(text_stream)
         columns = set(reader.fieldnames or ())
         missing = sorted(self._required_columns - columns)
         if "date" not in columns and "published_at" not in columns:
@@ -103,7 +128,6 @@ class LentaCsvImporter:
             )
 
         articles: list[ImportedNews] = []
-        errors: list[str] = []
         for row_number, row in enumerate(reader, start=2):
             if len(articles) >= MAX_IMPORT_ROWS:
                 raise NewsImportError(
@@ -111,25 +135,24 @@ class LentaCsvImporter:
                 )
             try:
                 articles.append(self._parse_row(row, row_number))
-            except NewsImportError as exc:
-                errors.append(str(exc))
-                if len(errors) >= 20:
-                    break
+            except NewsImportSkipRow:
+                continue
 
-        if errors:
-            raise NewsImportError("Invalid Lenta CSV rows: " + "; ".join(errors))
         if not articles:
             raise NewsImportError("Lenta CSV does not contain any news rows")
         return articles
 
     @staticmethod
     def _parse_row(row: dict[str, str | None], row_number: int) -> ImportedNews:
-        title = _required_value(row, "title", row_number)
-        content = _required_value(row, "text", row_number)
+        title = _required_row_value(row, "title", row_number)
+        content = _required_row_value(row, "text", row_number)
         date_value = _optional_value(row, "published_at") or _optional_value(row, "date")
         if date_value is None:
-            raise NewsImportError(f"row {row_number}: published date is empty")
-        published_at = _parse_datetime(date_value, row_number)
+            raise NewsImportSkipRow(f"row {row_number}: published date is empty")
+        try:
+            published_at = _parse_datetime(date_value, row_number)
+        except NewsImportError as exc:
+            raise NewsImportSkipRow(str(exc)) from exc
         tags = _optional_value(row, "tags")
         metadata = {"tags": tags} if tags is not None else None
         return ImportedNews(
@@ -170,6 +193,10 @@ def _looks_like_zip(content: bytes) -> bool:
     return zipfile.is_zipfile(io.BytesIO(content))
 
 
+def _looks_like_bzip2(content: bytes) -> bool:
+    return content.startswith(b"BZh")
+
+
 def _is_csv_path(path: str) -> bool:
     return PurePosixPath(path).suffix.lower() == ".csv"
 
@@ -185,14 +212,14 @@ def _decode_csv(content: bytes) -> str:
     raise NewsImportError("CSV must use UTF-8 or Windows-1251 encoding")
 
 
-def _required_value(
+def _required_row_value(
     row: dict[str, str | None],
     column: str,
     row_number: int,
 ) -> str:
     value = _optional_value(row, column)
     if value is None:
-        raise NewsImportError(f"row {row_number}: {column} is empty")
+        raise NewsImportSkipRow(f"row {row_number}: {column} is empty")
     return value
 
 
@@ -208,10 +235,13 @@ def _parse_datetime(value: str, row_number: int) -> datetime:
     normalized = value.replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(normalized)
-    except ValueError as exc:
-        raise NewsImportError(
-            f"row {row_number}: invalid published date {value!r}"
-        ) from exc
+    except ValueError:
+        try:
+            parsed = datetime.strptime(value, "%Y/%m/%d").replace(tzinfo=UTC)
+        except ValueError as exc:
+            raise NewsImportError(
+                f"row {row_number}: invalid published date {value!r}"
+            ) from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed

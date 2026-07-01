@@ -44,6 +44,25 @@ def test_import_job_uses_zip_content_type() -> None:
     )
 
 
+def test_import_job_uses_bzip2_content_type() -> None:
+    response = Mock()
+    response.status_code = 202
+    response.json.return_value = {"import_job_id": "job-id", "status": "queued"}
+
+    with patch("ui.api_client.requests.request", return_value=response) as request:
+        ApiClient("http://api").create_news_import_job(
+            "lenta",
+            "lenta-ru-news.csv.bz2",
+            b"BZh",
+        )
+
+    assert request.call_args.kwargs["files"]["file"] == (
+        "lenta-ru-news.csv.bz2",
+        b"BZh",
+        "application/x-bzip2",
+    )
+
+
 def test_list_news_history_fetches_all_pages() -> None:
     first = Mock()
     first.status_code = 200

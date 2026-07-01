@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from news.importers import ImportedNews
@@ -23,6 +23,7 @@ from news.models import (
 )
 
 IMPORT_PROGRESS_INTERVAL_ROWS = 1_000
+MAX_SQL_IN_LIST_SIZE = 10_000
 
 
 @dataclass(frozen=True)
@@ -293,6 +294,81 @@ class NewsService:
             published.append(article)
         self._session.flush()
         return published
+
+    def publish_user_article_ids_batched(
+        self,
+        article_ids: Iterable[UUID | str],
+        user_id: UUID,
+        *,
+        allow_already_public: bool = False,
+    ) -> list[str]:
+        unique_ids = list(dict.fromkeys(str(article_id) for article_id in article_ids))
+        if not unique_ids:
+            return []
+
+        published_ids: list[str] = []
+        for chunk in _chunks(unique_ids, MAX_SQL_IN_LIST_SIZE):
+            rows = list(
+                self._session.execute(
+                    select(
+                        NewsArticle.id,
+                        NewsArticle.visibility,
+                        NewsArticle.status,
+                    )
+                    .join(
+                        NewsArticleSubmission,
+                        NewsArticleSubmission.article_id == NewsArticle.id,
+                    )
+                    .where(
+                        NewsArticle.id.in_(chunk),
+                        NewsArticleSubmission.user_id == str(user_id),
+                    )
+                    .with_for_update()
+                ).all()
+            )
+            article_by_id = {
+                row.id: {"visibility": row.visibility, "status": row.status}
+                for row in rows
+            }
+            missing = [article_id for article_id in chunk if article_id not in article_by_id]
+            if missing:
+                raise LookupError(f"Draft articles not found: {missing[:10]}")
+
+            invalid: list[str] = []
+            publishable_ids: list[str] = []
+            for article_id in chunk:
+                article = article_by_id[article_id]
+                visibility = article["visibility"]
+                article_status = article["status"]
+                if visibility == ArticleVisibility.PUBLIC.value:
+                    if not allow_already_public:
+                        invalid.append(f"{article_id}: already public")
+                    continue
+                if visibility != ArticleVisibility.DRAFT.value:
+                    invalid.append(f"{article_id}: not a draft")
+                    continue
+                if article_status != ArticleStatus.NOT_STARTED.value:
+                    invalid.append(f"{article_id}: already entered processing")
+                    continue
+                publishable_ids.append(article_id)
+            if invalid:
+                raise ValueError(
+                    "All articles must be publishable drafts: " + "; ".join(invalid[:10])
+                )
+
+            if publishable_ids:
+                self._session.execute(
+                    update(NewsArticle)
+                    .where(NewsArticle.id.in_(publishable_ids))
+                    .values(
+                        visibility=ArticleVisibility.PUBLIC.value,
+                        status=ArticleStatus.PENDING.value,
+                    )
+                )
+                published_ids.extend(publishable_ids)
+                self._session.flush()
+
+        return published_ids
 
     def delete_user_drafts(
         self,
@@ -766,3 +842,8 @@ class NewsService:
             )
         )
         self._session.flush()
+
+
+def _chunks(values: list[str], chunk_size: int) -> Iterable[list[str]]:
+    for position in range(0, len(values), chunk_size):
+        yield values[position : position + chunk_size]
