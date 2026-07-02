@@ -257,25 +257,43 @@ async def _run_vectorization_stage(
     news_ids: list[str],
     organization_id: str | None,
 ) -> dict[str, Any]:
+    model_name = app.state.config.embedding_model_name
+    model_revision = app.state.config.embedding_model_revision
     requested = await repository.load_articles(news_ids, organization_id)
     await repository.mark_articles_processing(news_ids)
-    embedding_ids, embeddings = await asyncio.to_thread(
-        app.state.incremental_pipeline.encode_new_embeddings,
-        requested,
+    existing_embedding_ids = await repository.load_existing_embedding_ids(
+        article_ids=news_ids,
+        model_name=model_name,
+        model_revision=model_revision,
     )
-    await repository.save_embeddings(
-        article_ids=embedding_ids,
-        embeddings=embeddings,
-        model_name=app.state.config.embedding_model_name,
-        model_revision=app.state.config.embedding_model_revision,
-    )
+    missing_mask = ~requested["news_id"].astype(str).isin(existing_embedding_ids)
+    missing = requested.loc[missing_mask].reset_index(drop=True)
+    if missing.empty:
+        embedding_ids = []
+    else:
+        embedding_ids, embeddings = await asyncio.to_thread(
+            app.state.incremental_pipeline.encode_new_embeddings,
+            missing,
+        )
+        await repository.save_embeddings(
+            article_ids=embedding_ids,
+            embeddings=embeddings,
+            model_name=model_name,
+            model_revision=model_revision,
+        )
     return {
         "mode": PIPELINE_MODE_VECTORIZE,
-        "requested_ids": embedding_ids,
+        "requested_ids": news_ids,
+        "embedded_ids": embedding_ids,
+        "skipped_ids": [
+            news_id for news_id in news_ids if news_id in existing_embedding_ids
+        ],
+        "requested_count": len(news_ids),
         "embedded_count": len(embedding_ids),
+        "skipped_count": len(existing_embedding_ids),
         "versions": {
-            "embedding_model": app.state.config.embedding_model_name,
-            "embedding_model_revision": app.state.config.embedding_model_revision,
+            "embedding_model": model_name,
+            "embedding_model_revision": model_revision,
         },
     }
 
