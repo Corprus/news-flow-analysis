@@ -34,12 +34,12 @@ from api.metrics import (
 from db.database import get_session
 from db.news_pipeline_jobs import NewsPipelineJobRepository
 from messaging.rabbitmq import RabbitPublisher
+from news.import_limits import MAX_IMPORT_FILE_BYTES, format_import_file_size_limit
 from news.importers import (
     ImportedNews,
     NewsImportError,
     news_importers,
 )
-from news.import_limits import MAX_IMPORT_FILE_BYTES, format_import_file_size_limit
 from news.models import (
     ArticleOrigin,
     ArticleStatus,
@@ -51,13 +51,13 @@ from news.models import (
 from news.pipeline_jobs import (
     DEFAULT_PIPELINE_AGGREGATE_BATCH_SIZE,
     DEFAULT_PIPELINE_CHUNK_SIZE,
-    enqueue_streaming_vectorize_chunk,
     enqueue_pipeline_job,
+    enqueue_streaming_vectorize_chunk,
     finalize_streaming_incremental_job,
     start_streaming_incremental_job,
 )
 from news.search_results import group_search_items
-from news.service import NewsSearchFilters, NewsService
+from news.service import NewsImportResult, NewsSearchFilters, NewsService
 from settings import Settings, get_settings
 from users.deps import CurrentUser, SessionDep, authenticate, ensure_publisher
 from users.models import UserRole

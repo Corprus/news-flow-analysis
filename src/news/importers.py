@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Protocol
 
-from .import_limits import MAX_IMPORT_FILE_BYTES, MAX_IMPORT_ROWS
+from .import_limits import MAX_IMPORT_ROWS
 
 
 class NewsImportError(ValueError):

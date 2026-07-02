@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -9,6 +10,7 @@ from pydantic import ValidationError
 from api.main import NewsVectorizationJobStatus, NewsVectorizationRequest
 from final_pipeline.result import PipelineResult, PipelineVersions
 from model.significance_model import CatBoostSignificanceModel
+from model_service.main import _run_vectorization_stage
 from news.models import (
     ArticlePipelineEmbedding,
     ArticlePipelineState,
@@ -157,6 +159,90 @@ class _PipelinePublisherSpy:
         self.messages.append(message)
 
 
+class _VectorizationRepositorySpy:
+    def __init__(self, existing_embedding_ids: set[str]) -> None:
+        self.existing_embedding_ids = existing_embedding_ids
+        self.processing_ids: list[str] = []
+        self.saved_article_ids: list[str] = []
+        self.saved_embeddings: np.ndarray | None = None
+
+    async def load_articles(self, news_ids: list[str], organization_id: str | None):
+        return pd.DataFrame(
+            [
+                {
+                    "news_id": news_id,
+                    "organization_id": organization_id,
+                    "published_at": datetime(2026, 1, index + 1, tzinfo=UTC),
+                    "topic": "topic",
+                    "title": f"Title {news_id}",
+                    "text": f"Text {news_id}",
+                    "url": "",
+                }
+                for index, news_id in enumerate(news_ids)
+            ]
+        )
+
+    async def mark_articles_processing(self, news_ids: list[str]) -> None:
+        self.processing_ids = list(news_ids)
+
+    async def load_existing_embedding_ids(
+        self,
+        *,
+        article_ids: list[str],
+        model_name: str,
+        model_revision: str,
+    ) -> set[str]:
+        assert model_name == "test-model"
+        assert model_revision == "test-revision"
+        return set(article_ids) & self.existing_embedding_ids
+
+    async def save_embeddings(
+        self,
+        *,
+        article_ids: list[str],
+        embeddings: np.ndarray,
+        model_name: str,
+        model_revision: str,
+    ) -> None:
+        assert model_name == "test-model"
+        assert model_revision == "test-revision"
+        self.saved_article_ids = list(article_ids)
+        self.saved_embeddings = np.asarray(embeddings)
+
+
+class _VectorizationPipelineSpy:
+    def __init__(self) -> None:
+        self.encoded_ids: list[str] = []
+
+    def encode_new_embeddings(self, news_df: pd.DataFrame):
+        self.encoded_ids = news_df["news_id"].astype(str).tolist()
+        embeddings = np.asarray(
+            [
+                [float(index), 1.0]
+                for index, _news_id in enumerate(self.encoded_ids, start=1)
+            ],
+            dtype=np.float32,
+        )
+        return self.encoded_ids, embeddings
+
+
+class _VectorizationPipelineMustNotRun:
+    def encode_new_embeddings(self, _news_df: pd.DataFrame):
+        raise AssertionError("encoder must not run for already embedded articles")
+
+
+def _vectorization_app(pipeline) -> SimpleNamespace:
+    return SimpleNamespace(
+        state=SimpleNamespace(
+            config=SimpleNamespace(
+                embedding_model_name="test-model",
+                embedding_model_revision="test-revision",
+            ),
+            incremental_pipeline=pipeline,
+        )
+    )
+
+
 def _history_row(news_id: str, cluster_id: str, published_at: datetime):
     return (
         news_id,
@@ -264,6 +350,49 @@ def test_large_incremental_pipeline_job_plans_ordered_aggregate_batches() -> Non
         "vectorize",
         "vectorize",
     ]
+
+
+def test_vectorization_stage_skips_existing_embeddings() -> None:
+    repository = _VectorizationRepositorySpy(existing_embedding_ids={"news-2"})
+    pipeline = _VectorizationPipelineSpy()
+
+    result = asyncio.run(
+        _run_vectorization_stage(
+            app=_vectorization_app(pipeline),  # type: ignore[arg-type]
+            repository=repository,  # type: ignore[arg-type]
+            news_ids=["news-1", "news-2", "news-3"],
+            organization_id="10000000-0000-0000-0000-000000000001",
+        )
+    )
+
+    assert repository.processing_ids == ["news-1", "news-2", "news-3"]
+    assert pipeline.encoded_ids == ["news-1", "news-3"]
+    assert repository.saved_article_ids == ["news-1", "news-3"]
+    assert result["requested_ids"] == ["news-1", "news-2", "news-3"]
+    assert result["embedded_ids"] == ["news-1", "news-3"]
+    assert result["skipped_ids"] == ["news-2"]
+    assert result["embedded_count"] == 2
+    assert result["skipped_count"] == 1
+
+
+def test_vectorization_stage_does_not_encode_when_all_embeddings_exist() -> None:
+    repository = _VectorizationRepositorySpy(existing_embedding_ids={"news-1", "news-2"})
+
+    result = asyncio.run(
+        _run_vectorization_stage(
+            app=_vectorization_app(_VectorizationPipelineMustNotRun()),  # type: ignore[arg-type]
+            repository=repository,  # type: ignore[arg-type]
+            news_ids=["news-1", "news-2"],
+            organization_id="10000000-0000-0000-0000-000000000001",
+        )
+    )
+
+    assert repository.processing_ids == ["news-1", "news-2"]
+    assert repository.saved_article_ids == []
+    assert result["embedded_ids"] == []
+    assert result["skipped_ids"] == ["news-1", "news-2"]
+    assert result["embedded_count"] == 0
+    assert result["skipped_count"] == 2
 
 
 def test_history_load_expands_window_to_full_clusters(monkeypatch) -> None:

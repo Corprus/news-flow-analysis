@@ -277,6 +277,30 @@ class NewsPipelineRepository:
                     ),
                 )
 
+    async def load_existing_embedding_ids(
+        self,
+        *,
+        article_ids: list[str],
+        model_name: str,
+        model_revision: str,
+    ) -> set[str]:
+        if not article_ids:
+            return set()
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    SELECT article_id::text
+                    FROM article_pipeline_embeddings
+                    WHERE article_id = ANY(%s::uuid[])
+                      AND model_name = %s
+                      AND model_revision = %s
+                    """,
+                    (article_ids, model_name, model_revision),
+                )
+                rows = await cursor.fetchall()
+        return {str(row[0]) for row in rows}
+
     async def load_embeddings(
         self,
         *,
