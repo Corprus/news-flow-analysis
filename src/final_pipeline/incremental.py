@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -42,8 +45,26 @@ class IncrementalPipelineConfig:
     text_column: str = "text"
     text_embedding_column: str = "model_text"
 
+    @classmethod
+    def from_final_config(
+        cls,
+        final_config: FinalPipelineConfig,
+    ) -> IncrementalPipelineConfig:
+        base = final_config.base_clustering
+        attach = final_config.attach_clustering
+        return cls(
+            baseline_similarity=base.story_threshold,
+            baseline_window_days=base.story_window_days,
+            attach_similarity=attach.min_similarity,
+            attach_window_days=attach.max_days,
+            min_margin=attach.min_margin,
+            title_jaccard_threshold=attach.title_jaccard_threshold,
+            min_shared_numbers=attach.min_shared_numbers,
+        )
+
 
 IncrementalPipelineResult = PipelineResult
+ProgressCallback = Callable[[str, dict[str, Any]], None]
 
 
 class IncrementalNewsNoveltyPipeline:
@@ -68,6 +89,23 @@ class IncrementalNewsNoveltyPipeline:
         self.config = config or IncrementalPipelineConfig()
         self.final_config = final_config or FinalPipelineConfig()
 
+    def encode_new_embeddings(self, news_df: pd.DataFrame) -> tuple[list[str], np.ndarray]:
+        cfg = self.config
+        news = self._prepare_without_embeddings(news_df)
+        if news.empty:
+            raise ValueError("news_df must contain at least one article")
+        embeddings = self.encoder.encode_dataframe(
+            news,
+            text_column=cfg.text_embedding_column,
+            id_column=cfg.id_column,
+            cache_path=None,
+            force_recompute=True,
+        )
+        return (
+            news[cfg.id_column].astype(str).tolist(),
+            np.asarray(embeddings, dtype=np.float32),
+        )
+
     def process(
         self,
         *,
@@ -75,7 +113,21 @@ class IncrementalNewsNoveltyPipeline:
         historical_embeddings: np.ndarray,
         new_news_df: pd.DataFrame,
         new_embeddings: np.ndarray | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> IncrementalPipelineResult:
+        process_started_at = perf_counter()
+
+        def report_progress(stage: str, **details: Any) -> None:
+            if progress_callback is None:
+                return
+            progress_callback(
+                stage,
+                {
+                    "elapsed_seconds": round(perf_counter() - process_started_at, 3),
+                    **details,
+                },
+            )
+
         cfg = self.config
         historical_news, historical_embeddings = self._prepare_with_embeddings(
             historical_news_df,
@@ -83,6 +135,10 @@ class IncrementalNewsNoveltyPipeline:
             frame_name="historical_news_df",
         )
         self._validate_history(historical_news)
+        report_progress(
+            "prepare_history",
+            historical_rows=int(len(historical_news)),
+        )
 
         if new_embeddings is None:
             new_news = self._prepare_without_embeddings(new_news_df)
@@ -100,15 +156,66 @@ class IncrementalNewsNoveltyPipeline:
                 new_embeddings,
                 frame_name="new_news_df",
             )
+        report_progress(
+            "prepare_new_batch",
+            new_rows=int(len(new_news)),
+        )
 
         if new_news.empty:
             raise ValueError("new_news_df must contain at least one article")
         self._validate_embedding_dimensions(historical_embeddings, new_embeddings)
         self._validate_ids(historical_news, new_news)
 
+        normalization_started_at = perf_counter()
         history = historical_news.copy().reset_index(drop=True)
         history_embeddings = l2_normalize(np.asarray(historical_embeddings, dtype=np.float32))
         normalized_new_embeddings = l2_normalize(np.asarray(new_embeddings, dtype=np.float32))
+        embedding_normalization_seconds = perf_counter() - normalization_started_at
+        history_embeddings_capacity = len(history) + len(normalized_new_embeddings)
+        working_history_embeddings = np.empty(
+            (history_embeddings_capacity, normalized_new_embeddings.shape[1]),
+            dtype=np.float32,
+        )
+        if len(history_embeddings):
+            working_history_embeddings[: len(history_embeddings)] = history_embeddings
+        working_history_dates = np.empty(history_embeddings_capacity, dtype="datetime64[ns]")
+        working_history_dates[:] = np.datetime64("NaT")
+        if len(history):
+            working_history_dates[: len(history)] = pd.to_datetime(
+                history[cfg.date_column],
+                errors="coerce",
+            ).to_numpy(dtype="datetime64[ns]")
+        working_history_topics = np.empty(history_embeddings_capacity, dtype=object)
+        working_history_topics[: len(history)] = history[cfg.topic_column].astype(
+            str
+        ).to_numpy()
+        working_history_news_ids = np.empty(history_embeddings_capacity, dtype=object)
+        working_history_news_ids[: len(history)] = history[cfg.id_column].astype(
+            str
+        ).to_numpy()
+        working_history_cluster_ids = np.empty(history_embeddings_capacity, dtype=object)
+        working_history_cluster_ids[: len(history)] = history[cfg.cluster_column].astype(
+            str
+        ).to_numpy()
+        working_history_component_ids = np.empty(history_embeddings_capacity, dtype=object)
+        working_history_component_ids[: len(history)] = history[
+            cfg.baseline_component_column
+        ].astype(str).to_numpy()
+        working_history_title_tokens: list[set[str] | None] = [None] * (
+            history_embeddings_capacity
+        )
+        working_history_numbers: list[set[str] | None] = [None] * (
+            history_embeddings_capacity
+        )
+        for index, row in history.iterrows():
+            working_history_title_tokens[index] = tokenize_for_jaccard(
+                row[cfg.title_column]
+            )
+            working_history_numbers[index] = extract_numbers(
+                row[cfg.title_column],
+                row[cfg.text_column],
+            )
+        cluster_sizes = history[cfg.cluster_column].astype(str).value_counts().to_dict()
 
         existing_cluster_ids = set(history[cfg.cluster_column].astype(str))
         existing_component_ids = set(history[cfg.baseline_component_column].astype(str))
@@ -119,20 +226,88 @@ class IncrementalNewsNoveltyPipeline:
         assignment_rows: list[dict] = []
         merged_cluster_count = 0
         merged_component_count = 0
+        candidate_scoring_seconds = 0.0
+        merge_seconds = 0.0
+        selection_seconds = 0.0
+        affected_lookup_seconds = 0.0
+        history_append_seconds = 0.0
+        candidate_rows_total = 0
+        candidate_rows_max = 0
+        rows_without_candidates = 0
+        progress_interval = max(1, min(1_000, max(len(new_news) // 20, 1)))
+
+        def cluster_assignment_details(completed_rows: int) -> dict[str, Any]:
+            return {
+                "completed_rows": int(completed_rows),
+                "total_rows": int(len(new_news)),
+                "history_rows": int(len(history)),
+                "assigned_to_existing": int(
+                    sum(
+                        row["update_method"] in {"baseline", "baseline_merge", "attach"}
+                        for row in assignment_rows
+                    )
+                ),
+                "created_clusters": int(
+                    sum(
+                        row["update_method"] in {"new_cluster", "new_cluster_ambiguous"}
+                        for row in assignment_rows
+                    )
+                ),
+                "candidate_scoring_seconds": round(candidate_scoring_seconds, 3),
+                "merge_seconds": round(merge_seconds, 3),
+                "selection_seconds": round(selection_seconds, 3),
+                "affected_lookup_seconds": round(affected_lookup_seconds, 3),
+                "history_append_seconds": round(history_append_seconds, 3),
+                "embedding_normalization_seconds": round(
+                    embedding_normalization_seconds,
+                    3,
+                ),
+                "candidate_rows_total": int(candidate_rows_total),
+                "candidate_rows_avg": round(
+                    candidate_rows_total / completed_rows if completed_rows else 0.0,
+                    3,
+                ),
+                "candidate_rows_max": int(candidate_rows_max),
+                "rows_without_candidates": int(rows_without_candidates),
+                "merged_cluster_count": int(merged_cluster_count),
+                "merged_component_count": int(merged_component_count),
+            }
+
+        report_progress(
+            "cluster_assignment",
+            **cluster_assignment_details(0),
+        )
 
         for new_position, current in new_news.iterrows():
             current_embedding = normalized_new_embeddings[new_position]
+            candidate_started_at = perf_counter()
             candidates = self._score_candidate_clusters(
-                history=history,
-                history_embeddings=history_embeddings,
+                history_count=len(history),
+                history_embeddings=working_history_embeddings,
+                history_dates=working_history_dates,
+                history_topics=working_history_topics,
+                history_news_ids=working_history_news_ids,
+                history_cluster_ids=working_history_cluster_ids,
+                history_component_ids=working_history_component_ids,
+                history_title_tokens=working_history_title_tokens,
+                history_numbers=working_history_numbers,
+                cluster_sizes=cluster_sizes,
                 current=current,
                 current_embedding=current_embedding,
                 allow_future=True,
             )
+            candidate_scoring_seconds += perf_counter() - candidate_started_at
+            candidate_rows = int(len(candidates))
+            candidate_rows_total += candidate_rows
+            candidate_rows_max = max(candidate_rows_max, candidate_rows)
+            if candidate_rows == 0:
+                rows_without_candidates += 1
+            merge_started_at = perf_counter()
             merge = self._merge_baseline_connected_clusters(
                 history=history,
                 candidates=candidates,
             )
+            merge_seconds += perf_counter() - merge_started_at
             if merge is not None:
                 (
                     canonical_cluster_id,
@@ -143,6 +318,31 @@ class IncrementalNewsNoveltyPipeline:
                 ) = merge
                 merged_cluster_count += len(merged_cluster_ids) - 1
                 merged_component_count += len(merged_component_ids) - 1
+                absorbed_cluster_ids = set(merged_cluster_ids[1:])
+                absorbed_component_ids = set(merged_component_ids[1:])
+                if absorbed_cluster_ids:
+                    active_cluster_ids = working_history_cluster_ids[: len(history)]
+                    cluster_mask = np.isin(
+                        active_cluster_ids,
+                        list(absorbed_cluster_ids),
+                    )
+                    active_cluster_ids[cluster_mask] = canonical_cluster_id
+                    absorbed_size = sum(
+                        cluster_sizes.get(cluster_id, 0)
+                        for cluster_id in absorbed_cluster_ids
+                    )
+                    cluster_sizes[canonical_cluster_id] = int(
+                        cluster_sizes.get(canonical_cluster_id, 0) + absorbed_size
+                    )
+                    for cluster_id in absorbed_cluster_ids:
+                        cluster_sizes.pop(cluster_id, None)
+                if absorbed_component_ids:
+                    active_component_ids = working_history_component_ids[: len(history)]
+                    component_mask = np.isin(
+                        active_component_ids,
+                        list(absorbed_component_ids),
+                    )
+                    active_component_ids[component_mask] = canonical_component_id
                 for row in changed_rows:
                     news_id = str(row[cfg.id_column])
                     if news_id in historical_ids and news_id not in reassigned_historical_ids:
@@ -178,12 +378,14 @@ class IncrementalNewsNoveltyPipeline:
                         )
                     ],
                 )
+            selection_started_at = perf_counter()
             assignment = self._select_assignment(
                 current=current,
                 candidates=candidates,
                 existing_cluster_ids=existing_cluster_ids,
                 existing_component_ids=existing_component_ids,
             )
+            selection_seconds += perf_counter() - selection_started_at
             if merge is not None:
                 assignment["assignment_method"] = "baseline"
                 assignment["update_method"] = "baseline_merge"
@@ -207,12 +409,14 @@ class IncrementalNewsNoveltyPipeline:
                 current=current,
                 cluster_id=cluster_id,
             )
+            affected_started_at = perf_counter()
             affected_ids = self._find_affected_historical_ids(
                 history=history,
                 historical_ids=historical_ids,
                 current=current,
                 cluster_id=cluster_id,
             )
+            affected_lookup_seconds += perf_counter() - affected_started_at
             affected_historical_ids.update(affected_ids)
             assignment["late_arrival"] = bool(late_arrival)
             assignment["affected_historical_count"] = int(len(affected_ids))
@@ -223,8 +427,32 @@ class IncrementalNewsNoveltyPipeline:
             history_row = current.to_dict()
             history_row[cfg.cluster_column] = cluster_id
             history_row[cfg.baseline_component_column] = baseline_component_id
-            history = pd.concat([history, pd.DataFrame([history_row])], ignore_index=True)
-            history_embeddings = np.vstack([history_embeddings, current_embedding])
+            append_started_at = perf_counter()
+            history.loc[len(history)] = history_row
+            appended_index = len(history) - 1
+            working_history_embeddings[appended_index] = current_embedding
+            working_history_dates[appended_index] = self._datetime64(
+                current[cfg.date_column]
+            )
+            working_history_topics[appended_index] = str(current[cfg.topic_column])
+            working_history_news_ids[appended_index] = str(current[cfg.id_column])
+            working_history_cluster_ids[appended_index] = cluster_id
+            working_history_component_ids[appended_index] = baseline_component_id
+            working_history_title_tokens[appended_index] = tokenize_for_jaccard(
+                current[cfg.title_column]
+            )
+            working_history_numbers[appended_index] = extract_numbers(
+                current[cfg.title_column],
+                current[cfg.text_column],
+            )
+            cluster_sizes[cluster_id] = int(cluster_sizes.get(cluster_id, 0) + 1)
+            history_append_seconds += perf_counter() - append_started_at
+            completed_rows = len(assignment_rows)
+            if completed_rows % progress_interval == 0 or completed_rows == len(new_news):
+                report_progress(
+                    "cluster_assignment",
+                    **cluster_assignment_details(completed_rows),
+                )
 
         assignments = pd.DataFrame(assignment_rows)
         final_cluster_by_id = history.set_index(cfg.id_column)[cfg.cluster_column].astype(str)
@@ -250,6 +478,12 @@ class IncrementalNewsNoveltyPipeline:
         combined_news = pd.concat([historical_clustered, new_clustered], ignore_index=True)
         combined_embeddings = np.vstack([historical_embeddings, new_embeddings]).astype(np.float32)
 
+        report_progress(
+            "novelty_prediction",
+            combined_rows=int(len(combined_news)),
+            new_rows=int(len(new_clustered)),
+            historical_rows=int(len(historical_clustered)),
+        )
         all_predictions = self.novelty_model.predict_clustered_with_fallback(
             news_df=combined_news,
             embeddings=combined_embeddings,
@@ -259,6 +493,10 @@ class IncrementalNewsNoveltyPipeline:
             date_column=cfg.date_column,
             title_column=cfg.title_column,
             text_column=cfg.text_column,
+        )
+        report_progress(
+            "novelty_prediction_done",
+            prediction_rows=int(len(all_predictions)),
         )
         new_ids = set(new_clustered[cfg.id_column].astype(str))
         predictions = all_predictions[
@@ -319,6 +557,12 @@ class IncrementalNewsNoveltyPipeline:
             [assignments, pd.DataFrame(reassigned_historical_rows)],
             ignore_index=True,
             sort=False,
+        )
+        report_progress(
+            "result_assembly",
+            requested_rows=int(len(requested_ids)),
+            updated_rows=int(len(updated_ids)),
+            recalculated_historical_rows=int(len(affected_historical_ids)),
         )
 
         diagnostics = {
@@ -457,30 +701,48 @@ class IncrementalNewsNoveltyPipeline:
                 f"{historical_embeddings.shape[1]} != {new_embeddings.shape[1]}"
             )
 
+    @staticmethod
+    def _datetime64(value: Any) -> np.datetime64:
+        timestamp = pd.to_datetime(value, errors="coerce")
+        if pd.isna(timestamp):
+            return np.datetime64("NaT")
+        return timestamp.to_datetime64()
+
     def _score_candidate_clusters(
         self,
         *,
-        history: pd.DataFrame,
+        history_count: int,
         history_embeddings: np.ndarray,
+        history_dates: np.ndarray,
+        history_topics: np.ndarray,
+        history_news_ids: np.ndarray,
+        history_cluster_ids: np.ndarray,
+        history_component_ids: np.ndarray,
+        history_title_tokens: list[set[str] | None],
+        history_numbers: list[set[str] | None],
+        cluster_sizes: dict[str, int],
         current: pd.Series,
         current_embedding: np.ndarray,
         allow_future: bool,
     ) -> pd.DataFrame:
         cfg = self.config
-        if history.empty:
+        if history_count == 0:
             return pd.DataFrame()
 
-        current_date = current[cfg.date_column]
-        dates = pd.to_datetime(history[cfg.date_column], errors="coerce")
-        signed_delta_days = (current_date - dates).dt.total_seconds() / (24 * 60 * 60)
-        distance_days = signed_delta_days.abs() if allow_future else signed_delta_days
-        temporal_mask = distance_days.le(cfg.baseline_window_days)
+        current_date = pd.to_datetime(current[cfg.date_column], errors="coerce")
+        if pd.isna(current_date):
+            return pd.DataFrame()
+        signed_delta_days = (
+            self._datetime64(current_date) - history_dates[:history_count]
+        ) / np.timedelta64(1, "D")
+        distance_days = np.abs(signed_delta_days) if allow_future else signed_delta_days
+        temporal_mask = distance_days <= cfg.baseline_window_days
         if not allow_future:
-            temporal_mask &= signed_delta_days.ge(0)
-        candidate_mask = history[cfg.topic_column].astype(str).eq(
-            str(current[cfg.topic_column])
+            temporal_mask &= signed_delta_days >= 0
+        candidate_mask = (
+            history_topics[:history_count] == str(current[cfg.topic_column])
         ) & temporal_mask
-        candidate_indices = history.index[candidate_mask].to_numpy(dtype=int)
+        candidate_indices = np.flatnonzero(candidate_mask)
         if len(candidate_indices) == 0:
             return pd.DataFrame()
 
@@ -492,19 +754,14 @@ class IncrementalNewsNoveltyPipeline:
         )
         rows: list[dict] = []
         for index, similarity in zip(candidate_indices, similarities, strict=True):
-            previous = history.loc[index]
-            days = float(distance_days.loc[index])
+            days = float(distance_days[index])
+            previous_title_tokens = history_title_tokens[index] or set()
+            previous_numbers = history_numbers[index] or set()
             title_similarity = jaccard(
-                tokenize_for_jaccard(previous[cfg.title_column]),
+                previous_title_tokens,
                 current_title_tokens,
             )
-            shared_numbers = len(
-                extract_numbers(
-                    previous[cfg.title_column],
-                    previous[cfg.text_column],
-                )
-                & current_numbers
-            )
+            shared_numbers = len(previous_numbers & current_numbers)
             strong = float(similarity) >= cfg.baseline_similarity
             attach = (
                 float(similarity) >= cfg.attach_similarity
@@ -518,11 +775,9 @@ class IncrementalNewsNoveltyPipeline:
                 continue
             rows.append(
                 {
-                    cfg.cluster_column: str(previous[cfg.cluster_column]),
-                    cfg.baseline_component_column: str(
-                        previous[cfg.baseline_component_column]
-                    ),
-                    "parent_news_id": str(previous[cfg.id_column]),
+                    cfg.cluster_column: str(history_cluster_ids[index]),
+                    cfg.baseline_component_column: str(history_component_ids[index]),
+                    "parent_news_id": str(history_news_ids[index]),
                     "assignment_method": "baseline" if strong else "attach",
                     "similarity": float(similarity),
                     "days_diff": days,
@@ -534,7 +789,6 @@ class IncrementalNewsNoveltyPipeline:
             return pd.DataFrame()
 
         pair_candidates = pd.DataFrame(rows)
-        cluster_sizes = history[cfg.cluster_column].astype(str).value_counts()
         aggregated_rows: list[dict] = []
         for cluster_id, part in pair_candidates.groupby(cfg.cluster_column, sort=False):
             best = part.sort_values(

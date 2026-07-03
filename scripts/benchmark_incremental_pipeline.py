@@ -28,6 +28,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bootstrap-days", type=int, default=14)
     parser.add_argument("--checkpoint-days", type=int, default=7)
     parser.add_argument("--max-checkpoints", type=int, default=None)
+    parser.add_argument("--history-window-days", type=int, default=None)
+    parser.add_argument("--expand-history-clusters", action="store_true")
+    parser.add_argument("--history-cluster-expansion-max-rows", type=int, default=20_000)
     parser.add_argument("--device", type=str, default=None)
     return parser.parse_args()
 
@@ -89,6 +92,9 @@ def main() -> None:
             bootstrap_days=args.bootstrap_days,
             checkpoint_days=args.checkpoint_days,
             max_checkpoints=args.max_checkpoints,
+            history_window_days=args.history_window_days,
+            expand_history_clusters=args.expand_history_clusters,
+            history_cluster_expansion_max_rows=args.history_cluster_expansion_max_rows,
         ),
     )
 
@@ -109,6 +115,9 @@ def main() -> None:
         "rows": int(len(news)),
         "bootstrap_days": args.bootstrap_days,
         "checkpoint_days": args.checkpoint_days,
+        "history_window_days": args.history_window_days,
+        "expand_history_clusters": bool(args.expand_history_clusters),
+        "history_cluster_expansion_max_rows": args.history_cluster_expansion_max_rows,
         "checkpoints": int(len(result.metrics)),
         "final_checkpoint": {
             key: value.isoformat() if isinstance(value, pd.Timestamp) else value

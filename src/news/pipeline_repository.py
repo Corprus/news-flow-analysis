@@ -99,6 +99,7 @@ class NewsPipelineRepository:
                 "News articles are not ready for pipeline; missing required fields: "
                 + "; ".join(invalid[:10])
             )
+        frame = frame.sort_values(["published_at", "news_id"]).reset_index(drop=True)
         return frame
 
     async def load_history(
@@ -108,48 +109,97 @@ class NewsPipelineRepository:
         exclude_news_ids: list[str],
         embedding_model: str,
         embedding_model_revision: str,
+        published_from: datetime | None = None,
+        published_to: datetime | None = None,
+        expand_clusters: bool = False,
+        cluster_expansion_max_rows: int = 0,
     ) -> tuple[pd.DataFrame, np.ndarray]:
+        base_predicates = [
+            "NOT (a.id = ANY(%s::uuid[]))",
+            "a.status = %s",
+            "a.visibility = %s",
+            "a.organization_id = %s",
+            "e.model_name = %s",
+            "e.model_revision = %s",
+        ]
+        base_params: list[Any] = [
+            exclude_news_ids,
+            ArticleStatus.PROCESSED.value,
+            ArticleVisibility.PUBLIC.value,
+            organization_id,
+            embedding_model,
+            embedding_model_revision,
+        ]
+        predicates = list(base_predicates)
+        params = list(base_params)
+        if published_from is not None:
+            predicates.append("a.published_at >= %s")
+            params.append(published_from)
+        if published_to is not None:
+            predicates.append("a.published_at <= %s")
+            params.append(published_to)
+        where_clause = "\n                      AND ".join(predicates)
+        select_sql = """
+            SELECT
+                a.id::text AS news_id,
+                a.organization_id::text AS organization_id,
+                a.published_at,
+                COALESCE(a.topic, '<missing>') AS topic,
+                a.title,
+                a.content AS text,
+                COALESCE(a.url, '') AS url,
+                s.cluster_id,
+                s.baseline_component_id,
+                s.assignment_method,
+                s.assignment_parent_news_id::text,
+                s.assignment_similarity,
+                s.attached_to_component_id,
+                e.embedding::text
+            FROM article_pipeline_state s
+            JOIN news_articles a ON a.id = s.article_id
+            JOIN article_pipeline_embeddings e ON e.article_id = a.id
+        """
         async with await AsyncConnection.connect(self._database_url) as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
-                    """
-                    SELECT
-                        a.id::text AS news_id,
-                        a.organization_id::text AS organization_id,
-                        a.published_at,
-                        COALESCE(a.topic, '<missing>') AS topic,
-                        a.title,
-                        a.content AS text,
-                        COALESCE(a.url, '') AS url,
-                        s.cluster_id,
-                        s.baseline_component_id,
-                        s.assignment_method,
-                        s.assignment_parent_news_id::text,
-                        s.assignment_similarity,
-                        s.attached_to_component_id,
-                        e.embedding::text
-                    FROM article_pipeline_state s
-                    JOIN news_articles a ON a.id = s.article_id
-                    JOIN article_pipeline_embeddings e ON e.article_id = a.id
-                    WHERE NOT (a.id = ANY(%s::uuid[]))
-                      AND a.status = %s
-                      AND a.visibility = %s
-                      AND a.organization_id = %s
-                      AND e.model_name = %s
-                      AND e.model_revision = %s
+                    f"""
+                    {select_sql}
+                    WHERE {where_clause}
                     ORDER BY a.published_at, a.id
                     """,
-                    (
-                        exclude_news_ids,
-                        ArticleStatus.PROCESSED.value,
-                        ArticleVisibility.PUBLIC.value,
-                        organization_id,
-                        embedding_model,
-                        embedding_model_revision,
-                    ),
+                    params,
                 )
                 rows = await cursor.fetchall()
                 columns = [column.name for column in cursor.description]
+                if rows and expand_clusters and cluster_expansion_max_rows > len(rows):
+                    cluster_ids = sorted({str(row[7]) for row in rows if row[7] is not None})
+                    if cluster_ids:
+                        expansion_predicates = [
+                            *base_predicates,
+                            "s.cluster_id = ANY(%s::text[])",
+                        ]
+                        expansion_params = [
+                            *base_params,
+                            cluster_ids,
+                        ]
+                        expansion_where_clause = "\n                          AND ".join(
+                            expansion_predicates
+                        )
+                        await cursor.execute(
+                            f"""
+                            {select_sql}
+                            WHERE {expansion_where_clause}
+                            ORDER BY a.published_at, a.id
+                            LIMIT %s
+                            """,
+                            [
+                                *expansion_params,
+                                cluster_expansion_max_rows + 1,
+                            ],
+                        )
+                        expanded_rows = await cursor.fetchall()
+                        if len(expanded_rows) <= cluster_expansion_max_rows:
+                            rows = expanded_rows
         if not rows:
             return (
                 pd.DataFrame(
@@ -194,6 +244,97 @@ class NewsPipelineRepository:
                 ),
             )
 
+    async def save_embeddings(
+        self,
+        *,
+        article_ids: list[str],
+        embeddings: np.ndarray,
+        model_name: str,
+        model_revision: str,
+    ) -> None:
+        if len(article_ids) != len(embeddings):
+            raise ValueError(
+                "article_ids and embeddings must have the same length: "
+                f"{len(article_ids)} != {len(embeddings)}"
+            )
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            for article_id, embedding in zip(article_ids, embeddings, strict=True):
+                await connection.execute(
+                    """
+                    INSERT INTO article_pipeline_embeddings (
+                        id, article_id, model_name, model_revision, embedding, created_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s::vector, now())
+                    ON CONFLICT (article_id, model_name, model_revision) DO UPDATE
+                    SET embedding = EXCLUDED.embedding, created_at = now()
+                    """,
+                    (
+                        str(uuid4()),
+                        article_id,
+                        model_name,
+                        model_revision,
+                        _vector_literal(embedding),
+                    ),
+                )
+
+    async def load_existing_embedding_ids(
+        self,
+        *,
+        article_ids: list[str],
+        model_name: str,
+        model_revision: str,
+    ) -> set[str]:
+        if not article_ids:
+            return set()
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    SELECT article_id::text
+                    FROM article_pipeline_embeddings
+                    WHERE article_id = ANY(%s::uuid[])
+                      AND model_name = %s
+                      AND model_revision = %s
+                    """,
+                    (article_ids, model_name, model_revision),
+                )
+                rows = await cursor.fetchall()
+        return {str(row[0]) for row in rows}
+
+    async def load_embeddings(
+        self,
+        *,
+        article_ids: list[str],
+        model_name: str,
+        model_revision: str,
+    ) -> np.ndarray:
+        if not article_ids:
+            return np.empty((0, 1024), dtype=np.float32)
+        async with await AsyncConnection.connect(self._database_url) as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    SELECT article_id::text, embedding::text
+                    FROM article_pipeline_embeddings
+                    WHERE article_id = ANY(%s::uuid[])
+                      AND model_name = %s
+                      AND model_revision = %s
+                    """,
+                    (article_ids, model_name, model_revision),
+                )
+                rows = await cursor.fetchall()
+        embeddings_by_id = {
+            str(article_id): json.loads(embedding)
+            for article_id, embedding in rows
+        }
+        missing = [article_id for article_id in article_ids if article_id not in embeddings_by_id]
+        if missing:
+            raise ValueError(f"Missing embeddings for requested news: {missing[:10]}")
+        return np.asarray(
+            [embeddings_by_id[article_id] for article_id in article_ids],
+            dtype=np.float32,
+        )
+
     async def save_result(self, result: PipelineResult) -> None:
         prediction_by_id = (
             result.predictions.assign(news_id=result.predictions["news_id"].astype(str))
@@ -227,26 +368,14 @@ class NewsPipelineRepository:
             embedding_by_id=embedding_by_id,
         )
 
-        async with await AsyncConnection.connect(self._database_url) as connection:
-            for news_id, embedding in embedding_by_id.items():
-                await connection.execute(
-                    """
-                    INSERT INTO article_pipeline_embeddings (
-                        id, article_id, model_name, model_revision, embedding, created_at
-                    )
-                    VALUES (%s, %s, %s, %s, %s::vector, now())
-                    ON CONFLICT (article_id, model_name, model_revision) DO UPDATE
-                    SET embedding = EXCLUDED.embedding, created_at = now()
-                    """,
-                    (
-                        str(uuid4()),
-                        news_id,
-                        result.versions.embedding_model,
-                        result.versions.embedding_model_revision,
-                        _vector_literal(embedding),
-                    ),
-                )
+        await self.save_embeddings(
+            article_ids=list(embedding_by_id.keys()),
+            embeddings=np.asarray(list(embedding_by_id.values()), dtype=np.float32),
+            model_name=result.versions.embedding_model,
+            model_revision=result.versions.embedding_model_revision,
+        )
 
+        async with await AsyncConnection.connect(self._database_url) as connection:
             existing = await self._load_existing_state(connection, persisted_ids)
             affected_cluster_ids = self._collect_affected_cluster_ids(
                 existing=existing,

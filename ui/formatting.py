@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+DEMO_DUPLICATE_TITLE_RE = re.compile(r"\s*\(повтор(?:\s+[^)]*)?\)\s*$")
 
 
 def parse_decimal(value: str) -> Decimal | None:
@@ -57,3 +61,25 @@ def escape_markdown(value: str) -> str:
     for character in ("\\", "*", "_", "`", "[", "]"):
         value = value.replace(character, f"\\{character}")
     return value
+
+
+def display_news_title(value: object, fallback: str = "Без названия") -> str:
+    title = str(value or fallback).strip()
+    return DEMO_DUPLICATE_TITLE_RE.sub("", title) or fallback
+
+
+def display_news_url(value: object) -> str:
+    url = str(value or "").strip()
+    if not url:
+        return ""
+    parts = urlsplit(url)
+    if not parts.query:
+        return url
+    query = [
+        (key, current_value)
+        for key, current_value in parse_qsl(parts.query, keep_blank_values=True)
+        if key != "demo_duplicate"
+    ]
+    return urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+    )

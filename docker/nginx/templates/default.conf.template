@@ -13,7 +13,7 @@ upstream api_backend {
 server {
   listen 80;
   server_name _;
-  client_max_body_size 200m;
+  client_max_body_size ${NEWS_IMPORT_MAX_FILE_MIB}m;
 
   gzip on;
   gzip_vary on;

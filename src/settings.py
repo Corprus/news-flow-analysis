@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     demo_admin_login: str = Field(default="admin", alias="DEMO_ADMIN_LOGIN")
     demo_admin_password: str = Field(default="admin12345", alias="DEMO_ADMIN_PASSWORD")
     demo_initial_credit: Decimal = Field(
-        default=Decimal("100.00"),
+        default=Decimal("100000.00"),
         ge=0,
         alias="DEMO_INITIAL_CREDIT",
     )
@@ -36,6 +36,10 @@ class Settings(BaseSettings):
         default="news_vectorization.jobs",
         alias="NEWS_VECTORIZATION_QUEUE",
     )
+    news_aggregation_queue: str = Field(
+        default="news_aggregation.jobs",
+        alias="NEWS_AGGREGATION_QUEUE",
+    )
     sqlalchemy_echo: bool = Field(default=False, alias="SQLALCHEMY_ECHO")
     password_hash_secret: str = Field(
         default="change-me-local-password-secret",
@@ -51,6 +55,16 @@ class Settings(BaseSettings):
     )
     news_add_cost: Decimal = Field(default=Decimal("1.00"), ge=0, alias="NEWS_ADD_COST")
     news_search_cost: Decimal = Field(default=Decimal("0.00"), ge=0, alias="NEWS_SEARCH_COST")
+    news_import_max_file_mib: int = Field(
+        default=512,
+        ge=1,
+        alias="NEWS_IMPORT_MAX_FILE_MIB",
+    )
+    news_import_max_rows: int = Field(
+        default=1_000_000,
+        ge=1,
+        alias="NEWS_IMPORT_MAX_ROWS",
+    )
     pipeline_model_path: str = Field(
         default="data/artifacts/models/final_exp10/final_novelty_model.joblib",
         alias="PIPELINE_MODEL_PATH",
@@ -60,6 +74,79 @@ class Settings(BaseSettings):
         alias="PIPELINE_CONFIG_PATH",
     )
     pipeline_device: str | None = Field(default=None, alias="PIPELINE_DEVICE")
+    pipeline_chunk_size: int = Field(
+        default=5_000,
+        ge=1,
+        alias="PIPELINE_CHUNK_SIZE",
+    )
+    pipeline_aggregate_batch_size: int = Field(
+        default=1_000,
+        ge=1,
+        alias="PIPELINE_AGGREGATE_BATCH_SIZE",
+    )
+    pipeline_history_window_days: int = Field(
+        default=30,
+        ge=0,
+        alias="PIPELINE_HISTORY_WINDOW_DAYS",
+    )
+    pipeline_history_expand_clusters: bool = Field(
+        default=True,
+        alias="PIPELINE_HISTORY_EXPAND_CLUSTERS",
+    )
+    pipeline_history_cluster_expansion_max_rows: int = Field(
+        default=20_000,
+        ge=0,
+        alias="PIPELINE_HISTORY_CLUSTER_EXPANSION_MAX_ROWS",
+    )
+    pipeline_base_story_threshold: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        alias="PIPELINE_BASE_STORY_THRESHOLD",
+    )
+    pipeline_base_story_window_days: int | None = Field(
+        default=None,
+        ge=0,
+        alias="PIPELINE_BASE_STORY_WINDOW_DAYS",
+    )
+    pipeline_attach_min_similarity: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        alias="PIPELINE_ATTACH_MIN_SIMILARITY",
+    )
+    pipeline_attach_max_days: int | None = Field(
+        default=None,
+        ge=0,
+        alias="PIPELINE_ATTACH_MAX_DAYS",
+    )
+    pipeline_attach_min_margin: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        alias="PIPELINE_ATTACH_MIN_MARGIN",
+    )
+    pipeline_attach_source_max_cluster_size: int | None = Field(
+        default=None,
+        ge=1,
+        alias="PIPELINE_ATTACH_SOURCE_MAX_CLUSTER_SIZE",
+    )
+    pipeline_attach_title_jaccard_threshold: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        alias="PIPELINE_ATTACH_TITLE_JACCARD_THRESHOLD",
+    )
+    pipeline_attach_min_shared_numbers: int | None = Field(
+        default=None,
+        ge=0,
+        alias="PIPELINE_ATTACH_MIN_SHARED_NUMBERS",
+    )
+    pipeline_attach_require_evidence: bool | None = Field(
+        default=None,
+        alias="PIPELINE_ATTACH_REQUIRE_EVIDENCE",
+    )
+    model_service_role: str = Field(default="all", alias="MODEL_SERVICE_ROLE")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

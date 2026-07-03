@@ -6,6 +6,10 @@ from datetime import date, timedelta, timezone
 API_INTERNAL = os.getenv("API_BASE_URL", "http://nginx/api")
 AUTH_COOKIE_NAME = "semantic_news_novelty_access_token"
 AUTH_COOKIE_TTL_DAYS = int(os.getenv("AUTH_COOKIE_TTL_DAYS", "1"))
+NEWS_IMPORT_MAX_FILE_MIB = int(os.getenv("NEWS_IMPORT_MAX_FILE_MIB", "512"))
+NEWS_IMPORT_UPLOAD_TIMEOUT_SECONDS = int(
+    os.getenv("NEWS_IMPORT_UPLOAD_TIMEOUT_SECONDS", "900")
+)
 MOSCOW_TIMEZONE = timezone(timedelta(hours=3))
 MIN_NEWS_DATE = date(1900, 1, 1)
 

@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>SNN — шпаргалка Q&A</title>
+  <style>
+    @page {
+      size: A4 landscape;
+      margin: 7mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: #111;
+      font-family: Arial, "Segoe UI", sans-serif;
+      font-size: 9.8px;
+      line-height: 1.18;
+    }
+
+    .page {
+      min-height: 196mm;
+      page-break-after: always;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6mm;
+    }
+
+    .page:last-child {
+      page-break-after: auto;
+    }
+
+    h1 {
+      grid-column: 1 / -1;
+      margin: 0 0 2mm;
+      font-size: 17px;
+      line-height: 1.1;
+    }
+
+    h2 {
+      margin: 0 0 1.3mm;
+      padding-bottom: 0.7mm;
+      border-bottom: 1px solid #888;
+      font-size: 12px;
+    }
+
+    .lead {
+      grid-column: 1 / -1;
+      margin: -1mm 0 2mm;
+      font-size: 9.4px;
+    }
+
+    section {
+      break-inside: avoid;
+      margin-bottom: 2.6mm;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      vertical-align: top;
+      padding: 0.8mm 1mm;
+      border-bottom: 1px solid #ddd;
+    }
+
+    th {
+      text-align: left;
+      font-size: 9px;
+      background: #f2f2f2;
+    }
+
+    td:first-child,
+    th:first-child {
+      width: 28%;
+      font-weight: 700;
+    }
+
+    .metric td:nth-child(2),
+    .metric th:nth-child(2) {
+      width: 35%;
+      font-weight: 700;
+    }
+
+    .perf th,
+    .perf td {
+      font-size: 9px;
+      padding: 0.75mm 0.85mm;
+    }
+
+    .perf td:first-child,
+    .perf th:first-child {
+      width: 15%;
+      font-weight: 700;
+    }
+
+    .perf td:nth-child(2),
+    .perf th:nth-child(2) {
+      width: 16%;
+      font-weight: 700;
+    }
+
+    .perf td:nth-child(3),
+    .perf th:nth-child(3) {
+      width: 16%;
+    }
+
+    .perf td:nth-child(4),
+    .perf th:nth-child(4) {
+      width: 17%;
+      font-weight: 700;
+    }
+
+    .perf td:nth-child(5),
+    .perf th:nth-child(5) {
+      width: 14%;
+      font-weight: 700;
+    }
+
+    .qa td:first-child,
+    .qa th:first-child {
+      width: 34%;
+    }
+
+    .note {
+      margin-top: 1.3mm;
+      padding: 1.1mm 1.5mm;
+      background: #f7f7f7;
+      border-left: 3px solid #666;
+      font-size: 9.2px;
+    }
+
+    .compact-list {
+      margin: 0;
+      padding-left: 4mm;
+    }
+
+    .compact-list li {
+      margin: 0 0 0.6mm;
+    }
+
+    .mono {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 8.8px;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <h1>SNN — шпаргалка Q&A для защиты</h1>
+    <p class="lead">
+      Актуально на 01.07.2026. Ключевая формулировка: Semantic News Novelty — это MVP-сервис для постобработки уже собранных новостей:
+      сюжеты, новизна, дедупликация и семантический поиск. Это не full-cycle медиамониторинг.
+    </p>
+
+    <div>
+      <section>
+        <h2>1. Главные цифры</h2>
+        <table class="metric">
+          <thead>
+            <tr><th>Тема</th><th>Цифра</th><th>Что сказать</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Кластеры</td>
+              <td>Pairwise F1: 0.7697 → 0.9017</td>
+              <td>Финальная схема заметно лучше собирает публикации одного сюжета.</td>
+            </tr>
+            <tr>
+              <td>Recall кластеров</td>
+              <td>0.6257 → 0.8342</td>
+              <td>Главный выигрыш: меньше фрагментации одного инфоповода.</td>
+            </tr>
+            <tr>
+              <td>Precision кластеров</td>
+              <td>1.0000 → 0.9811</td>
+              <td>Точность почти не просела, несмотря на рост recall.</td>
+            </tr>
+            <tr>
+              <td>False merge</td>
+              <td>1.89%</td>
+              <td>Контролируемая цена: 3 ошибочные same-story пары из 159.</td>
+            </tr>
+            <tr>
+              <td>Novelty</td>
+              <td>P 0.8471 / R 0.9863 / F1 0.9114</td>
+              <td>Настроено под «не пропустить важное обновление».</td>
+            </tr>
+            <tr>
+              <td>Поиск</td>
+              <td>MRR@10: 0.9067 → 0.9944</td>
+              <td>Семантический поиск лучше keyword baseline.</td>
+            </tr>
+            <tr>
+              <td>Повторы Top-10</td>
+              <td>46.64% → 11.60%</td>
+              <td>Cluster collapse даёт −75.14% повторов в выдаче.</td>
+            </tr>
+            <tr>
+              <td>Golden</td>
+              <td>121 / 87 / 119</td>
+              <td>121 строка для кластеров, 87 для novelty, 119 search-запросов.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>2. Производительность</h2>
+        <table class="perf">
+          <thead>
+            <tr>
+              <th>Набор</th>
+              <th>Режим</th>
+              <th>Import</th>
+              <th>Pipeline / job</th>
+              <th>Скорость</th>
+              <th>Структура / вывод</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>10 000</td>
+              <td>full</td>
+              <td>не замерялся</td>
+              <td>226.33 с (3:46)</td>
+              <td>44.18/с</td>
+              <td>Горячий Docker-сервис; сравнение с автономным скриптом.</td>
+            </tr>
+            <tr>
+              <td>50 000</td>
+              <td>full</td>
+              <td>114.42 с (1:54)</td>
+              <td>1237 с (20:37)</td>
+              <td>40.42/с</td>
+              <td>Крупный сервисный прогон; pipeline throughput почти как на 10k.</td>
+            </tr>
+            <tr>
+              <td>50 000</td>
+              <td>incremental_chunked</td>
+              <td>не замерялся</td>
+              <td>1741 с (29:01)</td>
+              <td>≈28.7/с</td>
+              <td>10 vectorize × 5000; 50 aggregate × 1000. Старый baseline до увеличения aggregate batch.</td>
+            </tr>
+            <tr>
+              <td>200 000</td>
+              <td>streaming incremental</td>
+              <td>596 с (9:56)</td>
+              <td>9036 с (2:30:36) e2e</td>
+              <td>≈22.2/с</td>
+              <td>40 vectorize × 5000; 40 aggregate × 5000; 200 050 processed с demo-строками.</td>
+            </tr>
+            <tr>
+              <td>GPU</td>
+              <td>RTX 4070 12 GB; avg 78%, peak 100%</td>
+              <td>Для pipeline узкое место — вычисления, не БД.</td>
+            </tr>
+            <tr>
+              <td>VRAM</td>
+              <td>50k peak 8.33 GiB; после 200k занято 11.7 / 12.3 GiB</td>
+              <td>Chunking не грузит весь корпус в GPU, но 12 GB — практический минимум для BGE-M3 на RTX 4070; CUDA cache держит память после прогона.</td>
+            </tr>
+            <tr>
+              <td>PostgreSQL</td>
+              <td>avg CPU 0.16 core; RAM 0.55 GiB</td>
+              <td>БД в 50k-прогоне не была узким местом.</td>
+            </tr>
+            <tr>
+              <td>CPU</td>
+              <td>2.15–2.46/с на 1000 статей</td>
+              <td>CPU годится для малых объёмов, для больших нужен GPU.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    <div>
+      <section>
+        <h2>3. Модель</h2>
+        <table class="qa">
+          <tbody>
+            <tr>
+              <td>Embeddings</td>
+              <td><span class="mono">BAAI/bge-m3</span>, 1024 dimensions. Дообученный BGE-M3 проверялся, но в runtime не вошёл.</td>
+            </tr>
+            <tr>
+              <td>Clustering</td>
+              <td>Base similarity 0.82, окно 14 дней; attach similarity 0.75, окно 7 дней.</td>
+            </tr>
+            <tr>
+              <td>Novelty thresholds</td>
+              <td>Significant 0.42; duplicate 0.90; review margin 0.10.</td>
+            </tr>
+            <tr>
+              <td>Признаки novelty</td>
+              <td>18 previous-only признаков: считаются только по прошлым публикациям, без утечки будущего.</td>
+            </tr>
+            <tr>
+              <td>Метки</td>
+              <td><span class="mono">significant / minor / duplicate</span>. Первая публикация нового кластера всегда significant.</td>
+            </tr>
+            <tr>
+              <td>Runtime-хранилище</td>
+              <td>PostgreSQL 16 + pgvector. FAISS в runtime не используется.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>4. Что закрыли по batch/API</h2>
+        <table class="qa">
+          <tbody>
+            <tr>
+              <td>Большой incremental</td>
+              <td>Старый монолитный job заменён на parent job и child jobs: <span class="mono">vectorize</span> + <span class="mono">aggregate</span>.</td>
+            </tr>
+            <tr>
+              <td>Batch-разбиение</td>
+              <td><span class="mono">PIPELINE_CHUNK_SIZE=5000</span>; <span class="mono">PIPELINE_AGGREGATE_BATCH_SIZE=5000</span>.</td>
+            </tr>
+            <tr>
+              <td>Порядок aggregate</td>
+              <td>Чтобы сохранить хронологию и не дать novelty-признакам смотреть в будущее.</td>
+            </tr>
+            <tr>
+              <td>Крупный импорт</td>
+              <td>CSV/ZIP/BZ2 import, publish/delete/reprocess, novelty labels и pipeline переведены на batch-сценарий; 200k — проверенный сервисный прогон.</td>
+            </tr>
+            <tr>
+              <td>504 на import</td>
+              <td>Снято: nginx timeout для <span class="mono">/api/</span> поднят до 600 с; крупный импорт идёт через async import job.</td>
+            </tr>
+            <tr>
+              <td>Что осталось</td>
+              <td>Для 500k/1M вопрос не архитектурный, а во времени выполнения, памяти PostgreSQL и стратегии импорта файла.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+    </div>
+  </main>
+
+  <main class="page">
+    <h1>Ответы на вопросы</h1>
+    <p class="lead">Формулировки ниже лучше держать короткими: сначала ответ, потом одна цифра или честная граница применимости.</p>
+
+    <div>
+      <section>
+        <h2>5. Incremental vs full</h2>
+        <table class="qa">
+          <tbody>
+            <tr>
+              <td>Как мерили</td>
+              <td>Replay на 3 176 публикациях за март–апрель 2004: первые 14 дней initial full, дальше недельные incremental-батчи.</td>
+            </tr>
+            <tr>
+              <td>7 дней</td>
+              <td>1 131 строка; Pairwise F1 0.917; recall 0.942; fragmentation 7.8%.</td>
+            </tr>
+            <tr>
+              <td>14 дней</td>
+              <td>1 496 строк; Pairwise F1 0.908; recall 0.924; fragmentation 9.2%.</td>
+            </tr>
+            <tr>
+              <td>28 дней</td>
+              <td>2 207 строк; Pairwise F1 0.877; recall 0.906; fragmentation 9.6%.</td>
+            </tr>
+            <tr>
+              <td>47 дней</td>
+              <td>3 176 строк; Pairwise F1 0.836; recall 0.859; fragmentation 10.8%.</td>
+            </tr>
+            <tr>
+              <td>Новизна</td>
+              <td>Согласованность novelty на последней точке — 98.1%; основной drift в структуре кластеров.</td>
+            </tr>
+            <tr>
+              <td>Ответ про гарантию</td>
+              <td>Бесконечное качество incremental не гарантируем: измерили накопление drift и поэтому закладываем регулярный full reclustering.</td>
+            </tr>
+            <tr>
+              <td>Политика</td>
+              <td>Стартовая гипотеза: full reclustering примерно раз в две недели с мониторингом качества.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>6. Типовые вопросы</h2>
+        <table class="qa">
+          <tbody>
+            <tr>
+              <td>Почему не ChatGPT?</td>
+              <td>ChatGPT не даёт контролируемую историю, роли, поиск по базе, on-premise и воспроизводимые метки кластеров/новизны.</td>
+            </tr>
+            <tr>
+              <td>Почему не Медиалогия?</td>
+              <td>SNN не заменяет full-cycle мониторинг. Это более узкий слой поверх данных клиента: сюжеты, новизна, дедупликация, поиск.</td>
+            </tr>
+            <tr>
+              <td>Почему BGE-M3?</td>
+              <td>Хорошая поддержка русского, open-source, локальный запуск, 1024-мерные embeddings для pgvector.</td>
+            </tr>
+            <tr>
+              <td>Почему recall важнее precision?</td>
+              <td>Для аналитика хуже пропустить важное обновление, чем увидеть лишнюю спорную карточку.</td>
+            </tr>
+            <tr>
+              <td>Можно ли гарантировать incremental?</td>
+              <td>Нет на бесконечном горизонте: replay 47 дней дал F1 0.836 и fragmentation 10.8%, поэтому нужен периодический full reclustering.</td>
+            </tr>
+            <tr>
+              <td>Что уже есть сверх ML?</td>
+              <td>UI, API, CSV/ZIP import, очередь, batch jobs, роли, организации, учёт операций, pgvector, мониторинг.</td>
+            </tr>
+            <tr>
+              <td>Как продавать?</td>
+              <td>Подписка для быстрого старта; on-premise для контроля данных и инфраструктуры клиента.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+    </div>
+
+    <div>
+      <section>
+        <h2>7. Деньги и позиционирование</h2>
+        <table class="qa">
+          <tbody>
+            <tr>
+              <td>SNN subscription</td>
+              <td>15–25 тыс. ₽/мес за организацию — гипотеза для пилота, не подтверждённый прайс.</td>
+            </tr>
+            <tr>
+              <td>SNN on-premise</td>
+              <td>300–600 тыс. ₽/год за инстанс — гипотеза лицензии/сопровождения.</td>
+            </tr>
+            <tr>
+              <td>Российский ориентир</td>
+              <td>Медиалогия SM: 22–105 тыс. ₽/мес как нижний ориентир full-cycle SaaS.</td>
+            </tr>
+            <tr>
+              <td>Западный ориентир</td>
+              <td>Feedly Market Intelligence: $1,600–2,400/мес; NewsWhip: около $2,000/user/month по Capterra.</td>
+            </tr>
+            <tr>
+              <td>Позиционирование</td>
+              <td>Дешевле и уже full-cycle решений: не собираем весь медиапоток, а улучшаем работу с уже собранным.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>8. Честные ограничения</h2>
+        <table class="qa">
+          <tbody>
+            <tr>
+              <td>Малый golden</td>
+              <td>Метрики подтверждают MVP-критерии, но не гарантируют перенос на новый домен.</td>
+            </tr>
+            <tr>
+              <td>Нет клиентского пилота</td>
+              <td>Следующая обязательная проверка — 300–500 публикаций клиента с экспертной оценкой.</td>
+            </tr>
+            <tr>
+              <td>Поиск синтетический</td>
+              <td>MRR@10 — smoke-test; продуктовый эффект надо мерить на реальных запросах аналитиков.</td>
+            </tr>
+            <tr>
+              <td>200k — проверено</td>
+              <td>200k прошли end-to-end за 2:30:36; 500k/1M требуют долгого прогона и контроля памяти PostgreSQL, но pipeline работает пачками.</td>
+            </tr>
+            <tr>
+              <td>Incremental drift</td>
+              <td>Кластеры со временем расходятся с full; нужен регулярный reclustering.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>9. Что дальше</h2>
+        <ul class="compact-list">
+          <li>Пилот на данных клиента: 300–500 публикаций и экспертная оценка.</li>
+          <li>Больше ручной разметки по кластерам, novelty и поиску.</li>
+          <li>Реальные поисковые запросы аналитиков вместо синтетических.</li>
+          <li>Улучшение названий кластеров и объяснений значимости.</li>
+          <li>RSS/API-интеграции и политика регулярного full reclustering.</li>
+        </ul>
+        <div class="note">
+          Короткая финальная формула: «Мы не обещаем заменить аналитика. Мы уменьшаем подготовительную работу:
+          склеиваем повторы, показываем развитие сюжета и даём поиск без дублирования».
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

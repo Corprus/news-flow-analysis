@@ -154,6 +154,31 @@ def test_transaction_records_actor_without_moving_balance_to_user(session: Sessi
     _assert_ledger_matches_balance(session, organization_id)
 
 
+def test_refund_credit_adds_to_actor_organization(session: Session) -> None:
+    organization_id, user_id = _create_organization_with_user(
+        session,
+        organization_name="Refunded",
+        login="refund-user",
+    )
+    accounting = AccountingService(session)
+
+    transaction_id = accounting.refund_credit(
+        user_id,
+        Decimal("4.00"),
+        TransactionReason.NEWS_IMPORT_REFUND,
+        UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+    )
+
+    transaction = session.get(Transaction, str(transaction_id))
+    assert transaction is not None
+    assert transaction.organization_id == str(organization_id)
+    assert transaction.actor_user_id == str(user_id)
+    assert transaction.amount == Decimal("4.00")
+    assert transaction.reason == TransactionReason.NEWS_IMPORT_REFUND.value
+    assert accounting.get_balance(organization_id) == Decimal("4.00")
+    _assert_ledger_matches_balance(session, organization_id)
+
+
 def test_batch_id_groups_related_withdrawals(session: Session) -> None:
     organization_id, user_id = _create_organization_with_user(
         session,

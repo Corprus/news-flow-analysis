@@ -15,6 +15,9 @@ class ReplayBenchmarkConfig:
     bootstrap_days: int = 14
     checkpoint_days: int = 7
     max_checkpoints: int | None = None
+    history_window_days: int | None = None
+    expand_history_clusters: bool = False
+    history_cluster_expansion_max_rows: int = 20_000
     id_column: str = "news_id"
     date_column: str = "published_at"
     cluster_column: str = "cluster_id"
@@ -141,6 +144,65 @@ def _novelty_metrics(
     }
 
 
+def _service_like_history(
+    history: pd.DataFrame,
+    new_news: pd.DataFrame,
+    *,
+    cfg: ReplayBenchmarkConfig,
+) -> tuple[pd.DataFrame, dict]:
+    if cfg.history_window_days is None:
+        return history.copy(), {
+            "history_rows_full": int(len(history)),
+            "history_rows_window": int(len(history)),
+            "history_rows_used": int(len(history)),
+            "history_expanded_clusters": 0,
+            "history_expansion_limited": False,
+        }
+
+    if history.empty or new_news.empty:
+        return history.copy(), {
+            "history_rows_full": int(len(history)),
+            "history_rows_window": int(len(history)),
+            "history_rows_used": int(len(history)),
+            "history_expanded_clusters": 0,
+            "history_expansion_limited": False,
+        }
+
+    window = pd.Timedelta(days=cfg.history_window_days)
+    published_from = new_news[cfg.date_column].min() - window
+    published_to = new_news[cfg.date_column].max() + window
+    date_values = pd.to_datetime(history[cfg.date_column], errors="coerce")
+    window_history = history[
+        date_values.ge(published_from) & date_values.le(published_to)
+    ].copy()
+    if (
+        not cfg.expand_history_clusters
+        or window_history.empty
+        or cfg.history_cluster_expansion_max_rows <= len(window_history)
+    ):
+        return window_history, {
+            "history_rows_full": int(len(history)),
+            "history_rows_window": int(len(window_history)),
+            "history_rows_used": int(len(window_history)),
+            "history_expanded_clusters": 0,
+            "history_expansion_limited": False,
+        }
+
+    cluster_ids = set(window_history[cfg.cluster_column].astype(str))
+    expanded_history = history[
+        history[cfg.cluster_column].astype(str).isin(cluster_ids)
+    ].copy()
+    expansion_limited = len(expanded_history) > cfg.history_cluster_expansion_max_rows
+    used_history = window_history if expansion_limited else expanded_history
+    return used_history, {
+        "history_rows_full": int(len(history)),
+        "history_rows_window": int(len(window_history)),
+        "history_rows_used": int(len(used_history)),
+        "history_expanded_clusters": 0 if expansion_limited else int(len(cluster_ids)),
+        "history_expansion_limited": bool(expansion_limited),
+    }
+
+
 def run_replay_benchmark(
     *,
     news_df: pd.DataFrame,
@@ -224,16 +286,26 @@ def run_replay_benchmark(
             ]
             if column in assignment_state.columns
         ]
-        history = cumulative_news.iloc[:previous_count].merge(
+        history = cumulative_news.iloc[:previous_count].copy()
+        history["_history_embedding_position"] = np.arange(previous_count)
+        history = history.merge(
             assignment_state[assignment_columns],
             on=cfg.id_column,
             how="left",
             validate="one_to_one",
         )
+        history, history_diagnostics = _service_like_history(
+            history,
+            new_news,
+            cfg=cfg,
+        )
+        history_embedding_positions = history.pop("_history_embedding_position").to_numpy(
+            dtype=int
+        )
         incremental_started = perf_counter()
         incremental_result = incremental_pipeline.process(
             historical_news_df=history,
-            historical_embeddings=matrix[:previous_count],
+            historical_embeddings=matrix[history_embedding_positions],
             new_news_df=new_news,
             new_embeddings=new_embeddings,
         )
@@ -313,6 +385,7 @@ def run_replay_benchmark(
                 "new_rows": int(cumulative_count - previous_count),
                 "incremental_seconds": float(incremental_seconds),
                 "full_seconds": float(full_seconds),
+                **history_diagnostics,
                 **structure_metrics,
                 **novelty_metrics,
                 "created_clusters_in_batch": int(
@@ -341,6 +414,7 @@ def run_replay_benchmark(
             {
                 "checkpoint": checkpoint_number,
                 "checkpoint_date": checkpoint_date,
+                **history_diagnostics,
                 **incremental_result.diagnostics,
             }
         )

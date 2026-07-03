@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import html
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 import streamlit as st
 
-from api_client import ApiClient
+from api_client import ApiClient, ApiError
 from auth import clear_authentication, refresh_account
-from config import MIN_NEWS_DATE, PAGE_LABELS, ROLE_LABELS
+from config import MIN_NEWS_DATE, MOSCOW_TIMEZONE, PAGE_LABELS, ROLE_LABELS
+
+DATE_NEWS_SELECTED_KEY = "date_news_selected_date"
+SIDEBAR_NEWS_DATE_KEY = "sidebar_news_date"
 
 
 def render_sidebar(client: ApiClient) -> str:
@@ -86,22 +90,23 @@ def render_sidebar(client: ApiClient) -> str:
                 st.rerun()
 
         st.markdown("### Новости по дате")
+        selected_date = _get_selected_news_date(client)
+        if st.session_state.get(SIDEBAR_NEWS_DATE_KEY) != selected_date:
+            st.session_state[SIDEBAR_NEWS_DATE_KEY] = selected_date
         st.date_input(
             "Выберите день",
-            value=st.session_state.get("date_news_selected_date"),
+            value=selected_date,
             min_value=MIN_NEWS_DATE,
             format="DD.MM.YYYY",
-            key="sidebar_news_date",
+            key=SIDEBAR_NEWS_DATE_KEY,
+            on_change=_sync_sidebar_date,
         )
         if st.button(
             "Показать новости",
             key="show-news-by-date",
-            disabled=st.session_state.get("sidebar_news_date") is None,
+            disabled=st.session_state.get(SIDEBAR_NEWS_DATE_KEY) is None,
             use_container_width=True,
         ):
-            st.session_state["date_news_selected_date"] = st.session_state[
-                "sidebar_news_date"
-            ]
             st.session_state["date_news_page"] = 0
             st.session_state["active_page"] = "DateNews"
             st.rerun()
@@ -116,3 +121,37 @@ def render_sidebar(client: ApiClient) -> str:
             st.rerun()
 
         return active_page
+
+
+def _sync_sidebar_date() -> None:
+    st.session_state[DATE_NEWS_SELECTED_KEY] = st.session_state.get(
+        SIDEBAR_NEWS_DATE_KEY
+    )
+    st.session_state["date_news_page"] = 0
+
+
+def _get_selected_news_date(client: ApiClient) -> date | None:
+    selected_date = st.session_state.get(DATE_NEWS_SELECTED_KEY)
+    if isinstance(selected_date, date):
+        return selected_date
+
+    try:
+        latest = client.get_latest_news_date()
+    except ApiError:
+        return None
+
+    latest_date = _parse_api_date(latest.get("latest_date"))
+    if latest_date is not None:
+        st.session_state[DATE_NEWS_SELECTED_KEY] = latest_date
+        st.session_state["date_news_page"] = 0
+    return latest_date
+
+
+def _parse_api_date(value: object) -> date | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(MOSCOW_TIMEZONE).date()

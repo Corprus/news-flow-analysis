@@ -9,4 +9,4 @@ COPY ui /app
 
 EXPOSE 8501
 
-CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+CMD ["sh", "-c", "streamlit run app.py --server.address=0.0.0.0 --server.port=8501 --server.maxUploadSize=${NEWS_IMPORT_MAX_FILE_MIB:-512}"]

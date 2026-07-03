@@ -6,7 +6,8 @@ Docker Compose включает минимальный стек монитори
 - `prometheus` — сбор и хранение временных рядов;
 - `metrics-exporter` — CPU и RAM контейнеров через Docker API;
 - встроенный `rabbitmq_prometheus` — состояние очередей;
-- endpoint `/metrics` у `model-service` — скорость и результаты обработки.
+- endpoint `/metrics` у `api` — импорт новостей и фоновые import jobs;
+- endpoint `/metrics` у `model-service-vectorizer-*` и `model-service-processor` — скорость и результаты обработки;
 - NVML в GPU-воркере — загрузка GPU, VRAM и температура.
 
 ## Запуск
@@ -39,8 +40,19 @@ docker compose up --build -d
 - среднюю скорость последнего успешного задания в новостях в секунду;
 - количество неуспешных pipeline jobs после старта воркера;
 - длительность последнего завершённого pipeline job;
-- CPU и RAM по сервисам Docker Compose.
+- количество import jobs, импортированных строк и длительность импорта;
+- количество vectorization chunks и статей, прошедших embeddings-стадию;
+- текущий этап активного pipeline job через `news_flow_pipeline_stage_articles`;
+- длительность child jobs последнего большого pipeline, throughput, рост истории
+  по aggregate-пачкам и длительность отдельных стадий через DB-backed метрики
+  `news_flow_pipeline_latest_*`;
+- количество статей, находящихся в queued/processing pipeline jobs;
+- CPU и RAM по сервисам Docker Compose;
 - загрузку GPU, использование видеопамяти и температуру.
+
+Панели import jobs и import rows используют DB-backed метрики из
+`news_pipeline_jobs`. Они восстанавливаются после перезапуска API и показывают
+уже завершённые импорты, а не только in-memory counters текущего процесса.
 
 CPU и GPU utilization отображаются на одном временном графике, RAM и VRAM —
 на втором. Это позволяет сопоставлять переход между GPU- и CPU-фазами
@@ -60,7 +72,8 @@ CPU и GPU utilization отображаются на одном временно
 
 - `metrics-exporter`;
 - `rabbitmq`;
-- `model-service-gpu` или `model-service-cpu`, в зависимости от режима;
+- `api`;
+- `model-service-vectorizer-gpu`, `model-service-vectorizer-cpu` и/или `model-service-processor`, в зависимости от режима;
 - `prometheus`.
 
 Prometheus использует DNS service discovery и автоматически обнаруживает
@@ -68,8 +81,8 @@ Prometheus использует DNS service discovery и автоматичес�
 
 ## Ограничения MVP
 
-- метрики приложения сбрасываются при перезапуске `model-service`, исторические
-  значения сохраняются в Prometheus;
+- метрики приложения сбрасываются при перезапуске `api` или model-service containers,
+  исторические значения сохраняются в Prometheus;
 - общее количество обработанных новостей восстанавливается из PostgreSQL;
 - `metrics-exporter` получает read-only доступ к Docker socket;
 - GPU-панели появляются только при запущенном NVIDIA GPU-воркере с доступным

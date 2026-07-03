@@ -1,3 +1,14 @@
+x-model-service-clustering-env: &model-service-clustering-env
+  PIPELINE_BASE_STORY_THRESHOLD: ${PIPELINE_BASE_STORY_THRESHOLD:-0.82}
+  PIPELINE_BASE_STORY_WINDOW_DAYS: ${PIPELINE_BASE_STORY_WINDOW_DAYS:-14}
+  PIPELINE_ATTACH_MIN_SIMILARITY: ${PIPELINE_ATTACH_MIN_SIMILARITY:-0.75}
+  PIPELINE_ATTACH_MAX_DAYS: ${PIPELINE_ATTACH_MAX_DAYS:-7}
+  PIPELINE_ATTACH_MIN_MARGIN: ${PIPELINE_ATTACH_MIN_MARGIN:-0.03}
+  PIPELINE_ATTACH_SOURCE_MAX_CLUSTER_SIZE: ${PIPELINE_ATTACH_SOURCE_MAX_CLUSTER_SIZE:-2}
+  PIPELINE_ATTACH_TITLE_JACCARD_THRESHOLD: ${PIPELINE_ATTACH_TITLE_JACCARD_THRESHOLD:-0.15}
+  PIPELINE_ATTACH_MIN_SHARED_NUMBERS: ${PIPELINE_ATTACH_MIN_SHARED_NUMBERS:-1}
+  PIPELINE_ATTACH_REQUIRE_EVIDENCE: ${PIPELINE_ATTACH_REQUIRE_EVIDENCE:-true}
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -46,6 +57,8 @@ services:
       - prometheus_data:/prometheus
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      api:
         condition: service_healthy
     restart: unless-stopped
 
@@ -108,6 +121,12 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
+      NEWS_AGGREGATION_QUEUE: ${NEWS_AGGREGATION_QUEUE:-news_aggregation.jobs}
+      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-5000}
+      PIPELINE_AGGREGATE_BATCH_SIZE: ${PIPELINE_AGGREGATE_BATCH_SIZE:-5000}
+      PIPELINE_HISTORY_WINDOW_DAYS: ${PIPELINE_HISTORY_WINDOW_DAYS:-30}
+      NEWS_IMPORT_MAX_FILE_MIB: ${NEWS_IMPORT_MAX_FILE_MIB:-512}
+      NEWS_IMPORT_MAX_ROWS: ${NEWS_IMPORT_MAX_ROWS:-1000000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -125,14 +144,15 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  model-service:
-    image: news-flow-model-service:local
+  model-service-vectorizer-gpu:
+    image: news-flow-model-service-vectorizer:gpu
     build:
       context: .
-      dockerfile: docker/model-service.Dockerfile
+      dockerfile: docker/model-service.vectorizer-gpu.Dockerfile
       args:
         PYTORCH_IMAGE: ${PYTORCH_IMAGE:-mirror.gcr.io/pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime}
     environment:
+      <<: *model-service-clustering-env
       APP_ENV: ${APP_ENV:-local}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -145,14 +165,19 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
+      NEWS_AGGREGATION_QUEUE: ${NEWS_AGGREGATION_QUEUE:-news_aggregation.jobs}
       PIPELINE_MODEL_PATH: /app/data/artifacts/models/final_exp10/final_novelty_model.joblib
       PIPELINE_CONFIG_PATH: /app/data/artifacts/models/final_exp10/final_pipeline_config.json
-      PIPELINE_DEVICE: cuda
+      PIPELINE_DEVICE: ${MODEL_SERVICE_VECTORIZER_GPU_DEVICE:-cuda}
+      MODEL_SERVICE_ROLE: vectorizer
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
       HF_HOME: ${MODEL_SERVICE_HF_HOME:-/app/.cache/huggingface}
       HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
       HF_TOKEN: ${HF_TOKEN:-}
+      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-5000}
+      PIPELINE_AGGREGATE_BATCH_SIZE: ${PIPELINE_AGGREGATE_BATCH_SIZE:-5000}
+      PIPELINE_HISTORY_WINDOW_DAYS: ${PIPELINE_HISTORY_WINDOW_DAYS:-30}
     depends_on:
       postgres:
         condition: service_healthy
@@ -174,15 +199,16 @@ services:
       retries: 10
       start_period: 10s
     deploy:
-      replicas: ${MODEL_SERVICE_GPU_REPLICAS:-1}
+      replicas: ${MODEL_SERVICE_VECTORIZER_GPU_REPLICAS:-1}
     restart: unless-stopped
 
-  model-service-cpu:
-    image: news-flow-model-service:cpu
+  model-service-vectorizer-cpu:
+    image: news-flow-model-service-vectorizer:cpu
     build:
       context: .
-      dockerfile: docker/model-service.cpu.Dockerfile
+      dockerfile: docker/model-service.vectorizer-cpu.Dockerfile
     environment:
+      <<: *model-service-clustering-env
       APP_ENV: ${APP_ENV:-local}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -195,12 +221,17 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
+      NEWS_AGGREGATION_QUEUE: ${NEWS_AGGREGATION_QUEUE:-news_aggregation.jobs}
       PIPELINE_MODEL_PATH: /app/data/artifacts/models/final_exp10/final_novelty_model.joblib
       PIPELINE_CONFIG_PATH: /app/data/artifacts/models/final_exp10/final_pipeline_config.json
-      PIPELINE_DEVICE: cpu
+      PIPELINE_DEVICE: ${MODEL_SERVICE_VECTORIZER_CPU_DEVICE:-cpu}
+      MODEL_SERVICE_ROLE: vectorizer
       HF_HOME: ${MODEL_SERVICE_HF_HOME:-/app/.cache/huggingface}
       HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
       HF_TOKEN: ${HF_TOKEN:-}
+      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-5000}
+      PIPELINE_AGGREGATE_BATCH_SIZE: ${PIPELINE_AGGREGATE_BATCH_SIZE:-5000}
+      PIPELINE_HISTORY_WINDOW_DAYS: ${PIPELINE_HISTORY_WINDOW_DAYS:-30}
     depends_on:
       postgres:
         condition: service_healthy
@@ -221,7 +252,58 @@ services:
       retries: 10
       start_period: 30s
     deploy:
-      replicas: ${MODEL_SERVICE_CPU_REPLICAS:-0}
+      replicas: ${MODEL_SERVICE_VECTORIZER_CPU_REPLICAS:-0}
+    restart: unless-stopped
+
+  model-service-processor:
+    image: news-flow-model-service-processor:cpu
+    build:
+      context: .
+      dockerfile: docker/model-service.processor.Dockerfile
+    environment:
+      <<: *model-service-clustering-env
+      APP_ENV: ${APP_ENV:-local}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-semantic_news_novelty}
+      POSTGRES_USER: ${POSTGRES_USER:-semantic_news_novelty}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-semantic_news_novelty}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
+      NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
+      NEWS_AGGREGATION_QUEUE: ${NEWS_AGGREGATION_QUEUE:-news_aggregation.jobs}
+      PIPELINE_MODEL_PATH: /app/data/artifacts/models/final_exp10/final_novelty_model.joblib
+      PIPELINE_CONFIG_PATH: /app/data/artifacts/models/final_exp10/final_pipeline_config.json
+      PIPELINE_DEVICE: cpu
+      MODEL_SERVICE_ROLE: aggregator
+      PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-5000}
+      PIPELINE_AGGREGATE_BATCH_SIZE: ${PIPELINE_AGGREGATE_BATCH_SIZE:-5000}
+      PIPELINE_HISTORY_WINDOW_DAYS: ${PIPELINE_HISTORY_WINDOW_DAYS:-30}
+      PIPELINE_HISTORY_EXPAND_CLUSTERS: ${PIPELINE_HISTORY_EXPAND_CLUSTERS:-true}
+      PIPELINE_HISTORY_CLUSTER_EXPANSION_MAX_ROWS: ${PIPELINE_HISTORY_CLUSTER_EXPANSION_MAX_ROWS:-20000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    expose:
+      - "8000"
+    volumes:
+      - ./src:/app/src
+      - ./data/artifacts/models/final_exp10:/app/data/artifacts/models/final_exp10:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()\""]
+      interval: 30s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    deploy:
+      replicas: ${MODEL_SERVICE_PROCESSOR_REPLICAS:-1}
     restart: unless-stopped
 
   ui:
@@ -234,10 +316,13 @@ services:
       - app.py
       - --server.address=0.0.0.0
       - --server.port=8501
+      - --server.maxUploadSize=${NEWS_IMPORT_MAX_FILE_MIB:-512}
       - --server.runOnSave=true
       - --server.fileWatcherType=poll
     environment:
       API_BASE_URL: http://nginx/api
+      NEWS_IMPORT_MAX_FILE_MIB: ${NEWS_IMPORT_MAX_FILE_MIB:-512}
+      NEWS_IMPORT_UPLOAD_TIMEOUT_SECONDS: ${NEWS_IMPORT_UPLOAD_TIMEOUT_SECONDS:-900}
     depends_on:
       api:
         condition: service_healthy
@@ -245,6 +330,12 @@ services:
       - "8501"
     volumes:
       - ./ui:/app
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health').read()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
     restart: unless-stopped
 
   nginx:
@@ -253,11 +344,13 @@ services:
       api:
         condition: service_healthy
       ui:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "${NGINX_PORT:-80}:80"
+    environment:
+      NEWS_IMPORT_MAX_FILE_MIB: ${NEWS_IMPORT_MAX_FILE_MIB:-512}
     volumes:
-      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./docker/nginx/templates:/etc/nginx/templates:ro
     restart: unless-stopped
 
 volumes:

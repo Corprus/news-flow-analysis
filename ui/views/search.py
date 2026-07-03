@@ -8,7 +8,13 @@ import streamlit as st
 from api_client import ApiClient, ApiError
 from auth import refresh_account
 from config import MIN_NEWS_DATE, MOSCOW_TIMEZONE
-from formatting import escape_markdown, format_search_date, format_search_result_summary
+from formatting import (
+    display_news_title,
+    display_news_url,
+    escape_markdown,
+    format_search_date,
+    format_search_result_summary,
+)
 
 
 def render_search(client: ApiClient) -> None:
@@ -183,7 +189,7 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
         clusters = [
             {
                 "cluster_id": item.get("cluster_id") or item.get("article_id"),
-                "representative_title": item.get("title", ""),
+                "representative_title": display_news_title(item.get("title"), ""),
                 "article_count": 1,
                 "significant_count": int(item.get("novelty_label") == "significant"),
                 "items": [item],
@@ -255,7 +261,7 @@ def _format_cluster_period(cluster: dict) -> str:
 
 
 def render_search_article(item: dict, *, key_prefix: str) -> None:
-    title = html.escape(str(item.get("title") or "Без названия"))
+    title = html.escape(display_news_title(item.get("title")))
     novelty_label = item.get("novelty_label")
     is_significant = novelty_label == "significant"
     details = [
@@ -316,6 +322,6 @@ def render_search_article(item: dict, *, key_prefix: str) -> None:
                 unsafe_allow_html=True,
             )
 
-    url = item.get("url")
+    url = display_news_url(item.get("url"))
     if isinstance(url, str) and url.startswith(("http://", "https://")):
         st.markdown(f"[Открыть источник]({url})")

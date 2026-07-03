@@ -30,7 +30,7 @@ def make_settings(**overrides) -> Settings:
         "RABBITMQ_PASSWORD": "rabbit-secret",
         **overrides,
     }
-    return Settings(**values)
+    return Settings(_env_file=None, **values)
 
 
 @pytest.mark.parametrize("app_env", ["prod", "production", "PRODUCTION"])
@@ -47,7 +47,7 @@ def test_demo_defaults_are_usable_locally() -> None:
     validate_demo_settings(settings)
 
     assert settings.demo_user_login == "demo"
-    assert settings.demo_initial_credit == Decimal("100.00")
+    assert settings.demo_initial_credit == Decimal("100000.00")
 
 
 def test_user_service_can_create_multiple_users_in_one_organization() -> None:
@@ -86,6 +86,14 @@ class _JobRepositorySpy:
     async def mark_queued(self, job_id: str, payload: dict) -> None:
         self.queued.append((job_id, payload))
 
+    async def order_article_ids(
+        self,
+        news_ids: list[str],
+        *,
+        organization_id: str | None,
+    ) -> list[str]:
+        return news_ids
+
 
 class _PublisherSpy:
     def __init__(self) -> None:
@@ -118,7 +126,9 @@ def test_demo_pipeline_jobs_are_queued_per_organization() -> None:
         imported_article_count=2,
     )
 
-    asyncio.run(enqueue_demo_pipeline_jobs(repository, publisher, demo))
+    settings = make_settings()
+
+    asyncio.run(enqueue_demo_pipeline_jobs(repository, publisher, demo, settings))
 
     assert [payload for _, payload in repository.queued] == [
         {

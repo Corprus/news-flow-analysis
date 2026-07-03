@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -9,6 +10,7 @@ from pydantic import ValidationError
 from api.main import NewsVectorizationJobStatus, NewsVectorizationRequest
 from final_pipeline.result import PipelineResult, PipelineVersions
 from model.significance_model import CatBoostSignificanceModel
+from model_service.main import _run_vectorization_stage
 from news.models import (
     ArticlePipelineEmbedding,
     ArticlePipelineState,
@@ -17,6 +19,7 @@ from news.models import (
     NewsArticle,
     NewsClusterSummary,
 )
+from news.pipeline_jobs import chunk_news_ids, enqueue_pipeline_job
 from news.pipeline_repository import NewsPipelineRepository
 from news.routes import (
     AddNewsRequest,
@@ -62,9 +65,201 @@ class _ClusterSummaryConnection:
         self.executed.append((query, params))
 
 
+class _HistoryColumn:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _HistoryCursor:
+    columns = [
+        _HistoryColumn(name)
+        for name in (
+            "news_id",
+            "organization_id",
+            "published_at",
+            "topic",
+            "title",
+            "text",
+            "url",
+            "cluster_id",
+            "baseline_component_id",
+            "assignment_method",
+            "assignment_parent_news_id",
+            "assignment_similarity",
+            "attached_to_component_id",
+            "embedding",
+        )
+    ]
+
+    def __init__(self, row_batches) -> None:
+        self.row_batches = list(row_batches)
+        self.description = self.columns
+        self.executed = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    async def execute(self, query, params) -> None:
+        self.executed.append((query, params))
+
+    async def fetchall(self):
+        return self.row_batches.pop(0)
+
+
+class _HistoryConnection:
+    def __init__(self, row_batches) -> None:
+        self.cursor_instance = _HistoryCursor(row_batches)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    def cursor(self):
+        return self.cursor_instance
+
+
 class _Article:
     id = "00000000-0000-0000-0000-000000000001"
     organization_id = "10000000-0000-0000-0000-000000000001"
+
+
+class _PipelineJobRepositorySpy:
+    def __init__(self, ordered_ids: list[str]) -> None:
+        self.ordered_ids = ordered_ids
+        self.processing: list[tuple[str, dict]] = []
+        self.queued: list[tuple[str, dict]] = []
+
+    async def mark_processing(self, job_id: str, payload: dict) -> None:
+        self.processing.append((job_id, payload))
+
+    async def mark_queued(self, job_id: str, payload: dict) -> None:
+        self.queued.append((job_id, payload))
+
+    async def order_article_ids(
+        self,
+        news_ids: list[str],
+        *,
+        organization_id: str | None,
+    ) -> list[str]:
+        assert set(news_ids) == set(self.ordered_ids)
+        assert organization_id == "10000000-0000-0000-0000-000000000001"
+        return self.ordered_ids
+
+
+class _PipelinePublisherSpy:
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+
+    async def publish(self, message: dict) -> None:
+        self.messages.append(message)
+
+
+class _VectorizationRepositorySpy:
+    def __init__(self, existing_embedding_ids: set[str]) -> None:
+        self.existing_embedding_ids = existing_embedding_ids
+        self.processing_ids: list[str] = []
+        self.saved_article_ids: list[str] = []
+        self.saved_embeddings: np.ndarray | None = None
+
+    async def load_articles(self, news_ids: list[str], organization_id: str | None):
+        return pd.DataFrame(
+            [
+                {
+                    "news_id": news_id,
+                    "organization_id": organization_id,
+                    "published_at": datetime(2026, 1, index + 1, tzinfo=UTC),
+                    "topic": "topic",
+                    "title": f"Title {news_id}",
+                    "text": f"Text {news_id}",
+                    "url": "",
+                }
+                for index, news_id in enumerate(news_ids)
+            ]
+        )
+
+    async def mark_articles_processing(self, news_ids: list[str]) -> None:
+        self.processing_ids = list(news_ids)
+
+    async def load_existing_embedding_ids(
+        self,
+        *,
+        article_ids: list[str],
+        model_name: str,
+        model_revision: str,
+    ) -> set[str]:
+        assert model_name == "test-model"
+        assert model_revision == "test-revision"
+        return set(article_ids) & self.existing_embedding_ids
+
+    async def save_embeddings(
+        self,
+        *,
+        article_ids: list[str],
+        embeddings: np.ndarray,
+        model_name: str,
+        model_revision: str,
+    ) -> None:
+        assert model_name == "test-model"
+        assert model_revision == "test-revision"
+        self.saved_article_ids = list(article_ids)
+        self.saved_embeddings = np.asarray(embeddings)
+
+
+class _VectorizationPipelineSpy:
+    def __init__(self) -> None:
+        self.encoded_ids: list[str] = []
+
+    def encode_new_embeddings(self, news_df: pd.DataFrame):
+        self.encoded_ids = news_df["news_id"].astype(str).tolist()
+        embeddings = np.asarray(
+            [
+                [float(index), 1.0]
+                for index, _news_id in enumerate(self.encoded_ids, start=1)
+            ],
+            dtype=np.float32,
+        )
+        return self.encoded_ids, embeddings
+
+
+class _VectorizationPipelineMustNotRun:
+    def encode_new_embeddings(self, _news_df: pd.DataFrame):
+        raise AssertionError("encoder must not run for already embedded articles")
+
+
+def _vectorization_app(pipeline) -> SimpleNamespace:
+    return SimpleNamespace(
+        state=SimpleNamespace(
+            config=SimpleNamespace(
+                embedding_model_name="test-model",
+                embedding_model_revision="test-revision",
+            ),
+            incremental_pipeline=pipeline,
+        )
+    )
+
+
+def _history_row(news_id: str, cluster_id: str, published_at: datetime):
+    return (
+        news_id,
+        "10000000-0000-0000-0000-000000000001",
+        published_at,
+        "topic",
+        f"Title {news_id}",
+        f"Text {news_id}",
+        "",
+        cluster_id,
+        cluster_id,
+        "baseline",
+        None,
+        None,
+        None,
+        "[1.0,0.0]",
+    )
 
 
 def test_pipeline_job_contract_contains_ids_and_mode() -> None:
@@ -100,6 +295,192 @@ def test_pipeline_job_accepts_50k_article_ids() -> None:
     )
 
     assert len(request.news_ids) == 50_000
+
+
+def test_large_incremental_pipeline_job_is_split_into_chunks() -> None:
+    chunks = chunk_news_ids(["news-1", "news-2", "news-3", "news-4", "news-5"], 2)
+
+    assert chunks == [["news-1", "news-2"], ["news-3", "news-4"], ["news-5"]]
+
+
+def test_large_incremental_pipeline_job_plans_ordered_aggregate_batches() -> None:
+    repository = _PipelineJobRepositorySpy(
+        ["news-2", "news-4", "news-1", "news-3", "news-5"]
+    )
+    publisher = _PipelinePublisherSpy()
+
+    job_id = asyncio.run(
+        enqueue_pipeline_job(
+            repository=repository,  # type: ignore[arg-type]
+            publisher=publisher,  # type: ignore[arg-type]
+            payload={
+                "news_ids": ["news-1", "news-2", "news-3", "news-4", "news-5"],
+                "organization_id": "10000000-0000-0000-0000-000000000001",
+                "mode": "incremental",
+            },
+            chunk_size=2,
+            aggregate_batch_size=3,
+        )
+    )
+
+    parent_payload = repository.processing[0][1]
+    queued_payloads = [payload for _, payload in repository.queued]
+    aggregate_payloads = [
+        payload for payload in queued_payloads if payload["mode"] == "aggregate"
+    ]
+    vectorize_payloads = [
+        payload for payload in queued_payloads if payload["mode"] == "vectorize"
+    ]
+
+    assert str(job_id) == repository.processing[0][0]
+    assert parent_payload["news_ids"] == ["news-2", "news-4", "news-1", "news-3", "news-5"]
+    assert parent_payload["aggregate_batch_count"] == 2
+    assert [payload["news_ids"] for payload in aggregate_payloads] == [
+        ["news-2", "news-4", "news-1"],
+        ["news-3", "news-5"],
+    ]
+    assert [payload["batch_index"] for payload in aggregate_payloads] == [1, 2]
+    assert [payload["news_ids"] for payload in vectorize_payloads] == [
+        ["news-2", "news-4"],
+        ["news-1", "news-3"],
+        ["news-5"],
+    ]
+    assert [message["payload"]["mode"] for message in publisher.messages] == [
+        "vectorize",
+        "vectorize",
+        "vectorize",
+    ]
+
+
+def test_vectorization_stage_skips_existing_embeddings() -> None:
+    repository = _VectorizationRepositorySpy(existing_embedding_ids={"news-2"})
+    pipeline = _VectorizationPipelineSpy()
+
+    result = asyncio.run(
+        _run_vectorization_stage(
+            app=_vectorization_app(pipeline),  # type: ignore[arg-type]
+            repository=repository,  # type: ignore[arg-type]
+            news_ids=["news-1", "news-2", "news-3"],
+            organization_id="10000000-0000-0000-0000-000000000001",
+        )
+    )
+
+    assert repository.processing_ids == ["news-1", "news-2", "news-3"]
+    assert pipeline.encoded_ids == ["news-1", "news-3"]
+    assert repository.saved_article_ids == ["news-1", "news-3"]
+    assert result["requested_ids"] == ["news-1", "news-2", "news-3"]
+    assert result["embedded_ids"] == ["news-1", "news-3"]
+    assert result["skipped_ids"] == ["news-2"]
+    assert result["embedded_count"] == 2
+    assert result["skipped_count"] == 1
+
+
+def test_vectorization_stage_does_not_encode_when_all_embeddings_exist() -> None:
+    repository = _VectorizationRepositorySpy(existing_embedding_ids={"news-1", "news-2"})
+
+    result = asyncio.run(
+        _run_vectorization_stage(
+            app=_vectorization_app(_VectorizationPipelineMustNotRun()),  # type: ignore[arg-type]
+            repository=repository,  # type: ignore[arg-type]
+            news_ids=["news-1", "news-2"],
+            organization_id="10000000-0000-0000-0000-000000000001",
+        )
+    )
+
+    assert repository.processing_ids == ["news-1", "news-2"]
+    assert repository.saved_article_ids == []
+    assert result["embedded_ids"] == []
+    assert result["skipped_ids"] == ["news-1", "news-2"]
+    assert result["embedded_count"] == 0
+    assert result["skipped_count"] == 2
+
+
+def test_history_load_expands_window_to_full_clusters(monkeypatch) -> None:
+    window_rows = [
+        _history_row(
+            "00000000-0000-0000-0000-000000000001",
+            "cluster-1",
+            datetime(2026, 1, 2, tzinfo=UTC),
+        )
+    ]
+    expanded_rows = [
+        _history_row(
+            "00000000-0000-0000-0000-000000000000",
+            "cluster-1",
+            datetime(2025, 12, 1, tzinfo=UTC),
+        ),
+        *window_rows,
+    ]
+    connection = _HistoryConnection([window_rows, expanded_rows])
+
+    async def connect(_database_url):
+        return connection
+
+    monkeypatch.setattr("news.pipeline_repository.AsyncConnection.connect", connect)
+
+    history, embeddings = asyncio.run(
+        NewsPipelineRepository("postgresql://test").load_history(
+            organization_id="10000000-0000-0000-0000-000000000001",
+            exclude_news_ids=["00000000-0000-0000-0000-000000000099"],
+            embedding_model="test-model",
+            embedding_model_revision="test-revision",
+            published_from=datetime(2026, 1, 1, tzinfo=UTC),
+            published_to=datetime(2026, 1, 31, tzinfo=UTC),
+            expand_clusters=True,
+            cluster_expansion_max_rows=10,
+        )
+    )
+
+    assert history["news_id"].tolist() == [
+        "00000000-0000-0000-0000-000000000000",
+        "00000000-0000-0000-0000-000000000001",
+    ]
+    assert embeddings.shape == (2, 2)
+    assert len(connection.cursor_instance.executed) == 2
+    assert "s.cluster_id = ANY" in connection.cursor_instance.executed[1][0]
+
+
+def test_history_load_keeps_window_when_cluster_expansion_exceeds_limit(monkeypatch) -> None:
+    window_rows = [
+        _history_row(
+            "00000000-0000-0000-0000-000000000001",
+            "cluster-1",
+            datetime(2026, 1, 2, tzinfo=UTC),
+        )
+    ]
+    expanded_rows = [
+        _history_row(
+            f"00000000-0000-0000-0000-{index:012d}",
+            "cluster-1",
+            datetime(2025, 12, index + 1, tzinfo=UTC),
+        )
+        for index in range(3)
+    ]
+    connection = _HistoryConnection([window_rows, expanded_rows])
+
+    async def connect(_database_url):
+        return connection
+
+    monkeypatch.setattr("news.pipeline_repository.AsyncConnection.connect", connect)
+
+    history, embeddings = asyncio.run(
+        NewsPipelineRepository("postgresql://test").load_history(
+            organization_id="10000000-0000-0000-0000-000000000001",
+            exclude_news_ids=["00000000-0000-0000-0000-000000000099"],
+            embedding_model="test-model",
+            embedding_model_revision="test-revision",
+            published_from=datetime(2026, 1, 1, tzinfo=UTC),
+            published_to=datetime(2026, 1, 31, tzinfo=UTC),
+            expand_clusters=True,
+            cluster_expansion_max_rows=2,
+        )
+    )
+
+    assert history["news_id"].tolist() == [
+        "00000000-0000-0000-0000-000000000001"
+    ]
+    assert embeddings.shape == (1, 2)
+    assert len(connection.cursor_instance.executed) == 2
 
 
 def test_pipeline_job_rejects_more_than_50k_article_ids() -> None:

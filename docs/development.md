@@ -26,7 +26,8 @@ tests/               автоматические тесты
 Проект ориентирован на Python 3.11. Наборы зависимостей разделены:
 
 - `requirements-api.txt` — HTTP API;
-- `requirements-model-service.txt` — ML service;
+- `requirements-model-service.txt` — vectorizer service с BGE-M3;
+- `requirements-model-processor.txt` — processor service для CPU-стадий aggregate;
 - `requirements-ci.txt` — тесты CI;
 - `requirements-dev.txt` — инструменты разработки;
 - `requirements_model_improvement.txt` — offline ML.
@@ -51,7 +52,8 @@ docker compose config --quiet
 - pytest;
 - проверка Docker Compose config.
 
-Сборка API и model-service images запускается вручную через
+Сборка API и model-service images (`model-service-vectorizer-*`,
+`model-service-processor`) запускается вручную через
 `workflow_dispatch` с `build_images=true`.
 
 Чтобы блокировать merge при ошибках, в GitHub branch rules нужно сделать
