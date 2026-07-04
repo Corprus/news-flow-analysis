@@ -46,7 +46,7 @@ class BalanceResponse(BaseModel):
     organization_id: UUID
     balance: str
     license_type: str
-    access_expires_at: datetime | None
+    access_expires_at: datetime
 
 
 class TransactionResponse(BaseModel):

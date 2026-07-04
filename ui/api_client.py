@@ -166,7 +166,7 @@ class ApiClient:
         name: str,
         *,
         license_type: str,
-        access_expires_at: str | None,
+        access_expires_at: str,
     ) -> dict:
         return self._request(
             "PATCH",

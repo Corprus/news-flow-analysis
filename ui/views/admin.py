@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal, InvalidOperation
 
 import pandas as pd
@@ -44,6 +44,7 @@ AUDIT_DETAIL_LABELS = {
     "transaction_id": "ID операции",
 }
 ADMIN_FLASH_KEY = "admin_success_message"
+MAX_ACCESS_EXPIRES_AT = datetime.max.replace(tzinfo=UTC)
 
 
 def render_admin(client: ApiClient) -> None:
@@ -340,7 +341,7 @@ def _save_organization_changes(
 ) -> None:
     original_by_id = {item["id"]: item for item in organizations}
     license_type_by_label = {label: key for key, label in LICENSE_TYPE_LABELS.items()}
-    changes: list[tuple[str, str, Decimal, str, str | None]] = []
+    changes: list[tuple[str, str, Decimal, str, str]] = []
     names: set[str] = set()
     for row in edited.to_dict("records"):
         organization_id = str(row["ID"])
@@ -414,9 +415,9 @@ def _parse_access_date(value: object) -> date | None:
         return None
 
 
-def _access_date_to_iso(value: object) -> str | None:
+def _access_date_to_iso(value: object) -> str:
     if value is None or (isinstance(value, float) and pd.isna(value)):
-        return None
+        return MAX_ACCESS_EXPIRES_AT.isoformat()
     if isinstance(value, datetime):
         access_date = value.date()
     elif isinstance(value, date):
@@ -424,16 +425,16 @@ def _access_date_to_iso(value: object) -> str | None:
     else:
         parsed = _parse_access_date(value)
         if parsed is None:
-            return None
+            return MAX_ACCESS_EXPIRES_AT.isoformat()
         access_date = parsed
-    return datetime.combine(access_date, time.max).astimezone().isoformat()
+    return datetime.combine(access_date, time.max, tzinfo=UTC).isoformat()
 
 
-def _normalize_api_date(value: object) -> str | None:
+def _normalize_api_date(value: object) -> str:
     parsed = _parse_access_date(value)
     if parsed is None:
-        return None
-    return datetime.combine(parsed, time.max).astimezone().isoformat()
+        return MAX_ACCESS_EXPIRES_AT.isoformat()
+    return datetime.combine(parsed, time.max, tzinfo=UTC).isoformat()
 
 
 def _render_audit(client: ApiClient, user_by_id: dict[str, dict]) -> None:

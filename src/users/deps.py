@@ -153,7 +153,7 @@ def ensure_publisher(current_user: CurrentUser) -> None:
 def _organization_access_expired(session: Session, organization_id: UUID) -> bool:
     organization = session.get(Organization, str(organization_id))
     if organization is None or organization.access_expires_at is None:
-        return False
+        return True
     expires_at = organization.access_expires_at
     if expires_at.tzinfo is None or expires_at.utcoffset() is None:
         expires_at = expires_at.replace(tzinfo=UTC)

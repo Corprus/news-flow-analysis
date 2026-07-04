@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -9,18 +10,27 @@ from sqlalchemy.orm import Session
 from accounting.models import Account
 from users.deps import authenticate
 from users.exceptions import LastAdministratorError, UserAlreadyExistsError
-from users.models import AdminAuditLog, LicenseType, Organization, User, UserRole
+from users.models import (
+    MAX_ACCESS_EXPIRES_AT,
+    AdminAuditLog,
+    LicenseType,
+    Organization,
+    User,
+    UserRole,
+)
 from users.passwords import PasswordHasher
-from users.routes import CreateUserRequest
+from users.routes import CreateOrganizationRequest, CreateUserRequest
 from users.service import AdminAuditService, OrganizationService, UserService
 from users.tokens import AccessTokenHandler
 
 
 class _RequestStub:
-    class _Url:
-        path = "/admin"
+    def __init__(self, path: str = "/admin") -> None:
+        self.url = self._Url(path)
 
-    url = _Url()
+    class _Url:
+        def __init__(self, path: str) -> None:
+            self.path = path
 
 
 @pytest.fixture
@@ -96,6 +106,19 @@ def test_admin_service_updates_organization_license(session: Session) -> None:
     assert updated.access_expires_at == expires_at
 
 
+def test_admin_service_sets_default_access_expiration(session: Session) -> None:
+    organizations = OrganizationService(session)
+
+    organization = organizations.create("Research")
+
+    assert organization.access_expires_at == MAX_ACCESS_EXPIRES_AT
+
+
+def test_organization_request_rejects_null_access_expiration() -> None:
+    with pytest.raises(ValidationError):
+        CreateOrganizationRequest(name="Research", access_expires_at=None)
+
+
 def test_organization_names_are_unique_in_admin_service(session: Session) -> None:
     organizations = OrganizationService(session)
     organizations.create("Research")
@@ -131,6 +154,59 @@ def test_authentication_uses_current_database_role(session: Session) -> None:
     current_user = authenticate(tokens, session, _RequestStub(), f"Bearer {token}")
 
     assert current_user.role == UserRole.USER
+
+
+def test_expired_admin_can_authenticate_for_admin_area(session: Session) -> None:
+    organizations = OrganizationService(session)
+    users = UserService(session, PasswordHasher("test-secret"))
+    organization = organizations.create(
+        "Research",
+        access_expires_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    admin = users.create_user(
+        "admin",
+        "admin-password",
+        UserRole.ADMIN,
+        organization_id=UUID(organization.id),
+    )
+    tokens = AccessTokenHandler("token-secret", ttl_minutes=5)
+    token = tokens.create_access_token(
+        UUID(admin.id),
+        UUID(organization.id),
+        UserRole.ADMIN,
+    )
+
+    current_user = authenticate(tokens, session, _RequestStub("/admin"), f"Bearer {token}")
+
+    assert current_user.role == UserRole.ADMIN
+    assert current_user.access_expired is True
+
+
+def test_expired_admin_cannot_authenticate_for_regular_area(session: Session) -> None:
+    organizations = OrganizationService(session)
+    users = UserService(session, PasswordHasher("test-secret"))
+    organization = organizations.create(
+        "Research",
+        access_expires_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    admin = users.create_user(
+        "admin",
+        "admin-password",
+        UserRole.ADMIN,
+        organization_id=UUID(organization.id),
+    )
+    tokens = AccessTokenHandler("token-secret", ttl_minutes=5)
+    token = tokens.create_access_token(
+        UUID(admin.id),
+        UUID(organization.id),
+        UserRole.ADMIN,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        authenticate(tokens, session, _RequestStub("/news"), f"Bearer {token}")
+
+    assert error.value.status_code == 403
+    assert error.value.detail == "Organization access has expired"
 
 
 def test_admin_can_update_user_login_role_and_organization(session: Session) -> None:

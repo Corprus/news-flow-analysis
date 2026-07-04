@@ -54,7 +54,7 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
     primary_organization = _get_or_create_organization(session, "Demo Research")
     partner_organization = _get_or_create_organization(session, "Partner Analytics")
     partner_organization.license_type = LicenseType.ONPREMISE.value
-    partner_organization.access_expires_at = datetime.now(UTC) + timedelta(days=365)
+    partner_organization.access_expires_at = datetime.now(UTC) + timedelta(days=30)
     admin_organization = _get_or_create_organization(
         session, "Semantic News Novelty Administration"
     )

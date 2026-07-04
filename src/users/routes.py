@@ -23,7 +23,14 @@ from users.exceptions import (
     UserAlreadyExistsError,
     UserNotFoundError,
 )
-from users.models import AdminAuditLog, LicenseType, Organization, User, UserRole
+from users.models import (
+    AdminAuditLog,
+    LicenseType,
+    Organization,
+    User,
+    UserRole,
+    default_access_expires_at,
+)
 from users.service import AdminAuditService, AuthService, OrganizationService, UserService
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -64,20 +71,18 @@ class UpdateUserRequest(BaseModel):
 class CreateOrganizationRequest(BaseModel):
     name: str = Field(min_length=2, max_length=256)
     license_type: LicenseType = LicenseType.SUBSCRIPTION
-    access_expires_at: datetime | None = None
-
-
-class UpdateOrganizationRequest(BaseModel):
-    name: str = Field(min_length=2, max_length=256)
-    license_type: LicenseType = LicenseType.SUBSCRIPTION
-    access_expires_at: datetime | None = None
+    access_expires_at: datetime = Field(default_factory=default_access_expires_at)
 
     @field_validator("access_expires_at")
     @classmethod
-    def require_timezone(cls, value: datetime | None) -> datetime | None:
-        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+    def require_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("access_expires_at must include timezone information")
         return value
+
+
+class UpdateOrganizationRequest(CreateOrganizationRequest):
+    pass
 
 
 class LoginRequest(BaseModel):
@@ -100,14 +105,14 @@ class UserResponse(BaseModel):
 class CurrentUserResponse(UserResponse):
     organization_name: str
     license_type: LicenseType
-    access_expires_at: datetime | None
+    access_expires_at: datetime
 
 
 class OrganizationResponse(BaseModel):
     id: UUID
     name: str
     license_type: LicenseType
-    access_expires_at: datetime | None
+    access_expires_at: datetime
     created_at: datetime
     user_count: int
     balance: str
@@ -436,11 +441,7 @@ def create_organization(
         details={
             "name": organization.name,
             "license_type": organization.license_type,
-            "access_expires_at": (
-                organization.access_expires_at.isoformat()
-                if organization.access_expires_at
-                else None
-            ),
+            "access_expires_at": organization.access_expires_at.isoformat(),
         },
     )
     return _organization_response(organization)
@@ -464,11 +465,7 @@ def update_organization(
     previous = {
         "name": organization.name,
         "license_type": organization.license_type,
-        "access_expires_at": (
-            organization.access_expires_at.isoformat()
-            if organization.access_expires_at
-            else None
-        ),
+        "access_expires_at": organization.access_expires_at.isoformat(),
     }
     try:
         updated = organizations.update(
@@ -491,11 +488,7 @@ def update_organization(
             "previous": previous,
             "name": updated.name,
             "license_type": updated.license_type,
-            "access_expires_at": (
-                updated.access_expires_at.isoformat()
-                if updated.access_expires_at
-                else None
-            ),
+            "access_expires_at": updated.access_expires_at.isoformat(),
         },
     )
     return _organization_response(updated)

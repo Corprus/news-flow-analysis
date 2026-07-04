@@ -15,7 +15,14 @@ from users.exceptions import (
     UserAlreadyExistsError,
     UserNotFoundError,
 )
-from users.models import AdminAuditLog, LicenseType, Organization, User, UserRole
+from users.models import (
+    MAX_ACCESS_EXPIRES_AT,
+    AdminAuditLog,
+    LicenseType,
+    Organization,
+    User,
+    UserRole,
+)
 from users.passwords import PasswordHasher
 from users.tokens import AccessTokenHandler
 
@@ -130,7 +137,7 @@ class OrganizationService:
         name: str,
         *,
         license_type: LicenseType = LicenseType.SUBSCRIPTION,
-        access_expires_at: datetime | None = None,
+        access_expires_at: datetime = MAX_ACCESS_EXPIRES_AT,
     ) -> Organization:
         normalized_name = name.strip()
         if self.find_by_name(normalized_name) is not None:
@@ -150,7 +157,7 @@ class OrganizationService:
         *,
         name: str,
         license_type: LicenseType,
-        access_expires_at: datetime | None,
+        access_expires_at: datetime,
     ) -> Organization:
         organization = self.find_by_id(organization_id)
         if organization is None:
