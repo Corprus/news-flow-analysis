@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 
 import pandas as pd
@@ -14,6 +15,10 @@ ROLE_LABELS = {
     "user": "Пользователь",
     "publisher": "Редактор",
     "admin": "Администратор",
+}
+LICENSE_TYPE_LABELS = {
+    "subscription": "Подписка",
+    "onpremise": "On-premise",
 }
 AUDIT_ACTION_LABELS = {
     "user.create": "Создание пользователя",
@@ -253,6 +258,11 @@ def _render_organizations(client: ApiClient, organizations: list[dict]) -> None:
             "Название": item["name"],
             "Пользователей": item["user_count"],
             "Баланс": int(Decimal(str(item["balance"]))),
+            "Тип лицензии": LICENSE_TYPE_LABELS.get(
+                item.get("license_type"),
+                item.get("license_type"),
+            ),
+            "Доступ до": _parse_access_date(item.get("access_expires_at")),
             "Создана": format_search_date(item["created_at"]),
         }
         for item in organizations
@@ -262,7 +272,15 @@ def _render_organizations(client: ApiClient, organizations: list[dict]) -> None:
         hide_index=True,
         width="stretch",
         disabled=["ID", "Пользователей", "Создана"],
-        column_order=["Название", "Пользователей", "Баланс", "Создана", "ID"],
+        column_order=[
+            "Название",
+            "Пользователей",
+            "Баланс",
+            "Тип лицензии",
+            "Доступ до",
+            "Создана",
+            "ID",
+        ],
         column_config={
             "Название": st.column_config.TextColumn(
                 "Название",
@@ -280,6 +298,17 @@ def _render_organizations(client: ApiClient, organizations: list[dict]) -> None:
                 format="%d",
                 required=True,
                 width="small",
+            ),
+            "Тип лицензии": st.column_config.SelectboxColumn(
+                "Тип лицензии",
+                options=list(LICENSE_TYPE_LABELS.values()),
+                required=True,
+                width="medium",
+            ),
+            "Доступ до": st.column_config.DateColumn(
+                "Доступ до",
+                format="DD.MM.YYYY",
+                width="medium",
             ),
             "Создана": st.column_config.TextColumn("Создана", width="medium"),
             "ID": st.column_config.TextColumn("ID", width="large"),
@@ -310,7 +339,8 @@ def _save_organization_changes(
     edited: pd.DataFrame,
 ) -> None:
     original_by_id = {item["id"]: item for item in organizations}
-    changes: list[tuple[str, str, Decimal]] = []
+    license_type_by_label = {label: key for key, label in LICENSE_TYPE_LABELS.items()}
+    changes: list[tuple[str, str, Decimal, str, str | None]] = []
     names: set[str] = set()
     for row in edited.to_dict("records"):
         organization_id = str(row["ID"])
@@ -331,14 +361,31 @@ def _save_organization_changes(
         if balance < 0 or balance != balance.to_integral_value():
             st.warning("Баланс должен быть целым неотрицательным числом.")
             return
-        changes.append((organization_id, name, balance))
+        license_type = license_type_by_label.get(str(row["Тип лицензии"]))
+        if license_type is None:
+            st.warning("Выберите тип лицензии.")
+            return
+        access_expires_at = _access_date_to_iso(row.get("Доступ до"))
+        changes.append((organization_id, name, balance, license_type, access_expires_at))
 
     changed_count = 0
     try:
-        for organization_id, name, balance in changes:
+        for organization_id, name, balance, license_type, access_expires_at in changes:
             original = original_by_id[organization_id]
-            if name != original["name"]:
-                client.update_organization(organization_id, name)
+            original_access_expires_at = _normalize_api_date(
+                original.get("access_expires_at")
+            )
+            if (
+                name != original["name"]
+                or license_type != original.get("license_type", "subscription")
+                or access_expires_at != original_access_expires_at
+            ):
+                client.update_organization(
+                    organization_id,
+                    name,
+                    license_type=license_type,
+                    access_expires_at=access_expires_at,
+                )
                 changed_count += 1
             current_balance = Decimal(str(original["balance"]))
             balance_delta = balance - current_balance
@@ -354,6 +401,39 @@ def _save_organization_changes(
         return
     refresh_account(client)
     _rerun_with_success("Изменения организаций сохранены.")
+
+
+def _parse_access_date(value: object) -> date | None:
+    if not value:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def _access_date_to_iso(value: object) -> str | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if isinstance(value, datetime):
+        access_date = value.date()
+    elif isinstance(value, date):
+        access_date = value
+    else:
+        parsed = _parse_access_date(value)
+        if parsed is None:
+            return None
+        access_date = parsed
+    return datetime.combine(access_date, time.max).astimezone().isoformat()
+
+
+def _normalize_api_date(value: object) -> str | None:
+    parsed = _parse_access_date(value)
+    if parsed is None:
+        return None
+    return datetime.combine(parsed, time.max).astimezone().isoformat()
 
 
 def _render_audit(client: ApiClient, user_by_id: dict[str, dict]) -> None:

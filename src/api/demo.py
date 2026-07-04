@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -14,7 +15,7 @@ from news.importers import ImportedNews, NewsImportError, news_importers
 from news.models import ArticleStatus, ArticleVisibility, NewsArticle
 from news.service import NewsService
 from settings import Settings
-from users.models import Organization, User, UserRole
+from users.models import LicenseType, Organization, User, UserRole
 from users.passwords import PasswordHasher
 from users.service import UserService
 
@@ -52,6 +53,8 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
 
     primary_organization = _get_or_create_organization(session, "Demo Research")
     partner_organization = _get_or_create_organization(session, "Partner Analytics")
+    partner_organization.license_type = LicenseType.ONPREMISE.value
+    partner_organization.access_expires_at = datetime.now(UTC) + timedelta(days=365)
     admin_organization = _get_or_create_organization(
         session, "Semantic News Novelty Administration"
     )
@@ -263,7 +266,9 @@ def _publish_demo_articles(
     single_article_ids = to_process[-3:]
     batch_id = uuid4() if len(batch_article_ids) > 1 else None
     for article_id in batch_article_ids:
-        if amount_per_article > 0:
+        if amount_per_article > 0 and not accounting.should_skip_metered_withdrawal(
+            UUID(publisher.id)
+        ):
             accounting.withdraw_credit(
                 UUID(publisher.id),
                 amount_per_article,
@@ -272,7 +277,9 @@ def _publish_demo_articles(
                 batch_id=batch_id,
             )
     for article_id in single_article_ids:
-        if amount_per_article > 0:
+        if amount_per_article > 0 and not accounting.should_skip_metered_withdrawal(
+            UUID(publisher.id)
+        ):
             accounting.withdraw_credit(
                 UUID(publisher.id),
                 amount_per_article,
