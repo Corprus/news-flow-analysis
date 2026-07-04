@@ -185,6 +185,25 @@ def create_tables() -> None:
         connection.execute(
             text(
                 """
+                ALTER TABLE organizations
+                    ADD COLUMN IF NOT EXISTS license_type varchar(32)
+                        NOT NULL DEFAULT 'subscription',
+                    ADD COLUMN IF NOT EXISTS access_expires_at timestamptz;
+
+                UPDATE organizations
+                SET license_type = 'subscription'
+                WHERE license_type IS NULL;
+
+                ALTER TABLE organizations
+                    DROP CONSTRAINT IF EXISTS ck_organizations_license_type,
+                    ADD CONSTRAINT ck_organizations_license_type
+                    CHECK (license_type IN ('subscription', 'onpremise'))
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
                 INSERT INTO organizations (id, name, created_at)
                 SELECT '00000000-0000-0000-0000-000000000000'::uuid,
                        'System imports',

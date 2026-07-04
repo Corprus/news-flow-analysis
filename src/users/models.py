@@ -18,6 +18,11 @@ class UserRole(StrEnum):
     ADMIN = "admin"
 
 
+class LicenseType(StrEnum):
+    SUBSCRIPTION = "subscription"
+    ONPREMISE = "onpremise"
+
+
 class Organization(Base, CrudMixin):
     __tablename__ = "organizations"
 
@@ -27,6 +32,15 @@ class Organization(Base, CrudMixin):
         default=lambda: str(uuid4()),
     )
     name: Mapped[str] = mapped_column(String(256), nullable=False)
+    license_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=LicenseType.SUBSCRIPTION.value,
+    )
+    access_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

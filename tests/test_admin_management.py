@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
@@ -8,11 +9,18 @@ from sqlalchemy.orm import Session
 from accounting.models import Account
 from users.deps import authenticate
 from users.exceptions import LastAdministratorError, UserAlreadyExistsError
-from users.models import AdminAuditLog, Organization, User, UserRole
+from users.models import AdminAuditLog, LicenseType, Organization, User, UserRole
 from users.passwords import PasswordHasher
 from users.routes import CreateUserRequest
 from users.service import AdminAuditService, OrganizationService, UserService
 from users.tokens import AccessTokenHandler
+
+
+class _RequestStub:
+    class _Url:
+        path = "/admin"
+
+    url = _Url()
 
 
 @pytest.fixture
@@ -72,6 +80,22 @@ def test_admin_services_manage_organization_role_and_audit(session: Session) -> 
     assert entries[0].details["role"] == "publisher"
 
 
+def test_admin_service_updates_organization_license(session: Session) -> None:
+    organizations = OrganizationService(session)
+    organization = organizations.create("Research")
+    expires_at = datetime.now(UTC) + timedelta(days=30)
+
+    updated = organizations.update(
+        UUID(organization.id),
+        name="Research",
+        license_type=LicenseType.ONPREMISE,
+        access_expires_at=expires_at,
+    )
+
+    assert updated.license_type == LicenseType.ONPREMISE.value
+    assert updated.access_expires_at == expires_at
+
+
 def test_organization_names_are_unique_in_admin_service(session: Session) -> None:
     organizations = OrganizationService(session)
     organizations.create("Research")
@@ -104,7 +128,7 @@ def test_authentication_uses_current_database_role(session: Session) -> None:
     )
     users.update_role(UUID(user.id), UserRole.USER)
 
-    current_user = authenticate(tokens, session, f"Bearer {token}")
+    current_user = authenticate(tokens, session, _RequestStub(), f"Bearer {token}")
 
     assert current_user.role == UserRole.USER
 

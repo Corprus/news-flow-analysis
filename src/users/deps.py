@@ -2,16 +2,17 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from db.database import get_session
 from settings import Settings, get_settings
 from users.exceptions import InvalidAccessTokenError
-from users.models import User, UserRole
+from users.models import Organization, User, UserRole
 from users.passwords import PasswordHasher
 from users.service import AdminAuditService, AuthService, OrganizationService, UserService
 from users.tokens import AccessTokenHandler
@@ -22,6 +23,17 @@ class CurrentUser:
     id: UUID
     organization_id: UUID
     role: UserRole
+    access_expired: bool = False
+
+
+ADMIN_EXPIRED_ACCESS_PREFIXES = (
+    "/admin",
+    "/organizations",
+    "/users",
+    "/accounting/admin",
+    "/accounting/credits",
+    "/accounting/adjustments",
+)
 
 
 def get_db_session() -> Iterator[Session]:
@@ -71,6 +83,7 @@ def get_auth_service(
 def authenticate(
     token_handler: Annotated[AccessTokenHandler, Depends(get_token_handler)],
     session: SessionDep,
+    request: Request,
     authorization: AuthorizationHeader = None,
 ) -> CurrentUser:
     if authorization is None or not authorization.lower().startswith("bearer "):
@@ -94,10 +107,25 @@ def authenticate(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User account is no longer available",
         )
+    role = UserRole(user.role)
+    access_expired = _organization_access_expired(session, UUID(user.organization_id))
+    if access_expired and role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization access has expired",
+        )
+    if access_expired and role == UserRole.ADMIN and not _is_admin_access_path(
+        request.url.path
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization access has expired",
+        )
     return CurrentUser(
         id=UUID(user.id),
         organization_id=UUID(user.organization_id),
-        role=UserRole(user.role),
+        role=role,
+        access_expired=access_expired,
     )
 
 
@@ -110,8 +138,30 @@ def ensure_admin(current_user: CurrentUser) -> None:
 
 
 def ensure_publisher(current_user: CurrentUser) -> None:
+    if current_user.access_expired:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization access has expired",
+        )
     if current_user.role not in {UserRole.PUBLISHER, UserRole.ADMIN}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Publisher role is required",
         )
+
+
+def _organization_access_expired(session: Session, organization_id: UUID) -> bool:
+    organization = session.get(Organization, str(organization_id))
+    if organization is None or organization.access_expires_at is None:
+        return False
+    expires_at = organization.access_expires_at
+    if expires_at.tzinfo is None or expires_at.utcoffset() is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at <= datetime.now(UTC)
+
+
+def _is_admin_access_path(path: str) -> bool:
+    return any(
+        path == prefix or path.startswith(f"{prefix}/")
+        for prefix in ADMIN_EXPIRED_ACCESS_PREFIXES
+    )
