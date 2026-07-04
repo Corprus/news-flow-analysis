@@ -26,6 +26,14 @@ cookie_manager = stx.CookieManager(key="auth_cookie_manager")
 client = get_client(cookie_manager)
 clear_pending_auth_cookie(cookie_manager)
 
+
+def _render_login_after_auth_error(error: ApiError) -> None:
+    clear_authentication(client)
+    st.error(str(error))
+    render_login(client, cookie_manager)
+    st.stop()
+
+
 if not client.token:
     render_login(client, cookie_manager)
     if not client.token:
@@ -35,11 +43,7 @@ if "me" not in st.session_state:
     try:
         refresh_account(client)
     except ApiError as exc:
-        if exc.status_code in {401, 404}:
-            clear_authentication(client)
-            st.rerun()
-        st.error(str(exc))
-        st.stop()
+        _render_login_after_auth_error(exc)
 
 page = render_sidebar(client)
 
@@ -55,4 +59,7 @@ try:
     elif page == "Admin":
         render_admin(client)
 except ApiError as exc:
-    st.error(str(exc))
+    if exc.status_code in {401, 403, 404}:
+        _render_login_after_auth_error(exc)
+    else:
+        st.error(str(exc))

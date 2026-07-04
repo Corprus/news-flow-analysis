@@ -61,6 +61,20 @@ def refresh_account(client: ApiClient) -> None:
     st.session_state["balance"] = client.get_balance()
 
 
+def complete_authentication(
+    client: ApiClient,
+    cookie_manager: object,
+    token: str,
+) -> None:
+    client.set_token(token)
+    try:
+        refresh_account(client)
+    except ApiError:
+        clear_authentication(client)
+        raise
+    persist_token(client, cookie_manager, token)
+
+
 def render_login(client: ApiClient, cookie_manager: object) -> None:
     st.title("Semantic News Novelty")
     st.caption(
@@ -79,10 +93,16 @@ def render_login(client: ApiClient, cookie_manager: object) -> None:
     try:
         if do_signup:
             client.create_user(login, password)
-            persist_token(client, cookie_manager, client.login(login, password))
-            refresh_account(client)
+            complete_authentication(
+                client,
+                cookie_manager,
+                client.login(login, password),
+            )
         if do_login:
-            persist_token(client, cookie_manager, client.login(login, password))
-            refresh_account(client)
+            complete_authentication(
+                client,
+                cookie_manager,
+                client.login(login, password),
+            )
     except ApiError as exc:
         st.error(str(exc))
