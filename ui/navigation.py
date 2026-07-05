@@ -46,7 +46,7 @@ def render_sidebar(client: ApiClient) -> str:
             balance_prefix = (
                 "" if license_type == "onpremise" else "Баланс организации · "
             )
-            balance_col, refresh_col = st.columns([4, 2], vertical_alignment="center")
+            balance_col, refresh_col = st.columns([5, 1], vertical_alignment="center")
             with balance_col:
                 st.markdown(
                     (
