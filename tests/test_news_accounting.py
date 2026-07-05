@@ -19,6 +19,14 @@ class AccountingSpy:
     def refund_credit(self, *args, **kwargs) -> None:
         self.refund_calls.append((args, kwargs))
 
+    def should_skip_metered_withdrawal(self, user_id) -> bool:
+        return False
+
+
+class OnPremiseAccountingSpy(AccountingSpy):
+    def should_skip_metered_withdrawal(self, user_id) -> bool:
+        return True
+
 
 def test_zero_cost_operation_does_not_create_financial_activity() -> None:
     accounting = AccountingSpy()
@@ -28,6 +36,20 @@ def test_zero_cost_operation_does_not_create_financial_activity() -> None:
         user_id=uuid4(),
         amount=0,
         reason=TransactionReason.NEWS_SEARCH,
+        reference_id=uuid4(),
+    )
+
+    assert accounting.withdraw_calls == []
+
+
+def test_onpremise_license_does_not_withdraw_credits() -> None:
+    accounting = OnPremiseAccountingSpy()
+
+    _withdraw_or_raise(
+        accounting=accounting,
+        user_id=uuid4(),
+        amount=1,
+        reason=TransactionReason.NEWS_ADD,
         reference_id=uuid4(),
     )
 

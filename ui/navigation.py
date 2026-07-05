@@ -9,6 +9,7 @@ import streamlit as st
 from api_client import ApiClient, ApiError
 from auth import clear_authentication, refresh_account
 from config import MIN_NEWS_DATE, MOSCOW_TIMEZONE, PAGE_LABELS, ROLE_LABELS
+from formatting import format_search_date
 
 DATE_NEWS_SELECTED_KEY = "date_news_selected_date"
 SIDEBAR_NEWS_DATE_KEY = "sidebar_news_date"
@@ -38,22 +39,20 @@ def render_sidebar(client: ApiClient) -> str:
             unsafe_allow_html=True,
         )
         if role in {"publisher", "admin"}:
-            try:
-                balance_value = Decimal(str(balance.get("balance", "0")))
-                balance_text = (
-                    str(int(balance_value))
-                    if balance_value == balance_value.to_integral_value()
-                    else format(balance_value.normalize(), "f")
-                )
-            except (InvalidOperation, ValueError):
-                balance_text = str(balance.get("balance", "0"))
-            balance_col, refresh_col = st.columns([4, 2], vertical_alignment="center")
+            license_type = str(
+                balance.get("license_type") or me.get("license_type") or ""
+            )
+            balance_label, balance_text = _accounting_label_and_text(me, balance)
+            balance_prefix = (
+                "" if license_type == "onpremise" else "Баланс организации · "
+            )
+            balance_col, refresh_col = st.columns([5, 1], vertical_alignment="center")
             with balance_col:
                 st.markdown(
                     (
                         "<div class='organization-balance'>"
-                        "Баланс организации · "
-                        f"<strong>{balance_text}</strong>"
+                        f"{html.escape(balance_prefix + balance_label)}"
+                        f"<strong>{html.escape(balance_text)}</strong>"
                         "</div>"
                     ),
                     unsafe_allow_html=True,
@@ -121,6 +120,26 @@ def render_sidebar(client: ApiClient) -> str:
             st.rerun()
 
         return active_page
+
+
+def _accounting_label_and_text(me: dict, balance: dict) -> tuple[str, str]:
+    license_type = str(balance.get("license_type") or me.get("license_type") or "")
+    access_expires_at = balance.get("access_expires_at") or me.get("access_expires_at")
+    if license_type == "onpremise":
+        return (
+            "Доступ до · ",
+            format_search_date(access_expires_at, date_only=True) or "бессрочно",
+        )
+    try:
+        balance_value = Decimal(str(balance.get("balance", "0")))
+        balance_text = (
+            str(int(balance_value))
+            if balance_value == balance_value.to_integral_value()
+            else format(balance_value.normalize(), "f")
+        )
+    except (InvalidOperation, ValueError):
+        balance_text = str(balance.get("balance", "0"))
+    return "", balance_text
 
 
 def _sync_sidebar_date() -> None:

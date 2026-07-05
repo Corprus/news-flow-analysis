@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from accounting.exceptions import InsufficientBalanceError, UserAccountNotFoundError
 from accounting.models import Account, Transaction, TransactionReason
-from users.models import Organization, User
+from users.models import LicenseType, Organization, User
 
 
 class AccountingService:
@@ -117,6 +118,15 @@ class AccountingService:
         account = self._session.get(Account, str(organization_id))
         return account.balance if account is not None else Decimal("0.00")
 
+    def should_skip_metered_withdrawal(self, user_id: UUID) -> bool:
+        user = self._get_user(user_id)
+        organization = self._session.get(Organization, user.organization_id)
+        if organization is None:
+            raise UserAccountNotFoundError()
+        if organization.license_type != LicenseType.ONPREMISE.value:
+            return False
+        return not _is_expired(organization.access_expires_at)
+
     def get_transaction_history(
         self,
         organization_id: UUID | None,
@@ -183,3 +193,11 @@ class AccountingService:
     def _ensure_organization_exists(self, organization_id: UUID) -> None:
         if self._session.get(Organization, str(organization_id)) is None:
             raise UserAccountNotFoundError()
+
+
+def _is_expired(expires_at) -> bool:
+    if expires_at is None:
+        return True
+    if expires_at.tzinfo is None or expires_at.utcoffset() is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at <= datetime.now(UTC)

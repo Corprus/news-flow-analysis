@@ -6,7 +6,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from users.deps import (
     CurrentUser,
@@ -23,7 +23,14 @@ from users.exceptions import (
     UserAlreadyExistsError,
     UserNotFoundError,
 )
-from users.models import AdminAuditLog, Organization, User, UserRole
+from users.models import (
+    AdminAuditLog,
+    LicenseType,
+    Organization,
+    User,
+    UserRole,
+    default_access_expires_at,
+)
 from users.service import AdminAuditService, AuthService, OrganizationService, UserService
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -63,10 +70,19 @@ class UpdateUserRequest(BaseModel):
 
 class CreateOrganizationRequest(BaseModel):
     name: str = Field(min_length=2, max_length=256)
+    license_type: LicenseType = LicenseType.SUBSCRIPTION
+    access_expires_at: datetime = Field(default_factory=default_access_expires_at)
+
+    @field_validator("access_expires_at")
+    @classmethod
+    def require_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("access_expires_at must include timezone information")
+        return value
 
 
-class UpdateOrganizationRequest(BaseModel):
-    name: str = Field(min_length=2, max_length=256)
+class UpdateOrganizationRequest(CreateOrganizationRequest):
+    pass
 
 
 class LoginRequest(BaseModel):
@@ -88,11 +104,15 @@ class UserResponse(BaseModel):
 
 class CurrentUserResponse(UserResponse):
     organization_name: str
+    license_type: LicenseType
+    access_expires_at: datetime
 
 
 class OrganizationResponse(BaseModel):
     id: UUID
     name: str
+    license_type: LicenseType
+    access_expires_at: datetime
     created_at: datetime
     user_count: int
     balance: str
@@ -167,6 +187,8 @@ def get_me(
     return CurrentUserResponse(
         **_to_response(user).model_dump(),
         organization_name=organization.name,
+        license_type=LicenseType(organization.license_type),
+        access_expires_at=organization.access_expires_at,
     )
 
 
@@ -378,6 +400,8 @@ def list_organizations(
         OrganizationResponse(
             id=UUID(organization.id),
             name=organization.name,
+            license_type=LicenseType(organization.license_type),
+            access_expires_at=organization.access_expires_at,
             created_at=organization.created_at,
             user_count=user_count,
             balance=str(Decimal(balance)),
@@ -399,7 +423,11 @@ def create_organization(
 ) -> OrganizationResponse:
     ensure_admin(current_user)
     try:
-        organization = organizations.create(request.name)
+        organization = organizations.create(
+            request.name,
+            license_type=request.license_type,
+            access_expires_at=request.access_expires_at,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -410,7 +438,11 @@ def create_organization(
         action="organization.create",
         target_type="organization",
         target_id=organization.id,
-        details={"name": organization.name},
+        details={
+            "name": organization.name,
+            "license_type": organization.license_type,
+            "access_expires_at": organization.access_expires_at.isoformat(),
+        },
     )
     return _organization_response(organization)
 
@@ -430,9 +462,18 @@ def update_organization(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found",
         )
-    previous_name = organization.name
+    previous = {
+        "name": organization.name,
+        "license_type": organization.license_type,
+        "access_expires_at": organization.access_expires_at.isoformat(),
+    }
     try:
-        updated = organizations.update_name(organization_id, request.name)
+        updated = organizations.update(
+            organization_id,
+            name=request.name,
+            license_type=request.license_type,
+            access_expires_at=request.access_expires_at,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -443,7 +484,12 @@ def update_organization(
         action="organization.update",
         target_type="organization",
         target_id=organization_id,
-        details={"previous_name": previous_name, "name": updated.name},
+        details={
+            "previous": previous,
+            "name": updated.name,
+            "license_type": updated.license_type,
+            "access_expires_at": updated.access_expires_at.isoformat(),
+        },
     )
     return _organization_response(updated)
 
@@ -465,6 +511,8 @@ def _organization_response(organization: Organization) -> OrganizationResponse:
     return OrganizationResponse(
         id=UUID(organization.id),
         name=organization.name,
+        license_type=LicenseType(organization.license_type),
+        access_expires_at=organization.access_expires_at,
         created_at=organization.created_at,
         user_count=0,
         balance="0.00",

@@ -36,6 +36,7 @@ ERROR_TRANSLATIONS = {
         "Недостаточно средств на балансе организации"
     ),
     "Insufficient credits": "Недостаточно средств для публикации новостей",
+    "Organization access has expired": "Срок доступа организации истек",
     "Authorization bearer token is required": "Требуется токен авторизации",
     "Invalid access token": "Недействительный токен авторизации",
     "User account is no longer available": "Учётная запись пользователя недоступна",
@@ -159,11 +160,22 @@ class ApiClient:
     def create_organization(self, name: str) -> dict:
         return self._request("POST", "/organizations", json={"name": name})
 
-    def update_organization(self, organization_id: str, name: str) -> dict:
+    def update_organization(
+        self,
+        organization_id: str,
+        name: str,
+        *,
+        license_type: str,
+        access_expires_at: str,
+    ) -> dict:
         return self._request(
             "PATCH",
             f"/organizations/{organization_id}",
-            json={"name": name},
+            json={
+                "name": name,
+                "license_type": license_type,
+                "access_expires_at": access_expires_at,
+            },
         )
 
     def list_admin_audit(self, action: str | None = None) -> list[dict]:

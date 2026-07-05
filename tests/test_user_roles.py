@@ -42,6 +42,21 @@ def test_publisher_and_admin_can_publish_news(role: UserRole) -> None:
     ensure_publisher(_current_user(role))
 
 
+def test_expired_access_cannot_publish_even_for_admin() -> None:
+    with pytest.raises(HTTPException) as error:
+        ensure_publisher(
+            CurrentUser(
+                id=uuid4(),
+                organization_id=uuid4(),
+                role=UserRole.ADMIN,
+                access_expired=True,
+            )
+        )
+
+    assert error.value.status_code == 403
+    assert error.value.detail == "Organization access has expired"
+
+
 class _NewsServiceSpy:
     def __init__(self) -> None:
         self.add_calls = []

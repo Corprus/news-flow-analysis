@@ -67,7 +67,10 @@ div[class*="st-key-read-more-"] button:hover {
 .organization-balance {
     color: #8b949e;
     font-size: 0.85rem;
-    white-space: nowrap;
+    line-height: 1.25rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    white-space: normal;
 }
 .organization-balance strong {
     color: #d7dbe0;

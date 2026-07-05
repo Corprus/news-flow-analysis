@@ -1634,6 +1634,9 @@ def _withdraw_or_raise(
         return
 
     try:
+        skip_metered = getattr(accounting, "should_skip_metered_withdrawal", None)
+        if skip_metered is not None and skip_metered(user_id):
+            return
         accounting.withdraw_credit(user_id, amount, reason, reference_id, batch_id)
     except InsufficientBalanceError as exc:
         raise HTTPException(

@@ -18,6 +18,18 @@ class UserRole(StrEnum):
     ADMIN = "admin"
 
 
+class LicenseType(StrEnum):
+    SUBSCRIPTION = "subscription"
+    ONPREMISE = "onpremise"
+
+
+MAX_ACCESS_EXPIRES_AT = datetime.max.replace(tzinfo=UTC)
+
+
+def default_access_expires_at() -> datetime:
+    return MAX_ACCESS_EXPIRES_AT
+
+
 class Organization(Base, CrudMixin):
     __tablename__ = "organizations"
 
@@ -27,6 +39,16 @@ class Organization(Base, CrudMixin):
         default=lambda: str(uuid4()),
     )
     name: Mapped[str] = mapped_column(String(256), nullable=False)
+    license_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=LicenseType.SUBSCRIPTION.value,
+    )
+    access_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=default_access_expires_at,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

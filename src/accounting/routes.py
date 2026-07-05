@@ -45,6 +45,8 @@ class TransactionIdResponse(BaseModel):
 class BalanceResponse(BaseModel):
     organization_id: UUID
     balance: str
+    license_type: str
+    access_expires_at: datetime
 
 
 class TransactionResponse(BaseModel):
@@ -136,11 +138,20 @@ def adjust_credit(
 @router.get("/me/balance", response_model=BalanceResponse)
 def get_my_balance(
     current_user: CurrentUserDep,
+    session: SessionDep,
     accounting: Annotated[AccountingService, Depends(get_accounting_service)],
 ) -> BalanceResponse:
+    organization = session.get(Organization, str(current_user.organization_id))
+    if organization is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
     return BalanceResponse(
         organization_id=current_user.organization_id,
         balance=str(accounting.get_balance(current_user.organization_id)),
+        license_type=organization.license_type,
+        access_expires_at=organization.access_expires_at,
     )
 
 

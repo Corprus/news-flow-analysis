@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -14,7 +15,14 @@ from users.exceptions import (
     UserAlreadyExistsError,
     UserNotFoundError,
 )
-from users.models import AdminAuditLog, Organization, User, UserRole
+from users.models import (
+    MAX_ACCESS_EXPIRES_AT,
+    AdminAuditLog,
+    LicenseType,
+    Organization,
+    User,
+    UserRole,
+)
 from users.passwords import PasswordHasher
 from users.tokens import AccessTokenHandler
 
@@ -124,16 +132,33 @@ class OrganizationService:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def create(self, name: str) -> Organization:
+    def create(
+        self,
+        name: str,
+        *,
+        license_type: LicenseType = LicenseType.SUBSCRIPTION,
+        access_expires_at: datetime = MAX_ACCESS_EXPIRES_AT,
+    ) -> Organization:
         normalized_name = name.strip()
         if self.find_by_name(normalized_name) is not None:
             raise ValueError("Organization already exists")
-        organization = Organization(name=normalized_name)
+        organization = Organization(
+            name=normalized_name,
+            license_type=license_type.value,
+            access_expires_at=access_expires_at,
+        )
         self._session.add(organization)
         self._session.flush()
         return organization
 
-    def update_name(self, organization_id: UUID, name: str) -> Organization:
+    def update(
+        self,
+        organization_id: UUID,
+        *,
+        name: str,
+        license_type: LicenseType,
+        access_expires_at: datetime,
+    ) -> Organization:
         organization = self.find_by_id(organization_id)
         if organization is None:
             raise ValueError("Organization does not exist")
@@ -142,8 +167,21 @@ class OrganizationService:
         if existing is not None and existing.id != organization.id:
             raise ValueError("Organization already exists")
         organization.name = normalized_name
+        organization.license_type = license_type.value
+        organization.access_expires_at = access_expires_at
         self._session.flush()
         return organization
+
+    def update_name(self, organization_id: UUID, name: str) -> Organization:
+        organization = self.find_by_id(organization_id)
+        if organization is None:
+            raise ValueError("Organization does not exist")
+        return self.update(
+            organization_id,
+            name=name,
+            license_type=LicenseType(organization.license_type),
+            access_expires_at=organization.access_expires_at,
+        )
 
     def find_by_id(self, organization_id: UUID) -> Organization | None:
         return self._session.get(Organization, str(organization_id))
