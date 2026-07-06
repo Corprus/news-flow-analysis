@@ -22,6 +22,8 @@
 - второй проход: `exp10_src2_sim0.75_days7_m0.03_tj0.15_num1`;
 - novelty model: CatBoost-конфигурация
   `exp_10a_current_model_on_exp10_clustering`;
+- контракт признаков novelty model: 18 previous-only признаков из
+  `LEGACY_SIGNIFICANCE_FEATURE_COLUMNS`;
 - novelty threshold: `0.42`;
 - duplicate threshold: `0.90`;
 - review margin: `0.10`.
@@ -45,7 +47,7 @@
 
 ## Признаки новизны
 
-Runtime использует 18 previous-only признаков. Они вычисляются только по более
+Runtime использует один актуальный контракт: 18 previous-only признаков. Они вычисляются только по более
 ранним публикациям, чтобы исключить утечку из будущего. Среди них:
 
 ```text
@@ -56,6 +58,9 @@ previous_centroid_similarity
 title_jaccard_max
 shared_numbers_count
 ```
+
+Экспериментальные варианты с другим числом признаков остались только в
+исследовательских ноутбуках и не являются частью runtime-пайплайна.
 
 ## Выход
 
