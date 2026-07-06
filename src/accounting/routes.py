@@ -29,13 +29,13 @@ CurrentUserDep = Annotated[CurrentUser, Depends(authenticate)]
 
 
 class AddCreditRequest(BaseModel):
-    organization_id: UUID
-    amount: Decimal = Field(gt=0)
+    organization_id: UUID = Field(description="ID организации, которой начисляются кредиты.")
+    amount: Decimal = Field(gt=0, description="Положительное количество кредитов.")
 
 
 class AdjustCreditRequest(BaseModel):
-    organization_id: UUID
-    amount: Decimal
+    organization_id: UUID = Field(description="ID организации для корректировки.")
+    amount: Decimal = Field(description="Целое положительное или отрицательное изменение баланса.")
 
 
 class TransactionIdResponse(BaseModel):
@@ -69,7 +69,13 @@ def get_accounting_service(session: SessionDep) -> AccountingService:
     return AccountingService(session)
 
 
-@router.post("/credits", response_model=TransactionIdResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/credits",
+    response_model=TransactionIdResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Начислить кредиты организации",
+    description="Администратор добавляет положительное количество кредитов на баланс.",
+)
 def add_credit(
     request: AddCreditRequest,
     current_user: CurrentUserDep,
@@ -96,6 +102,11 @@ def add_credit(
     "/adjustments",
     response_model=TransactionIdResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="Скорректировать баланс организации",
+    description=(
+        "Администратор выполняет целочисленную положительную "
+        "или отрицательную корректировку."
+    ),
 )
 def adjust_credit(
     request: AdjustCreditRequest,
@@ -135,7 +146,12 @@ def adjust_credit(
     return TransactionIdResponse(transaction_id=transaction_id)
 
 
-@router.get("/me/balance", response_model=BalanceResponse)
+@router.get(
+    "/me/balance",
+    response_model=BalanceResponse,
+    summary="Получить свой баланс",
+    description="Возвращает баланс и лицензионные ограничения организации текущего пользователя.",
+)
 def get_my_balance(
     current_user: CurrentUserDep,
     session: SessionDep,
@@ -155,7 +171,12 @@ def get_my_balance(
     )
 
 
-@router.get("/me/transactions", response_model=list[TransactionResponse])
+@router.get(
+    "/me/transactions",
+    response_model=list[TransactionResponse],
+    summary="Получить свои операции",
+    description="Возвращает историю списаний и начислений организации текущего пользователя.",
+)
 def get_my_transactions(
     current_user: CurrentUserDep,
     session: SessionDep,
@@ -174,7 +195,12 @@ def get_my_transactions(
     )
 
 
-@router.get("/admin/transactions", response_model=list[TransactionResponse])
+@router.get(
+    "/admin/transactions",
+    response_model=list[TransactionResponse],
+    summary="Получить все операции",
+    description="Администратор получает историю операций всех организаций с фильтром причины.",
+)
 def get_admin_transactions(
     current_user: CurrentUserDep,
     session: SessionDep,

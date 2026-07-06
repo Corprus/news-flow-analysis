@@ -7,7 +7,7 @@ from prometheus_client.core import GaugeMetricFamily
 
 try:
     import pynvml
-except ImportError:  # CPU workers and lightweight test environments.
+except ImportError:  # CPU-воркеры и облегчённые тестовые окружения.
     pynvml = None
 
 

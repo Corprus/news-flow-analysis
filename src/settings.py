@@ -7,6 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Настройки приложения, читаемые из переменных окружения и `.env`."""
+
     app_env: str = Field(default="local", alias="APP_ENV")
     demo_mode: bool = Field(default=False, alias="DEMO_MODE")
     demo_user_login: str = Field(default="demo", alias="DEMO_USER_LOGIN")
@@ -152,6 +154,7 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        """Собрать DSN для psycopg/async psycopg подключений."""
         user = quote(self.postgres_user, safe="")
         password = quote(self.postgres_password, safe="")
         return (
@@ -161,10 +164,12 @@ class Settings(BaseSettings):
 
     @property
     def sqlalchemy_database_url(self) -> str:
+        """Собрать SQLAlchemy DSN на базе основного PostgreSQL URL."""
         return self.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
     @property
     def rabbitmq_url(self) -> str:
+        """Собрать AMQP URL для RabbitMQ publisher/consumer."""
         user = quote(self.rabbitmq_user, safe="")
         password = quote(self.rabbitmq_password, safe="")
         vhost = quote(self.rabbitmq_vhost, safe="")
@@ -173,4 +178,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    """Вернуть кэшированный объект настроек приложения."""
     return Settings()

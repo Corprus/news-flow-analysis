@@ -13,15 +13,21 @@ from .import_limits import MAX_IMPORT_ROWS
 
 
 class NewsImportError(ValueError):
+    """Ошибка формата или содержимого файла импорта новостей."""
+
     pass
 
 
 class NewsImportSkipRow(ValueError):
+    """Сигнал пропуска одной некорректной строки без остановки всего импорта."""
+
     pass
 
 
 @dataclass(frozen=True)
 class ImportedNews:
+    """Нормализованная публикация после разбора входного файла."""
+
     title: str
     content: str
     published_at: datetime
@@ -34,6 +40,8 @@ class ImportedNews:
 
 @dataclass(frozen=True)
 class NewsImportFormat:
+    """Описание поддерживаемого формата загрузки новостей."""
+
     id: str
     label: str
     file_extensions: tuple[str, ...]
@@ -41,12 +49,18 @@ class NewsImportFormat:
 
 
 class NewsFileImporter(Protocol):
+    """Контракт парсера одного формата новостного файла."""
+
     format: NewsImportFormat
 
-    def parse(self, content: bytes) -> list[ImportedNews]: ...
+    def parse(self, content: bytes) -> list[ImportedNews]:
+        """Разобрать байты файла в список нормализованных публикаций."""
+        ...
 
 
 class LentaCsvImporter:
+    """Импортёр CSV/ZIP/BZip2 выгрузок Lenta.ru."""
+
     format = NewsImportFormat(
         id="lenta",
         label="Lenta.ru CSV",
@@ -65,6 +79,7 @@ class LentaCsvImporter:
     _required_columns = frozenset({"title", "text"})
 
     def parse(self, content: bytes) -> list[ImportedNews]:
+        """Определить контейнер файла и разобрать его как Lenta CSV."""
         if _looks_like_zip(content):
             return self._parse_zip(content)
         if _looks_like_bzip2(content):
@@ -168,13 +183,18 @@ class LentaCsvImporter:
 
 
 class NewsImporterRegistry:
+    """Реестр доступных импортёров новостных файлов."""
+
     def __init__(self, importers: list[NewsFileImporter]) -> None:
+        """Зарегистрировать импортёры по их format.id."""
         self._importers = {importer.format.id: importer for importer in importers}
 
     def list_formats(self) -> list[NewsImportFormat]:
+        """Вернуть форматы, доступные пользователю в API/UI."""
         return [importer.format for importer in self._importers.values()]
 
     def parse(self, format_id: str, content: bytes) -> list[ImportedNews]:
+        """Найти импортёр по ID формата и разобрать файл."""
         importer = self._importers.get(format_id)
         if importer is None:
             supported = ", ".join(self._importers) or "<none>"

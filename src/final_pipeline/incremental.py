@@ -25,7 +25,7 @@ from .result import PipelineResult, PipelineVersions
 
 @dataclass(frozen=True)
 class IncrementalPipelineConfig:
-    """Rules for assigning new articles and preserving baseline graph connectivity."""
+    """Правила назначения новых статей и сохранения связности baseline-графа."""
 
     baseline_similarity: float = 0.82
     baseline_window_days: int = 14
@@ -50,6 +50,7 @@ class IncrementalPipelineConfig:
         cls,
         final_config: FinalPipelineConfig,
     ) -> IncrementalPipelineConfig:
+        """Построить incremental-настройки из финальной full pipeline конфигурации."""
         base = final_config.base_clustering
         attach = final_config.attach_clustering
         return cls(
@@ -68,12 +69,12 @@ ProgressCallback = Callable[[str, dict[str, Any]], None]
 
 
 class IncrementalNewsNoveltyPipeline:
-    """Assign new articles to stable clusters and predict novelty incrementally.
+    """Инкрементально назначить новые статьи в стабильные кластеры и оценить новизну.
 
-    A new article is assigned to at most one resulting cluster. When it has baseline
-    edges to several existing clusters, those clusters are merged because the full
-    baseline graph would place them in the same connected component. Ambiguous
-    evidence-aware attach candidates are not merged.
+    Новая статья назначается максимум в один итоговый кластер. Если у неё есть
+    baseline-рёбра к нескольким существующим кластерам, эти кластеры объединяются:
+    полный baseline-граф поместил бы их в одну связную компоненту. Неоднозначные
+    evidence-aware attach-кандидаты не объединяются.
     """
 
     def __init__(
@@ -84,12 +85,14 @@ class IncrementalNewsNoveltyPipeline:
         config: IncrementalPipelineConfig | None = None,
         final_config: FinalPipelineConfig | None = None,
     ) -> None:
+        """Собрать incremental pipeline из encoder, novelty model и конфигураций."""
         self.encoder = encoder
         self.novelty_model = novelty_model
         self.config = config or IncrementalPipelineConfig()
         self.final_config = final_config or FinalPipelineConfig()
 
     def encode_new_embeddings(self, news_df: pd.DataFrame) -> tuple[list[str], np.ndarray]:
+        """Посчитать embeddings для новой пачки без запуска кластеризации."""
         cfg = self.config
         news = self._prepare_without_embeddings(news_df)
         if news.empty:
@@ -115,6 +118,7 @@ class IncrementalNewsNoveltyPipeline:
         new_embeddings: np.ndarray | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> IncrementalPipelineResult:
+        """Добавить новую пачку к истории и пересчитать затронутые novelty labels."""
         process_started_at = perf_counter()
 
         def report_progress(stage: str, **details: Any) -> None:
@@ -1095,7 +1099,7 @@ def load_incremental_pipeline(
     device: str | None = None,
     project_root: str | Path | None = None,
 ) -> IncrementalNewsNoveltyPipeline:
-    """Load the selected v3 encoder/model for incremental inference."""
+    """Загрузить выбранные v3 encoder/model для incremental inference."""
 
     root = Path(project_root).resolve() if project_root is not None else Path.cwd().resolve()
     if final_config is None:

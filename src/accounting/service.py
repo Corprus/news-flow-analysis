@@ -13,7 +13,10 @@ from users.models import LicenseType, Organization, User
 
 
 class AccountingService:
+    """Сервис баланса организации и финансовых операций по публикациям/поиску."""
+
     def __init__(self, session: Session) -> None:
+        """Создать сервис поверх текущей SQLAlchemy-сессии."""
         self._session = session
 
     def add_credit(
@@ -24,6 +27,7 @@ class AccountingService:
         reason: TransactionReason = TransactionReason.CREDIT_ADD,
         reference_id: UUID | None = None,
     ) -> UUID:
+        """Пополнить баланс организации и записать положительную транзакцию."""
         if amount <= 0:
             raise ValueError("amount must be > 0")
         self._ensure_organization_exists(organization_id)
@@ -46,6 +50,7 @@ class AccountingService:
         actor_user_id: UUID,
         amount: Decimal,
     ) -> UUID:
+        """Вручную скорректировать баланс организации целым числом кредитов."""
         if amount == 0:
             raise ValueError("amount must not be zero")
         if amount != amount.to_integral_value():
@@ -76,6 +81,7 @@ class AccountingService:
         reference_id: UUID | None = None,
         batch_id: UUID | None = None,
     ) -> UUID:
+        """Списать кредиты с организации пользователя для платной операции."""
         if amount <= 0:
             raise ValueError("amount must be > 0")
         user = self._get_user(user_id)
@@ -103,6 +109,7 @@ class AccountingService:
         reason: TransactionReason,
         reference_id: UUID | None = None,
     ) -> UUID:
+        """Вернуть кредиты пользователю после отменённой или частичной операции."""
         if amount <= 0:
             raise ValueError("amount must be > 0")
         user = self._get_user(user_id)
@@ -115,10 +122,12 @@ class AccountingService:
         )
 
     def get_balance(self, organization_id: UUID) -> Decimal:
+        """Вернуть текущий баланс организации, создавая нулевое значение логически."""
         account = self._session.get(Account, str(organization_id))
         return account.balance if account is not None else Decimal("0.00")
 
     def should_skip_metered_withdrawal(self, user_id: UUID) -> bool:
+        """Проверить, освобождена ли организация пользователя от списаний по лицензии."""
         user = self._get_user(user_id)
         organization = self._session.get(Organization, user.organization_id)
         if organization is None:
@@ -134,6 +143,7 @@ class AccountingService:
         offset: int = 0,
         reason: TransactionReason | None = None,
     ) -> list[Transaction]:
+        """Вернуть историю транзакций с фильтром по организации и причине."""
         statement = select(Transaction).order_by(Transaction.timestamp.desc())
         if organization_id is not None:
             statement = statement.where(

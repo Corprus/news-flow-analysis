@@ -19,6 +19,7 @@ class CatBoostSignificanceModel:
     """Binary significant/not-significant model with deterministic post-processing."""
 
     def __init__(self, config: SignificanceModelConfig | None = None, model=None) -> None:
+        """Создать обёртку CatBoost с конфигурацией признаков и порогов."""
         self.config = config or SignificanceModelConfig()
         self.model = model
         self.feature_columns = list(self.config.feature_columns or DEFAULT_FEATURE_COLUMNS)
@@ -54,6 +55,7 @@ class CatBoostSignificanceModel:
         label_column: str = "novelty_label",
         catboost_params: dict | None = None,
     ) -> CatBoostSignificanceModel:
+        """Обучить CatBoost на признаках и novelty-разметке."""
         try:
             from catboost import CatBoostClassifier
         except ImportError as exc:
@@ -81,6 +83,7 @@ class CatBoostSignificanceModel:
         return self
 
     def predict_proba(self, features_df: pd.DataFrame) -> np.ndarray:
+        """Вернуть вероятность класса significant для готовой матрицы признаков."""
         if self.model is None:
             raise ValueError("Model is not fitted or loaded.")
         missing = [col for col in self.feature_columns if col not in features_df.columns]
@@ -90,6 +93,7 @@ class CatBoostSignificanceModel:
         return np.asarray(proba, dtype=np.float32)
 
     def predict_labels(self, features_df: pd.DataFrame) -> pd.DataFrame:
+        """Назначить novelty_label, p_significant и needs_review по готовым признакам."""
         proba = self.predict_proba(features_df)
         out = features_df.copy()
         out["p_significant"] = proba
@@ -115,6 +119,7 @@ class CatBoostSignificanceModel:
         features_df: pd.DataFrame,
         id_column: str = "news_id",
     ) -> pd.DataFrame:
+        """Собрать prediction dataframe в eval-схеме по новостям и признакам."""
         pred = self.predict_labels(features_df)
         columns_from_news = ["news_id", "published_at", "topic", "title", "text"]
         base = news_df[columns_from_news].copy()
@@ -129,6 +134,7 @@ class CatBoostSignificanceModel:
         return ensure_prediction_schema(result)
 
     def save(self, model_path: str | Path, config_path: str | Path | None = None) -> None:
+        """Сохранить CatBoost artifact и, при необходимости, JSON-конфигурацию."""
         if self.model is None:
             raise ValueError("Model is not fitted.")
         model_path = Path(model_path)
@@ -156,6 +162,7 @@ class CatBoostSignificanceModel:
         config_path: Path | None = None,
         config: SignificanceModelConfig | None = None,
     ) -> CatBoostSignificanceModel:
+        """Загрузить модель из CatBoost/joblib artifact и вернуть runtime-обёртку."""
         if config_path and Path(config_path).exists():
             raw = json.loads(Path(config_path).read_text(encoding="utf-8"))
 
