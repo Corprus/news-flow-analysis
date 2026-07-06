@@ -110,6 +110,12 @@ services:
       DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-admin12345}
       DEMO_INITIAL_CREDIT: ${DEMO_INITIAL_CREDIT:-100.00}
       DEMO_NEWS_PATH: ${DEMO_NEWS_PATH:-data/demo/lenta_demo.csv}
+      SQLALCHEMY_ECHO: ${SQLALCHEMY_ECHO:-false}
+      PASSWORD_HASH_SECRET: ${PASSWORD_HASH_SECRET:-change-me-local-password-secret}
+      ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET:-change-me-local-access-token-secret}
+      ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-1440}
+      NEWS_ADD_COST: ${NEWS_ADD_COST:-1.00}
+      NEWS_SEARCH_COST: ${NEWS_SEARCH_COST:-0.00}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-semantic_news_novelty}
