@@ -23,6 +23,7 @@ from users.models import UserRole
 
 
 def test_lenta_import_format_is_exposed_by_registry() -> None:
+    """Формат Lenta доступен в registry и объявляет поддерживаемые расширения."""
     formats = news_importers.list_formats()
 
     assert [item.id for item in formats] == ["lenta"]
@@ -30,6 +31,7 @@ def test_lenta_import_format_is_exposed_by_registry() -> None:
 
 
 def test_lenta_csv_is_mapped_to_imported_news() -> None:
+    """CSV Lenta преобразуется в внутренний объект импортированной новости."""
     content = (
         b"url,title,text,topic,tags,date\n"
         b"https://example.test/1,Title,Content,Technology,tag,2020-01-01\n"
@@ -47,6 +49,7 @@ def test_lenta_csv_is_mapped_to_imported_news() -> None:
 
 
 def test_lenta_csv_accepts_timezone_aware_published_at_and_news_id() -> None:
+    """Импорт сохраняет внешний news_id и timezone-aware дату публикации."""
     content = (
         b"news_id,title,text,published_at\n"
         b"42,Title,Content,2020-01-01T12:30:00+03:00\n"
@@ -59,6 +62,7 @@ def test_lenta_csv_accepts_timezone_aware_published_at_and_news_id() -> None:
 
 
 def test_lenta_csv_accepts_slash_separated_date() -> None:
+    """Импорт принимает даты Lenta с разделителем `/`."""
     content = b"title,text,date\nTitle,Content,2020/01/02\n"
 
     article = news_importers.parse("lenta", content)[0]
@@ -67,6 +71,7 @@ def test_lenta_csv_accepts_slash_separated_date() -> None:
 
 
 def test_lenta_bzip2_imports_csv() -> None:
+    """BZ2-архив с CSV импортируется как обычная Lenta-выгрузка."""
     content = bz2.compress(
         b"url,title,text,topic,tags,date\n"
         b"https://example.test/1,Title,Content,Technology,tag,2020/01/02\n"
@@ -80,6 +85,7 @@ def test_lenta_bzip2_imports_csv() -> None:
 
 
 def test_lenta_csv_skips_rows_with_empty_text() -> None:
+    """Строки без текста пропускаются, остальные статьи продолжают импортироваться."""
     content = (
         b"title,text,date\n"
         b"Good,Content,2020-01-01\n"
@@ -93,6 +99,7 @@ def test_lenta_csv_skips_rows_with_empty_text() -> None:
 
 
 def test_lenta_zip_imports_csv_files_and_ignores_other_entries() -> None:
+    """ZIP-импорт читает все CSV-файлы и игнорирует посторонние вложения."""
     archive = BytesIO()
     with ZipFile(archive, "w") as zip_file:
         zip_file.writestr(
@@ -111,6 +118,7 @@ def test_lenta_zip_imports_csv_files_and_ignores_other_entries() -> None:
 
 
 def test_lenta_zip_without_csv_files_is_rejected() -> None:
+    """ZIP без CSV-файлов отклоняется как некорректный импорт."""
     archive = BytesIO()
     with ZipFile(archive, "w") as zip_file:
         zip_file.writestr("notes.txt", "not a CSV")
@@ -127,11 +135,13 @@ def test_lenta_zip_without_csv_files_is_rejected() -> None:
     ],
 )
 def test_lenta_csv_reports_contract_errors(content: bytes, message: str) -> None:
+    """CSV-импорт сообщает понятные ошибки нарушенного контракта файла."""
     with pytest.raises(NewsImportError, match=message):
         news_importers.parse("lenta", content)
 
 
 def test_lenta_csv_drops_rows_that_fail_data_cleaning() -> None:
+    """Некорректные строки очищаются без остановки всего импорта."""
     content = (
         b"title,text,date\n"
         b"Good,Content,2020-01-01\n"
@@ -148,15 +158,18 @@ def test_lenta_csv_drops_rows_that_fail_data_cleaning() -> None:
 
 
 def test_unknown_import_format_is_rejected() -> None:
+    """Неизвестный формат импорта отклоняется на уровне registry."""
     with pytest.raises(NewsImportError, match="Unsupported"):
         news_importers.parse("unknown", b"content")
 
 
 def test_lenta_csv_import_limit_supports_full_lenta_rows() -> None:
+    """Лимит строк рассчитан на полный демонстрационный Lenta-датасет."""
     assert MAX_IMPORT_ROWS == 1_000_000
 
 
 def test_lenta_csv_row_limit_is_enforced(monkeypatch) -> None:
+    """Импорт останавливается, если файл превышает настроенный лимит строк."""
     monkeypatch.setattr("news.importers.MAX_IMPORT_ROWS", 2)
     rows = ["title,text,date"]
     rows.extend(
@@ -169,6 +182,8 @@ def test_lenta_csv_row_limit_is_enforced(monkeypatch) -> None:
 
 
 class _ImportSession:
+    """Минимальная сессия, которая назначает id добавленным статьям."""
+
     def __init__(self) -> None:
         self.added: list[NewsArticle] = []
 
@@ -182,6 +197,7 @@ class _ImportSession:
 
 
 def test_import_keeps_detected_duplicate_as_separate_draft(monkeypatch) -> None:
+    """Найденный дубль сохраняется отдельным черновиком с ссылкой на оригинал."""
     session = _ImportSession()
     service = NewsService(session)  # type: ignore[arg-type]
     existing_id = str(uuid4())
@@ -214,6 +230,7 @@ def test_import_keeps_detected_duplicate_as_separate_draft(monkeypatch) -> None:
 
 
 def test_import_reports_row_progress(monkeypatch) -> None:
+    """Сервис импорта возвращает прогресс по каждой обработанной строке."""
     session = _ImportSession()
     service = NewsService(session)  # type: ignore[arg-type]
     monkeypatch.setattr(service, "_find_existing_article", lambda *_args: None)
@@ -243,6 +260,8 @@ def test_import_reports_row_progress(monkeypatch) -> None:
 
 
 class _ImportNewsServiceSpy:
+    """Имитирует NewsService для endpoint-тестов импорта."""
+
     def __init__(self) -> None:
         self.committed = False
         self.rolled_back = False
@@ -270,6 +289,8 @@ class _ImportNewsServiceSpy:
 
 
 class _FailingImportNewsServiceSpy(_ImportNewsServiceSpy):
+    """Имитирует ошибку публикации после успешного импорта."""
+
     def publish_user_article_ids_batched(self, article_ids, user_id, **kwargs):
         raise ValueError("one imported article cannot be published")
 
@@ -278,6 +299,7 @@ class _FailingImportNewsServiceSpy(_ImportNewsServiceSpy):
 
 
 def test_import_endpoint_creates_drafts_and_commits() -> None:
+    """Endpoint импорта создаёт черновики и фиксирует транзакцию."""
     service = _ImportNewsServiceSpy()
     current_user = CurrentUser(
         id=uuid4(),
@@ -308,6 +330,7 @@ def test_import_endpoint_creates_drafts_and_commits() -> None:
 
 
 def test_import_endpoint_rejects_oversized_file(monkeypatch) -> None:
+    """Endpoint импорта отклоняет файл больше настроенного лимита."""
     monkeypatch.setattr("news.routes.MAX_IMPORT_FILE_BYTES", 4)
     current_user = CurrentUser(
         id=uuid4(),
@@ -323,7 +346,7 @@ def test_import_endpoint_rejects_oversized_file(monkeypatch) -> None:
                 news=None,
                 file=upload,
                 accounting=None,
-                    settings=SimpleNamespace(news_add_cost=0),
+                settings=SimpleNamespace(news_add_cost=0),
                 publisher=None,
                 repository=None,
                 import_format="lenta",
@@ -334,6 +357,7 @@ def test_import_endpoint_rejects_oversized_file(monkeypatch) -> None:
 
 
 def test_import_and_publish_rolls_back_import_when_batch_is_invalid() -> None:
+    """Импорт с немедленной публикацией откатывается, если батч невалиден."""
     service = _FailingImportNewsServiceSpy()
     current_user = CurrentUser(
         id=uuid4(),
