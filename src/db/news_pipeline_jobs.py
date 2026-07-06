@@ -5,10 +5,14 @@ from psycopg import AsyncConnection
 
 
 class NewsPipelineJobRepository:
+    """Репозиторий состояния asynchronous pipeline jobs в PostgreSQL."""
+
     def __init__(self, database_url: str) -> None:
+        """Сохранить DSN базы для короткоживущих async-подключений."""
         self._database_url = database_url
 
     async def initialize(self) -> None:
+        """Создать расширение vector и таблицу jobs, если они ещё не существуют."""
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
             await connection.execute(
@@ -25,6 +29,7 @@ class NewsPipelineJobRepository:
             )
 
     async def mark_queued(self, job_id: str, request: dict[str, Any]) -> None:
+        """Создать или обновить job в статусе queued."""
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
                 """
@@ -39,6 +44,7 @@ class NewsPipelineJobRepository:
             )
 
     async def mark_processing(self, job_id: str, request: dict[str, Any]) -> None:
+        """Перевести job в processing и сохранить актуальный request."""
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
                 """
@@ -53,6 +59,7 @@ class NewsPipelineJobRepository:
             )
 
     async def update_result(self, job_id: str, result: dict[str, Any]) -> None:
+        """Обновить промежуточный result без изменения статуса job."""
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
                 """
@@ -65,6 +72,7 @@ class NewsPipelineJobRepository:
             )
 
     async def mark_done(self, job_id: str, result: dict[str, Any]) -> None:
+        """Завершить job успешно и объединить итоговый result с прогрессом."""
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
                 """
@@ -111,6 +119,7 @@ class NewsPipelineJobRepository:
             )
 
     async def mark_failed(self, job_id: str, error: str) -> None:
+        """Завершить job ошибкой и записать текст ошибки в result."""
         async with await AsyncConnection.connect(self._database_url) as connection:
             await connection.execute(
                 """
@@ -124,6 +133,7 @@ class NewsPipelineJobRepository:
             )
 
     async def mark_dispatched_if_queued(self, job_id: str) -> bool:
+        """Пометить queued job как отправленную, если её ещё не публиковали."""
         async with await AsyncConnection.connect(self._database_url) as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
@@ -152,6 +162,7 @@ class NewsPipelineJobRepository:
         *,
         mode: str | None = None,
     ) -> list[dict[str, Any]]:
+        """Вернуть дочерние jobs parent-задачи, опционально по режиму обработки."""
         mode_filter = "AND request->>'mode' = %s" if mode is not None else ""
         params: tuple[Any, ...] = (
             (parent_job_id, mode) if mode is not None else (parent_job_id,)
@@ -190,6 +201,7 @@ class NewsPipelineJobRepository:
         *,
         organization_id: str | None,
     ) -> list[str]:
+        """Отсортировать article IDs по времени публикации перед chunk/aggregate обработкой."""
         if not news_ids:
             return []
         conditions = ["id = ANY(%s::uuid[])"]
@@ -217,6 +229,7 @@ class NewsPipelineJobRepository:
         return ordered_ids
 
     async def get(self, job_id: str) -> dict[str, Any] | None:
+        """Получить job по идентификатору."""
         async with await AsyncConnection.connect(self._database_url) as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
@@ -246,6 +259,7 @@ class NewsPipelineJobRepository:
         request_type: str,
         user_id: str,
     ) -> dict[str, Any] | None:
+        """Вернуть последнюю job заданного типа для пользователя."""
         async with await AsyncConnection.connect(self._database_url) as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
@@ -274,6 +288,7 @@ class NewsPipelineJobRepository:
         }
 
     async def get_latest_completed(self) -> dict[str, Any] | None:
+        """Вернуть последнюю завершённую или упавшую job для метрик сервиса."""
         async with await AsyncConnection.connect(self._database_url) as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(

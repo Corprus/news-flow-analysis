@@ -82,17 +82,42 @@ CurrentUserDep = Annotated[CurrentUser, Depends(authenticate)]
 
 
 class AddNewsRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "title": "Новый отраслевой отчёт опубликован",
+                    "content": "Текст публикации для анализа и кластеризации.",
+                    "url": "https://example.test/news/1",
+                    "language": "ru",
+                    "topic": "economy",
+                    "published_at": "2026-06-19T12:00:00+03:00",
+                    "publish_immediately": True,
+                }
+            ]
+        },
+    )
 
-    title: str = Field(min_length=1, max_length=1024)
-    content: str = Field(min_length=1)
-    url: str | None = Field(default=None, max_length=2048)
-    canonical_url: str | None = Field(default=None, max_length=2048)
-    summary: str | None = None
-    language: str | None = Field(default=None, max_length=16)
-    topic: str | None = Field(default=None, max_length=256)
-    published_at: datetime
-    publish_immediately: bool = False
+    title: str = Field(min_length=1, max_length=1024, description="Заголовок публикации.")
+    content: str = Field(min_length=1, description="Полный текст публикации.")
+    url: str | None = Field(default=None, max_length=2048, description="Исходная ссылка.")
+    canonical_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Нормализованная ссылка для дедупликации, если известна.",
+    )
+    summary: str | None = Field(default=None, description="Краткое описание или лид.")
+    language: str | None = Field(default=None, max_length=16, description="Код языка.")
+    topic: str | None = Field(default=None, max_length=256, description="Тема или рубрика.")
+    published_at: datetime = Field(
+        description="Дата публикации со смещением UTC, например 2026-06-19T12:00:00+03:00.",
+    )
+    publish_immediately: bool = Field(
+        default=False,
+        description="Если true, черновик сразу публикуется и ставится в обработку.",
+    )
 
     @field_validator("published_at")
     @classmethod
@@ -143,7 +168,11 @@ class NewsImportJobStatus(BaseModel):
 class PublishNewsBatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    article_ids: list[UUID] = Field(min_length=1, max_length=MAX_BATCH_ARTICLES)
+    article_ids: list[UUID] = Field(
+        min_length=1,
+        max_length=MAX_BATCH_ARTICLES,
+        description="ID черновиков или публикаций, к которым применяется операция.",
+    )
 
 
 class PublishNewsBatchResponse(BaseModel):
@@ -156,7 +185,14 @@ class PublishNewsBatchResponse(BaseModel):
 class DeleteNewsBatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    article_ids: list[UUID] = Field(min_length=1, max_length=MAX_BATCH_ARTICLES)
+    article_ids: list[UUID] = Field(
+        min_length=1,
+        max_length=MAX_BATCH_ARTICLES,
+        description=(
+            "ID статей, которые нужно удалить, архивировать, восстановить "
+            "или переобработать."
+        ),
+    )
 
 
 class DeleteNewsBatchResponse(BaseModel):
@@ -168,8 +204,13 @@ class ChangeNewsVisibilityResponse(BaseModel):
 
 
 class NoveltyLabelUpdate(BaseModel):
-    article_id: UUID
-    label: Literal["significant", "minor", "duplicate"] | None
+    article_id: UUID = Field(description="ID обработанной публикации.")
+    label: Literal["significant", "minor", "duplicate"] | None = Field(
+        description=(
+            "Ручная метка новизны. Null сбрасывает ручную правку "
+            "и возвращает модельную метку."
+        ),
+    )
 
 
 class UpdateNoveltyLabelsRequest(BaseModel):
@@ -249,17 +290,44 @@ class LatestNewsDateResponse(BaseModel):
 
 
 class NewsSearchRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "query_text": "изменения на рынке электроэнергии",
+                    "top_k": 20,
+                    "language": "ru",
+                    "published_from": "2026-06-01T00:00:00+03:00",
+                    "published_to": "2026-06-30T23:59:59+03:00",
+                    "min_relevance": 0.5,
+                }
+            ]
+        },
+    )
 
-    query_text: str = Field(min_length=1)
-    top_k: int = Field(default=20, ge=1, le=100)
-    organization_id: UUID | None = None
-    language: str | None = Field(default=None, max_length=16)
-    source_id: UUID | None = None
-    published_from: datetime | None = None
-    published_to: datetime | None = None
-    min_novelty_score: float | None = Field(default=None, ge=0, le=1)
-    min_relevance: float = Field(default=0.5, ge=0, le=1)
+    query_text: str = Field(min_length=1, description="Текст семантического запроса.")
+    top_k: int = Field(default=20, ge=1, le=100, description="Максимум результатов.")
+    organization_id: UUID | None = Field(
+        default=None,
+        description="ID организации для admin-запросов; обычный пользователь видит только свою.",
+    )
+    language: str | None = Field(default=None, max_length=16, description="Фильтр языка.")
+    published_from: datetime | None = Field(default=None, description="Начало периода.")
+    published_to: datetime | None = Field(default=None, description="Конец периода.")
+    min_novelty_score: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Минимальная оценка новизны публикации.",
+    )
+    min_relevance: float = Field(
+        default=0.5,
+        ge=0,
+        le=1,
+        description="Минимальная семантическая релевантность результата.",
+    )
 
     @field_validator("published_from", "published_to")
     @classmethod
@@ -346,7 +414,16 @@ async def enqueue_vectorization_job(
     )
 
 
-@router.post("", response_model=NewsArticleResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=NewsArticleResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Создать публикацию",
+    description=(
+        "Создаёт черновик публикации от имени текущего publisher. "
+        "При `publish_immediately=true` сразу публикует статью и ставит её в ML-пайплайн."
+    ),
+)
 async def add_news(
     request: AddNewsRequest,
     current_user: CurrentUserDep,
@@ -406,7 +483,12 @@ async def add_news(
     )
 
 
-@router.get("/import-formats", response_model=list[NewsImportFormatResponse])
+@router.get(
+    "/import-formats",
+    response_model=list[NewsImportFormatResponse],
+    summary="Получить поддерживаемые форматы импорта",
+    description="Возвращает форматы файлов, которые можно загрузить через import endpoints.",
+)
 def get_news_import_formats(
     current_user: CurrentUserDep,
 ) -> list[NewsImportFormatResponse]:
@@ -426,6 +508,11 @@ def get_news_import_formats(
     "/import",
     response_model=NewsImportResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="Импортировать публикации синхронно",
+    description=(
+        "Разбирает небольшой файл, создаёт черновики и при необходимости сразу "
+        "публикует их с постановкой в ML-пайплайн."
+    ),
 )
 async def import_news(
     current_user: CurrentUserDep,
@@ -521,6 +608,11 @@ async def import_news(
     "/import-jobs",
     response_model=NewsImportJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    summary="Запустить асинхронный импорт",
+    description=(
+        "Создаёт import job для больших файлов. При публикации сразу запускает "
+        "streaming-векторизацию и последующую агрегацию пайплайна."
+    ),
 )
 async def create_news_import_job(
     current_user: CurrentUserDep,
@@ -574,7 +666,12 @@ async def create_news_import_job(
     return NewsImportJobResponse(import_job_id=import_job_id, status="queued")
 
 
-@router.get("/import-jobs/latest", response_model=NewsImportJobStatus)
+@router.get(
+    "/import-jobs/latest",
+    response_model=NewsImportJobStatus,
+    summary="Получить последний import job пользователя",
+    description="Возвращает последнюю задачу импорта текущего пользователя.",
+)
 async def get_latest_news_import_job(
     current_user: CurrentUserDep,
     repository: Annotated[NewsPipelineJobRepository, Depends(get_job_repository)],
@@ -592,7 +689,12 @@ async def get_latest_news_import_job(
     return _news_import_job_status(job)
 
 
-@router.get("/import-jobs/{import_job_id}", response_model=NewsImportJobStatus)
+@router.get(
+    "/import-jobs/{import_job_id}",
+    response_model=NewsImportJobStatus,
+    summary="Получить статус import job",
+    description="Возвращает прогресс и итог асинхронного импорта.",
+)
 async def get_news_import_job(
     import_job_id: UUID,
     current_user: CurrentUserDep,
@@ -621,6 +723,11 @@ async def get_news_import_job(
     "/publish",
     response_model=PublishNewsBatchResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    summary="Опубликовать пакет черновиков",
+    description=(
+        "Переводит выбранные черновики в public/pending, списывает стоимость "
+        "и создаёт одну задачу ML-пайплайна."
+    ),
 )
 async def publish_news_batch(
     request: PublishNewsBatchRequest,
@@ -674,6 +781,8 @@ async def publish_news_batch(
 @router.delete(
     "",
     response_model=DeleteNewsBatchResponse,
+    summary="Удалить черновики",
+    description="Удаляет только черновики текущего пользователя, которые ещё не ушли в обработку.",
 )
 def delete_news_drafts(
     request: DeleteNewsBatchRequest,
@@ -702,6 +811,8 @@ def delete_news_drafts(
 @router.post(
     "/archive",
     response_model=ChangeNewsVisibilityResponse,
+    summary="Архивировать публикации",
+    description="Скрывает выбранные публикации из рабочих списков без физического удаления.",
 )
 def archive_news(
     request: DeleteNewsBatchRequest,
@@ -720,6 +831,8 @@ def archive_news(
 @router.post(
     "/restore",
     response_model=ChangeNewsVisibilityResponse,
+    summary="Восстановить публикации из архива",
+    description="Возвращает архивные публикации в рабочую видимость.",
 )
 def restore_news(
     request: DeleteNewsBatchRequest,
@@ -738,6 +851,11 @@ def restore_news(
 @router.post(
     "/moderation-labels",
     response_model=UpdateNoveltyLabelsResponse,
+    summary="Обновить ручные метки новизны",
+    description=(
+        "Сохраняет экспертную правку `significant`, `minor` или `duplicate` "
+        "поверх модельной метки. Null сбрасывает ручную правку."
+    ),
 )
 def update_novelty_labels(
     request: UpdateNoveltyLabelsRequest,
@@ -765,6 +883,8 @@ def update_novelty_labels(
     "/reprocess",
     response_model=ReprocessNewsResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    summary="Поставить публикации на повторную обработку",
+    description="Сбрасывает состояние выбранных статей и создаёт новую incremental job.",
 )
 async def reprocess_news(
     request: DeleteNewsBatchRequest,
@@ -840,6 +960,8 @@ def _change_news_visibility(
     "/{article_id}/publish",
     response_model=NewsArticlePublishResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    summary="Опубликовать один черновик",
+    description="Публикует один черновик, списывает стоимость и ставит статью в ML-пайплайн.",
 )
 async def publish_news(
     article_id: UUID,
@@ -880,7 +1002,12 @@ async def publish_news(
     )
 
 
-@router.get("/me/history", response_model=list[NewsArticleHistoryItem])
+@router.get(
+    "/me/history",
+    response_model=list[NewsArticleHistoryItem],
+    summary="Получить историю публикаций",
+    description="Возвращает статьи текущего пользователя с видимостью, статусом и ML-результатами.",
+)
 def get_my_news_history(
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],
@@ -902,7 +1029,12 @@ def get_my_news_history(
     return [_article_history_item(article) for article in articles]
 
 
-@router.get("/me/history-summary", response_model=NewsArticleHistorySummary)
+@router.get(
+    "/me/history-summary",
+    response_model=NewsArticleHistorySummary,
+    summary="Получить агрегированное состояние публикаций",
+    description="Возвращает счётчики статей по видимости и статусу обработки.",
+)
 def get_my_news_history_summary(
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],
@@ -928,7 +1060,15 @@ def get_my_news_history_summary(
     )
 
 
-@router.get("/feed", response_model=NewsFeedResponse)
+@router.get(
+    "/feed",
+    response_model=NewsFeedResponse,
+    summary="Получить ленту обработанных публикаций",
+    description=(
+        "Возвращает public-публикации за период, сгруппированные по предсказанным "
+        "кластерам инфоповодов."
+    ),
+)
 def get_news_feed(
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],
@@ -1009,7 +1149,12 @@ def get_news_feed(
     )
 
 
-@router.get("/feed/adjacent-dates", response_model=AdjacentNewsDatesResponse)
+@router.get(
+    "/feed/adjacent-dates",
+    response_model=AdjacentNewsDatesResponse,
+    summary="Найти соседние даты с публикациями",
+    description="Помогает UI переходить к предыдущему или следующему дню с новостями.",
+)
 def get_adjacent_news_dates(
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],
@@ -1040,7 +1185,12 @@ def get_adjacent_news_dates(
     )
 
 
-@router.get("/feed/latest-date", response_model=LatestNewsDateResponse)
+@router.get(
+    "/feed/latest-date",
+    response_model=LatestNewsDateResponse,
+    summary="Получить последнюю дату с публикациями",
+    description="Возвращает последнюю дату, на которую есть public-публикации.",
+)
 def get_latest_news_date(
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],
@@ -1052,7 +1202,16 @@ def get_latest_news_date(
     )
 
 
-@search_router.post("", response_model=NewsSearchResponse, status_code=status.HTTP_202_ACCEPTED)
+@search_router.post(
+    "",
+    response_model=NewsSearchResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Запустить семантический поиск",
+    description=(
+        "Создаёт асинхронный поисковый запрос по обработанным public-публикациям. "
+        "Результаты дедуплицируются по кластерам."
+    ),
+)
 async def create_news_search(
     request: NewsSearchRequest,
     current_user: CurrentUserDep,
@@ -1069,7 +1228,6 @@ async def create_news_search(
     filters = NewsSearchFilters(
         organization_id=visible_organization_id,
         language=request.language,
-        source_id=request.source_id,
         published_from=request.published_from,
         published_to=request.published_to,
         min_novelty_score=request.min_novelty_score,
@@ -1101,7 +1259,12 @@ async def create_news_search(
     )
 
 
-@search_router.get("/history", response_model=list[NewsSearchHistoryItem])
+@search_router.get(
+    "/history",
+    response_model=list[NewsSearchHistoryItem],
+    summary="Получить историю поисковых запросов",
+    description="Возвращает последние семантические поиски пользователя и их результаты.",
+)
 def get_my_search_history(
     current_user: CurrentUserDep,
     news: Annotated[NewsService, Depends(get_news_service)],

@@ -88,11 +88,13 @@ GET  /api/news-pipeline/{job_id}
 ```json
 {
   "news_ids": ["ARTICLE_UUID"],
+  "organization_id": "ORGANIZATION_UUID",
   "mode": "incremental"
 }
 ```
 
-`mode` принимает `incremental` или `full`. Статус задачи:
+`organization_id` обязателен и ограничивает обработку статьями конкретной
+организации. `mode` принимает `incremental` или `full`. Статус задачи:
 `queued`, `processing`, `done` или `failed`.
 
 Большой `incremental` job автоматически разбивается на child jobs режимов

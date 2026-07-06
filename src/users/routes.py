@@ -49,29 +49,35 @@ RoleQuery = Annotated[UserRole | None, Query()]
 class CreateUserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    login: str = Field(min_length=3, max_length=128)
-    password: str = Field(min_length=8, max_length=256)
+    login: str = Field(min_length=3, max_length=128, description="Логин пользователя.")
+    password: str = Field(min_length=8, max_length=256, description="Пароль пользователя.")
 
 
 class AdminCreateUserRequest(CreateUserRequest):
-    organization_id: UUID
-    role: UserRole = UserRole.USER
+    organization_id: UUID = Field(description="ID организации пользователя.")
+    role: UserRole = Field(default=UserRole.USER, description="Роль пользователя.")
 
 
 class UpdateUserRoleRequest(BaseModel):
-    role: UserRole
+    role: UserRole = Field(description="Новая роль пользователя.")
 
 
 class UpdateUserRequest(BaseModel):
-    login: str = Field(min_length=3, max_length=128)
-    role: UserRole
-    organization_id: UUID
+    login: str = Field(min_length=3, max_length=128, description="Новый логин.")
+    role: UserRole = Field(description="Новая роль.")
+    organization_id: UUID = Field(description="Новая организация пользователя.")
 
 
 class CreateOrganizationRequest(BaseModel):
-    name: str = Field(min_length=2, max_length=256)
-    license_type: LicenseType = LicenseType.SUBSCRIPTION
-    access_expires_at: datetime = Field(default_factory=default_access_expires_at)
+    name: str = Field(min_length=2, max_length=256, description="Название организации.")
+    license_type: LicenseType = Field(
+        default=LicenseType.SUBSCRIPTION,
+        description="Тип поставки или лицензии.",
+    )
+    access_expires_at: datetime = Field(
+        default_factory=default_access_expires_at,
+        description="Дата окончания доступа со смещением UTC.",
+    )
 
     @field_validator("access_expires_at")
     @classmethod
@@ -86,8 +92,8 @@ class UpdateOrganizationRequest(CreateOrganizationRequest):
 
 
 class LoginRequest(BaseModel):
-    login: str
-    password: str
+    login: str = Field(description="Логин пользователя.")
+    password: str = Field(description="Пароль пользователя.")
 
 
 class TokenResponse(BaseModel):
@@ -137,7 +143,12 @@ def _to_response(user: User) -> UserResponse:
     )
 
 
-@auth_router.post("/login", response_model=TokenResponse)
+@auth_router.post(
+    "/login",
+    response_model=TokenResponse,
+    summary="Войти в систему",
+    description="Проверяет логин и пароль, возвращает bearer token для последующих запросов.",
+)
 def login(request: LoginRequest, auth: AuthServiceDep) -> TokenResponse:
     try:
         return TokenResponse(access_token=auth.login(request.login, request.password))
@@ -148,7 +159,13 @@ def login(request: LoginRequest, auth: AuthServiceDep) -> TokenResponse:
         ) from exc
 
 
-@router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Создать базового пользователя",
+    description="Создаёт пользователя в организации по умолчанию, если такой режим включён.",
+)
 def create_user(request: CreateUserRequest, users: UserServiceDep) -> UserResponse:
     try:
         return _to_response(users.create_user(request.login, request.password))
@@ -159,7 +176,12 @@ def create_user(request: CreateUserRequest, users: UserServiceDep) -> UserRespon
         ) from exc
 
 
-@router.get("", response_model=list[UserResponse])
+@router.get(
+    "",
+    response_model=list[UserResponse],
+    summary="Получить пользователей",
+    description="Администратор получает список пользователей с необязательным фильтром роли.",
+)
 def list_users(
     users: UserServiceDep,
     current_user: CurrentUserDep,
@@ -169,7 +191,12 @@ def list_users(
     return [_to_response(user) for user in users.list_users(role=role)]
 
 
-@router.get("/me", response_model=CurrentUserResponse)
+@router.get(
+    "/me",
+    response_model=CurrentUserResponse,
+    summary="Получить текущего пользователя",
+    description="Возвращает профиль, роль и лицензионные параметры организации текущего токена.",
+)
 def get_me(
     current_user: CurrentUserDep,
     users: UserServiceDep,
@@ -192,7 +219,12 @@ def get_me(
     )
 
 
-@router.get("/{user_id}", response_model=UserResponse)
+@router.get(
+    "/{user_id}",
+    response_model=UserResponse,
+    summary="Получить пользователя по ID",
+    description="Административный просмотр карточки пользователя.",
+)
 def get_user(
     user_id: UUID,
     users: UserServiceDep,
@@ -205,7 +237,12 @@ def get_user(
     return _to_response(user)
 
 
-@router.patch("/{user_id}/role", response_model=UserResponse)
+@router.patch(
+    "/{user_id}/role",
+    response_model=UserResponse,
+    summary="Изменить роль пользователя",
+    description="Меняет только роль и защищает систему от потери последнего администратора.",
+)
 def update_user_role(
     user_id: UUID,
     request: UpdateUserRoleRequest,
@@ -244,7 +281,12 @@ def update_user_role(
     return _to_response(updated)
 
 
-@router.patch("/{user_id}", response_model=UserResponse)
+@router.patch(
+    "/{user_id}",
+    response_model=UserResponse,
+    summary="Изменить пользователя",
+    description="Администратор меняет логин, роль и организацию пользователя.",
+)
 def update_user(
     user_id: UUID,
     request: UpdateUserRequest,
@@ -304,7 +346,13 @@ def update_user(
     return _to_response(updated)
 
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+@router.delete(
+    "/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    summary="Удалить пользователя",
+    description="Удаляет пользователя и запрещает удалить текущего или последнего администратора.",
+)
 def delete_user(
     user_id: UUID,
     users: UserServiceDep,
@@ -350,6 +398,8 @@ def delete_user(
     "/users",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="Создать пользователя администратором",
+    description="Создаёт пользователя в выбранной организации с заданной ролью.",
 )
 def admin_create_user(
     request: AdminCreateUserRequest,
@@ -390,7 +440,12 @@ def admin_create_user(
     return _to_response(user)
 
 
-@organization_router.get("", response_model=list[OrganizationResponse])
+@organization_router.get(
+    "",
+    response_model=list[OrganizationResponse],
+    summary="Получить организации",
+    description="Возвращает организации, количество пользователей и текущий баланс.",
+)
 def list_organizations(
     organizations: OrganizationServiceDep,
     current_user: CurrentUserDep,
@@ -414,6 +469,8 @@ def list_organizations(
     "",
     response_model=OrganizationResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="Создать организацию",
+    description="Создаёт организацию с типом лицензии и датой окончания доступа.",
 )
 def create_organization(
     request: CreateOrganizationRequest,
@@ -447,7 +504,12 @@ def create_organization(
     return _organization_response(organization)
 
 
-@organization_router.patch("/{organization_id}", response_model=OrganizationResponse)
+@organization_router.patch(
+    "/{organization_id}",
+    response_model=OrganizationResponse,
+    summary="Изменить организацию",
+    description="Обновляет название, тип лицензии и дату окончания доступа.",
+)
 def update_organization(
     organization_id: UUID,
     request: UpdateOrganizationRequest,
@@ -494,7 +556,12 @@ def update_organization(
     return _organization_response(updated)
 
 
-@admin_router.get("/audit", response_model=list[AdminAuditResponse])
+@admin_router.get(
+    "/audit",
+    response_model=list[AdminAuditResponse],
+    summary="Получить журнал администрирования",
+    description="Возвращает audit log с фильтром по действию и пагинацией.",
+)
 def list_admin_audit(
     audit: AdminAuditServiceDep,
     current_user: CurrentUserDep,

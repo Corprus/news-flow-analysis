@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -11,7 +10,7 @@ from tqdm.auto import tqdm
 from .embeddings import l2_normalize
 
 # ---------------------------------------------------------------------------
-# Feature sets
+# Наборы признаков
 # ---------------------------------------------------------------------------
 
 LEGACY_SIGNIFICANCE_FEATURE_COLUMNS = (
@@ -35,38 +34,16 @@ LEGACY_SIGNIFICANCE_FEATURE_COLUMNS = (
     "text_length",
 )
 
-# Keep DEFAULT_FEATURE_COLUMNS compatible with the saved CatBoost model from the
-# previous notebook. That model was trained on 18 unnamed columns, matching the
-# legacy feature order above.
+# DEFAULT_FEATURE_COLUMNS должен оставаться совместимым с сохранённой CatBoost
+# моделью из предыдущего ноутбука. Она обучалась на 18 безымянных колонках,
+# соответствующих legacy-порядку признаков выше.
 DEFAULT_FEATURE_COLUMNS = LEGACY_SIGNIFICANCE_FEATURE_COLUMNS
 
 FEATURE_COLUMNS = list(LEGACY_SIGNIFICANCE_FEATURE_COLUMNS)
 
-# Experimental feature set from the improvement scaffold. Keep it available for
-# later ablation experiments, but do not use it as the default for the saved
-# legacy CatBoost model.
-PREVIOUS_ONLY_EXPERIMENTAL_FEATURE_COLUMNS = (
-    "prev_count",
-    "position_in_cluster",
-    "is_first_in_cluster",
-    "max_prev_sim",
-    "mean_prev_sim",
-    "top3_prev_sim_mean",
-    "top5_prev_sim_mean",
-    "prev_centroid_sim",
-    "prev_centroid_distance",
-    "days_since_prev_news",
-    "days_since_cluster_start",
-    "cluster_density_last_3_days",
-    "cluster_density_last_7_days",
-    "topic_prev_count_30d",
-    "topic_max_prev_sim_30d",
-    "topic_top3_prev_sim_30d",
-)
-
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Вспомогательные функции
 # ---------------------------------------------------------------------------
 
 _TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9]+", flags=re.IGNORECASE)
@@ -91,7 +68,7 @@ def _safe_float(value: object, default: float = 0.0) -> float:
 
 
 def _text_len(row: pd.Series, text_column: str, length_column: str) -> int:
-    """Prefer precomputed length column, fall back to len(text)."""
+    """Использовать готовую длину текста, а при её отсутствии считать len(text)."""
     if length_column in row.index and not pd.isna(row[length_column]):
         try:
             return int(row[length_column])
@@ -160,7 +137,7 @@ def _ensure_cluster_column(
 
 
 # ---------------------------------------------------------------------------
-# Legacy 18-feature builder
+# Legacy-сборщик 18 признаков
 # ---------------------------------------------------------------------------
 
 
@@ -178,12 +155,12 @@ def build_legacy_significance_features(
     text_length_column: str = "text_length",
     show_progress: bool = False,
 ) -> pd.DataFrame:
-    """Build the 18 legacy features used by the saved CatBoost model.
+    """Собрать 18 legacy-признаков для сохранённой CatBoost-модели.
 
-    The function is previous-only: for each news item, all features are computed
-    only from earlier items within the same predicted cluster.
+    Функция previous-only: для каждой новости все признаки считаются только по
+    более ранним элементам того же предсказанного кластера.
 
-    The returned rows are in the original `news_df` order.
+    Строки возвращаются в исходном порядке `news_df`.
     """
     if len(news_df) != len(embeddings):
         raise ValueError("news_df and embeddings must have the same length")
@@ -314,242 +291,9 @@ def build_legacy_significance_features(
     return result
 
 
-@dataclass
-class LegacySignificanceFeatureBuilder:
-    """Feature builder compatible with the saved 18-feature CatBoost model."""
-
-    cluster_column: str = "cluster_id"
-    id_column: str = "news_id"
-    topic_column: str = "topic"
-    date_column: str = "published_at"
-    title_column: str = "title"
-    text_column: str = "text"
-    title_length_column: str = "title_length"
-    text_length_column: str = "text_length"
-
-    feature_columns = LEGACY_SIGNIFICANCE_FEATURE_COLUMNS
-
-    def build(
-        self,
-        news_df: pd.DataFrame,
-        embeddings: np.ndarray,
-        cluster_ids: np.ndarray | list | pd.Series | None = None,
-    ) -> pd.DataFrame:
-        return build_legacy_significance_features(
-            news_df=news_df,
-            embeddings=embeddings,
-            cluster_ids=cluster_ids,
-            cluster_column=self.cluster_column,
-            id_column=self.id_column,
-            topic_column=self.topic_column,
-            date_column=self.date_column,
-            title_column=self.title_column,
-            text_column=self.text_column,
-            title_length_column=self.title_length_column,
-            text_length_column=self.text_length_column,
-        )
-
-
-# ---------------------------------------------------------------------------
-# Experimental 16-feature builder kept for later experiments
-# ---------------------------------------------------------------------------
-
-
-def build_experimental_previous_only_features(
-    news_df: pd.DataFrame,
-    embeddings: np.ndarray,
-    cluster_ids: np.ndarray | list | pd.Series | None = None,
-    cluster_column: str = "cluster_id",
-    id_column: str = "news_id",
-    topic_column: str = "topic",
-    date_column: str = "published_at",
-    topic_fallback_window_days: int = 30,
-) -> pd.DataFrame:
-    """Build the newer 16-feature experimental set.
-
-    This is not the default because the saved CatBoost model from the previous
-    notebook expects the 18 legacy features.
-    """
-    if len(news_df) != len(embeddings):
-        raise ValueError("news_df and embeddings must have the same length")
-
-    df = _ensure_cluster_column(news_df, cluster_ids, cluster_column=cluster_column)
-    df = df.copy()
-    df["_row_pos"] = np.arange(len(df))
-    df[date_column] = pd.to_datetime(df[date_column], errors="coerce")
-    emb = l2_normalize(np.asarray(embeddings, dtype=np.float32))
-
-    rows: list[dict] = []
-
-    sorted_by_time = df.sort_values(date_column, kind="mergesort")
-    topic_history: dict[object, list[int]] = {}
-
-    for _, current in sorted_by_time.iterrows():
-        idx = int(current["_row_pos"])
-        current_date = current[date_column]
-        topic = current.get(topic_column, "")
-        hist = topic_history.setdefault(topic, [])
-
-        if hist:
-            hist_dates = df.iloc[hist][date_column]
-            if pd.isna(current_date):
-                in_window = np.ones(len(hist), dtype=bool)
-            else:
-                deltas = (current_date - hist_dates).dt.total_seconds().to_numpy() / (24 * 60 * 60)
-                in_window = (deltas >= 0) & (deltas <= topic_fallback_window_days)
-
-            topic_candidates = np.asarray(hist, dtype=int)[in_window]
-            topic_sims = (
-                emb[topic_candidates] @ emb[idx]
-                if len(topic_candidates)
-                else np.asarray([], dtype=np.float32)
-            )
-        else:
-            topic_candidates = np.asarray([], dtype=int)
-            topic_sims = np.asarray([], dtype=np.float32)
-
-        rows.append(
-            {
-                "_row_pos": idx,
-                id_column: current[id_column],
-                cluster_column: current[cluster_column],
-                topic_column: current.get(topic_column, ""),
-                date_column: current_date,
-                "topic_prev_count_30d": int(len(topic_candidates)),
-                "topic_max_prev_sim_30d": float(topic_sims.max()) if topic_sims.size else 0.0,
-                "topic_top3_prev_sim_30d": _mean_top_k(topic_sims, 3),
-            }
-        )
-
-        hist.append(idx)
-
-    topic_features = pd.DataFrame(rows).set_index(id_column)
-
-    cluster_rows: list[dict] = []
-    for _, group in df.sort_values(date_column, kind="mergesort").groupby(
-        cluster_column, sort=False, dropna=False
-    ):
-        history_indices: list[int] = []
-        history_dates: list[pd.Timestamp] = []
-        cluster_start = None
-
-        for position, (_, current) in enumerate(group.iterrows()):
-            idx = int(current["_row_pos"])
-            current_date = current[date_column]
-            current_emb = emb[idx]
-            prev_count = len(history_indices)
-
-            if prev_count:
-                prev_emb = emb[history_indices]
-                sims = prev_emb @ current_emb
-                centroid = l2_normalize(prev_emb.mean(axis=0, keepdims=True))[0]
-                prev_centroid_sim = float(centroid @ current_emb)
-
-                if pd.isna(current_date):
-                    days_since_prev = -1.0
-                    days_since_start = -1.0
-                    density3 = 0
-                    density7 = 0
-                else:
-                    last_date = history_dates[-1]
-                    days_since_prev = _days_between(current_date, last_date)
-                    days_since_start = _days_between(current_date, cluster_start)
-                    deltas = np.array(
-                        [
-                            (current_date - d).total_seconds() / (24 * 60 * 60)
-                            for d in history_dates
-                            if not pd.isna(d)
-                        ]
-                    )
-                    density3 = int(((deltas >= 0) & (deltas <= 3)).sum()) if deltas.size else 0
-                    density7 = int(((deltas >= 0) & (deltas <= 7)).sum()) if deltas.size else 0
-
-                item_features = {
-                    "prev_count": prev_count,
-                    "position_in_cluster": position,
-                    "is_first_in_cluster": 0,
-                    "max_prev_sim": float(sims.max()),
-                    "mean_prev_sim": float(sims.mean()),
-                    "top3_prev_sim_mean": _mean_top_k(sims, 3),
-                    "top5_prev_sim_mean": _mean_top_k(sims, 5),
-                    "prev_centroid_sim": prev_centroid_sim,
-                    "prev_centroid_distance": float(1.0 - prev_centroid_sim),
-                    "days_since_prev_news": float(days_since_prev),
-                    "days_since_cluster_start": float(days_since_start),
-                    "cluster_density_last_3_days": density3,
-                    "cluster_density_last_7_days": density7,
-                }
-            else:
-                cluster_start = current_date
-                item_features = {
-                    "prev_count": 0,
-                    "position_in_cluster": position,
-                    "is_first_in_cluster": 1,
-                    "max_prev_sim": 0.0,
-                    "mean_prev_sim": 0.0,
-                    "top3_prev_sim_mean": 0.0,
-                    "top5_prev_sim_mean": 0.0,
-                    "prev_centroid_sim": 0.0,
-                    "prev_centroid_distance": 1.0,
-                    "days_since_prev_news": -1.0,
-                    "days_since_cluster_start": 0.0,
-                    "cluster_density_last_3_days": 0,
-                    "cluster_density_last_7_days": 0,
-                }
-
-            cluster_rows.append({id_column: current[id_column], **item_features})
-            history_indices.append(idx)
-            history_dates.append(current_date)
-
-    cluster_features = pd.DataFrame(cluster_rows).set_index(id_column)
-    result = cluster_features.join(topic_features, how="left").reset_index()
-
-    for col in PREVIOUS_ONLY_EXPERIMENTAL_FEATURE_COLUMNS:
-        if col not in result.columns:
-            result[col] = 0.0
-
-    result[list(PREVIOUS_ONLY_EXPERIMENTAL_FEATURE_COLUMNS)] = (
-        result[list(PREVIOUS_ONLY_EXPERIMENTAL_FEATURE_COLUMNS)]
-        .replace([np.inf, -np.inf], np.nan)
-        .fillna(0.0)
-    )
-
-    return result
-
-
-@dataclass
-class ExperimentalPreviousOnlyFeatureBuilder:
-    """Feature builder for the newer 16-feature experimental set."""
-
-    cluster_column: str = "cluster_id"
-    id_column: str = "news_id"
-    topic_column: str = "topic"
-    date_column: str = "published_at"
-    topic_fallback_window_days: int = 30
-
-    feature_columns = PREVIOUS_ONLY_EXPERIMENTAL_FEATURE_COLUMNS
-
-    def build(
-        self,
-        news_df: pd.DataFrame,
-        embeddings: np.ndarray,
-        cluster_ids: np.ndarray | list | pd.Series | None = None,
-    ) -> pd.DataFrame:
-        return build_experimental_previous_only_features(
-            news_df=news_df,
-            embeddings=embeddings,
-            cluster_ids=cluster_ids,
-            cluster_column=self.cluster_column,
-            id_column=self.id_column,
-            topic_column=self.topic_column,
-            date_column=self.date_column,
-            topic_fallback_window_days=self.topic_fallback_window_days,
-        )
-
-
-# Backward-compatible public function used by the current notebook/model code.
-# It now returns the 18 legacy features by default, so the saved CatBoost model
-# can be used without changing the notebook.
+# Публичная функция для обратной совместимости с текущими ноутбуками и модельным
+# кодом. По умолчанию она возвращает 18 legacy-признаков, чтобы сохранённую
+# CatBoost-модель можно было использовать без изменений в ноутбуке.
 def build_previous_only_features(
     news_df: pd.DataFrame,
     embeddings: np.ndarray,

@@ -22,6 +22,7 @@ from users.models import UserRole
 
 
 def _current_user(role: UserRole) -> CurrentUser:
+    """Создать пользователя нужной роли для route-level проверок."""
     return CurrentUser(
         id=uuid4(),
         organization_id=uuid4(),
@@ -30,6 +31,7 @@ def _current_user(role: UserRole) -> CurrentUser:
 
 
 def test_regular_user_cannot_publish_news() -> None:
+    """Обычный пользователь не проходит проверку прав публикации."""
     with pytest.raises(HTTPException) as error:
         ensure_publisher(_current_user(UserRole.USER))
 
@@ -39,10 +41,12 @@ def test_regular_user_cannot_publish_news() -> None:
 
 @pytest.mark.parametrize("role", [UserRole.PUBLISHER, UserRole.ADMIN])
 def test_publisher_and_admin_can_publish_news(role: UserRole) -> None:
+    """Издатель и администратор имеют право публиковать новости."""
     ensure_publisher(_current_user(role))
 
 
 def test_expired_access_cannot_publish_even_for_admin() -> None:
+    """Истёкший доступ организации блокирует публикации даже для администратора."""
     with pytest.raises(HTTPException) as error:
         ensure_publisher(
             CurrentUser(
@@ -58,6 +62,8 @@ def test_expired_access_cannot_publish_even_for_admin() -> None:
 
 
 class _NewsServiceSpy:
+    """Падает при побочном эффекте, который не должен случиться без прав."""
+
     def __init__(self) -> None:
         self.add_calls = []
 
@@ -67,6 +73,7 @@ class _NewsServiceSpy:
 
 
 def test_add_news_endpoint_rejects_regular_user_before_side_effects() -> None:
+    """API добавления новости отсекает обычного пользователя до создания черновика."""
     news = _NewsServiceSpy()
     request = AddNewsRequest(
         title="Title",
@@ -92,6 +99,7 @@ def test_add_news_endpoint_rejects_regular_user_before_side_effects() -> None:
 
 
 def test_import_formats_endpoint_requires_publisher_role() -> None:
+    """Список форматов импорта доступен только роли издателя или администратора."""
     with pytest.raises(HTTPException) as error:
         get_news_import_formats(_current_user(UserRole.USER))
 
@@ -99,6 +107,7 @@ def test_import_formats_endpoint_requires_publisher_role() -> None:
 
 
 def test_publish_news_endpoint_rejects_regular_user_before_side_effects() -> None:
+    """Публикация новости не запускает побочные эффекты без publisher-прав."""
     with pytest.raises(HTTPException) as error:
         asyncio.run(
             publish_news(
@@ -116,6 +125,7 @@ def test_publish_news_endpoint_rejects_regular_user_before_side_effects() -> Non
 
 
 def test_delete_news_endpoint_rejects_regular_user_before_side_effects() -> None:
+    """Удаление черновиков недоступно обычному пользователю."""
     with pytest.raises(HTTPException) as error:
         delete_news_drafts(
             request=DeleteNewsBatchRequest(article_ids=[uuid4()]),
@@ -127,6 +137,7 @@ def test_delete_news_endpoint_rejects_regular_user_before_side_effects() -> None
 
 
 def test_moderation_and_reprocessing_require_publisher_role() -> None:
+    """Ручная модерация и переобработка требуют роли издателя."""
     article_id = uuid4()
     current_user = _current_user(UserRole.USER)
 

@@ -85,7 +85,7 @@ jobs:
           pip install -r requirements-ci.txt
 
       - name: Run tests
-        run: pytest
+        run: pytest -vv -ra --tb=short
 
   compose-config:
     name: Docker Compose Config

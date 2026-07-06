@@ -28,22 +28,22 @@ MAX_SQL_IN_LIST_SIZE = 10_000
 
 @dataclass(frozen=True)
 class NewsSearchFilters:
+    """Фильтры семантического поиска, сохраняемые в payload поисковой задачи."""
+
     organization_id: UUID | None = None
     language: str | None = None
-    source_id: UUID | None = None
     published_from: datetime | None = None
     published_to: datetime | None = None
     min_novelty_score: float | None = None
     min_relevance: float = 0.4
 
     def to_payload(self) -> dict[str, str]:
+        """Преобразовать фильтры в JSON-совместимый словарь строк."""
         payload: dict[str, str] = {}
         if self.organization_id is not None:
             payload["organization_id"] = str(self.organization_id)
         if self.language is not None:
             payload["language"] = self.language
-        if self.source_id is not None:
-            payload["source_id"] = str(self.source_id)
         if self.published_from is not None:
             payload["published_from"] = self.published_from.isoformat()
         if self.published_to is not None:
@@ -56,6 +56,8 @@ class NewsSearchFilters:
 
 @dataclass(frozen=True)
 class NewsImportResult:
+    """Итог разбора и сохранения файла импорта новостей."""
+
     total_rows: int
     created_count: int
     duplicate_count: int
@@ -63,7 +65,10 @@ class NewsImportResult:
 
 
 class NewsService:
+    """Доменный сервис публикаций, импорта, поиска и пользовательской модерации."""
+
     def __init__(self, session: Session) -> None:
+        """Создать сервис поверх текущей SQLAlchemy-сессии."""
         self._session = session
 
     def add_user_article(
@@ -80,6 +85,7 @@ class NewsService:
         language: str | None = None,
         topic: str | None = None,
     ) -> NewsArticle:
+        """Создать или обновить черновик пользовательской публикации."""
         content_hash = hashlib.sha256(content.encode()).hexdigest()
         existing_article = self._find_existing_article(
             canonical_url,
@@ -136,6 +142,7 @@ class NewsService:
         progress_callback: Callable[[int, int, int], None] | None = None,
         progress_interval_rows: int = IMPORT_PROGRESS_INTERVAL_ROWS,
     ) -> NewsImportResult:
+        """Импортировать набор публикаций как черновики пользователя."""
         article_ids: list[str] = []
         created_count = 0
         duplicate_count = 0
@@ -210,6 +217,7 @@ class NewsService:
         )
 
     def publish_user_article(self, article_id: UUID, user_id: UUID) -> NewsArticle | None:
+        """Опубликовать один пользовательский черновик и поставить его в pending."""
         article = (
             self._session.execute(
                 select(NewsArticle)
@@ -243,6 +251,7 @@ class NewsService:
         *,
         allow_already_public: bool = False,
     ) -> list[NewsArticle]:
+        """Опубликовать несколько черновиков пользователя с полной валидацией."""
         unique_ids = list(dict.fromkeys(str(article_id) for article_id in article_ids))
         if not unique_ids:
             return []
@@ -302,6 +311,7 @@ class NewsService:
         *,
         allow_already_public: bool = False,
     ) -> list[str]:
+        """Опубликовать большое число черновиков чанками без загрузки всех ORM-объектов."""
         unique_ids = list(dict.fromkeys(str(article_id) for article_id in article_ids))
         if not unique_ids:
             return []
@@ -375,6 +385,7 @@ class NewsService:
         article_ids: Iterable[UUID],
         user_id: UUID,
     ) -> int:
+        """Удалить необработанные черновики пользователя."""
         unique_ids = list(dict.fromkeys(str(article_id) for article_id in article_ids))
         if not unique_ids:
             return 0
@@ -421,6 +432,7 @@ class NewsService:
         article_ids: Iterable[UUID],
         user_id: UUID,
     ) -> int:
+        """Архивировать public-публикации пользователя."""
         return self._change_user_article_visibility(
             article_ids,
             user_id,
@@ -433,6 +445,7 @@ class NewsService:
         article_ids: Iterable[UUID],
         user_id: UUID,
     ) -> int:
+        """Восстановить архивные публикации пользователя в public."""
         return self._change_user_article_visibility(
             article_ids,
             user_id,
@@ -445,6 +458,7 @@ class NewsService:
         labels: dict[UUID, str | None],
         user_id: UUID,
     ) -> int:
+        """Сохранить или сбросить ручные novelty-label для обработанных публикаций."""
         if not labels:
             return 0
         valid_labels = {"significant", "minor", "duplicate"}
@@ -497,6 +511,7 @@ class NewsService:
         article_ids: Iterable[UUID],
         user_id: UUID,
     ) -> list[NewsArticle]:
+        """Подготовить public-публикации к повторной ML-обработке."""
         unique_ids = list(dict.fromkeys(str(article_id) for article_id in article_ids))
         if not unique_ids:
             return []
@@ -599,6 +614,7 @@ class NewsService:
         filters: NewsSearchFilters,
         top_k: int,
     ) -> NewsSearchQuery:
+        """Создать queued semantic-search задачу для model-service."""
         search_query = NewsSearchQuery(
             user_id=str(user_id),
             query_text=query_text,
@@ -618,6 +634,7 @@ class NewsService:
         visibility: ArticleVisibility | None = None,
         statuses: Iterable[ArticleStatus] | None = None,
     ) -> list[NewsArticle]:
+        """Вернуть страницу публикаций пользователя с фильтрами истории."""
         filters = [NewsArticleSubmission.user_id == str(user_id)]
         if visibility is not None:
             filters.append(NewsArticle.visibility == visibility.value)
@@ -642,6 +659,7 @@ class NewsService:
         self,
         user_id: UUID,
     ) -> list[tuple[str, str, int]]:
+        """Посчитать публикации пользователя по visibility и processing status."""
         statement = (
             select(
                 NewsArticle.visibility,
@@ -664,6 +682,7 @@ class NewsService:
         published_to: datetime,
         organization_id: UUID | None = None,
     ) -> tuple[list[NewsArticle], int]:
+        """Вернуть processed public-публикации за период для ленты."""
         filters = [
             NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
             NewsArticle.status == ArticleStatus.PROCESSED.value,
@@ -691,6 +710,7 @@ class NewsService:
         published_to: datetime,
         organization_id: UUID | None = None,
     ) -> tuple[datetime | None, datetime | None]:
+        """Найти ближайшие даты с public-публикациями до и после периода."""
         filters = [
             NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
             NewsArticle.status == ArticleStatus.PROCESSED.value,
@@ -715,6 +735,7 @@ class NewsService:
         self,
         organization_id: UUID | None = None,
     ) -> datetime | None:
+        """Вернуть дату последней обработанной public-публикации."""
         filters = [
             NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
             NewsArticle.status == ArticleStatus.PROCESSED.value,
@@ -730,6 +751,7 @@ class NewsService:
         cluster_ids: Iterable[str],
         organization_id: UUID | None = None,
     ) -> dict[str, dict]:
+        """Вернуть краткие сведения по кластерам ленты."""
         unique_cluster_ids = list(dict.fromkeys(str(cluster_id) for cluster_id in cluster_ids))
         if not unique_cluster_ids:
             return {}
@@ -767,6 +789,7 @@ class NewsService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[NewsSearchQuery]:
+        """Вернуть историю семантических поисковых запросов пользователя."""
         statement = (
             select(NewsSearchQuery)
             .where(NewsSearchQuery.user_id == str(user_id))
@@ -777,9 +800,11 @@ class NewsService:
         return list(self._session.execute(statement).scalars().all())
 
     def commit(self) -> None:
+        """Зафиксировать изменения текущей сессии."""
         self._session.commit()
 
     def rollback(self) -> None:
+        """Откатить изменения текущей сессии."""
         self._session.rollback()
 
     def _find_existing_article(

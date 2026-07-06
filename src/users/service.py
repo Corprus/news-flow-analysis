@@ -28,7 +28,10 @@ from users.tokens import AccessTokenHandler
 
 
 class UserService:
+    """Сервис управления пользователями и их принадлежностью к организациям."""
+
     def __init__(self, session: Session, password_hasher: PasswordHasher) -> None:
+        """Создать сервис с БД-сессией и хешером паролей."""
         self._session = session
         self._password_hasher = password_hasher
 
@@ -39,6 +42,7 @@ class UserService:
         role: UserRole = UserRole.USER,
         organization_id: UUID | None = None,
     ) -> User:
+        """Создать пользователя, при необходимости вместе с новой организацией."""
         if self.find_user(login) is not None:
             raise UserAlreadyExistsError()
 
@@ -61,6 +65,7 @@ class UserService:
         return user
 
     def delete_user(self, user_id: UUID) -> None:
+        """Удалить пользователя, не позволяя удалить последнего администратора."""
         user = self.find_user_by_id(user_id)
         if user is None:
             raise UserNotFoundError()
@@ -70,6 +75,7 @@ class UserService:
         self._session.flush()
 
     def update_role(self, user_id: UUID, role: UserRole) -> User:
+        """Изменить роль пользователя с защитой последнего администратора."""
         user = self.find_user_by_id(user_id)
         if user is None:
             raise UserNotFoundError()
@@ -87,6 +93,7 @@ class UserService:
         role: UserRole,
         organization_id: UUID,
     ) -> User:
+        """Обновить логин, роль и организацию пользователя."""
         user = self.find_user_by_id(user_id)
         if user is None:
             raise UserNotFoundError()
@@ -104,13 +111,16 @@ class UserService:
         return user
 
     def find_user(self, login: str) -> User | None:
+        """Найти пользователя по логину."""
         query = select(User).where(User.login == login)
         return self._session.execute(query).scalars().first()
 
     def find_user_by_id(self, user_id: UUID) -> User | None:
+        """Найти пользователя по UUID."""
         return self._session.get(User, str(user_id))
 
     def list_users(self, role: UserRole | None = None) -> Sequence[User]:
+        """Вернуть пользователей, опционально отфильтрованных по роли."""
         query = select(User).order_by(User.login)
         if role is not None:
             query = query.where(User.role == role.value)
@@ -129,7 +139,10 @@ class UserService:
 
 
 class OrganizationService:
+    """Сервис административного управления организациями."""
+
     def __init__(self, session: Session) -> None:
+        """Создать сервис поверх текущей SQLAlchemy-сессии."""
         self._session = session
 
     def create(
@@ -139,6 +152,7 @@ class OrganizationService:
         license_type: LicenseType = LicenseType.SUBSCRIPTION,
         access_expires_at: datetime = MAX_ACCESS_EXPIRES_AT,
     ) -> Organization:
+        """Создать организацию с параметрами лицензии."""
         normalized_name = name.strip()
         if self.find_by_name(normalized_name) is not None:
             raise ValueError("Organization already exists")
@@ -159,6 +173,7 @@ class OrganizationService:
         license_type: LicenseType,
         access_expires_at: datetime,
     ) -> Organization:
+        """Обновить название и параметры лицензии организации."""
         organization = self.find_by_id(organization_id)
         if organization is None:
             raise ValueError("Organization does not exist")
@@ -173,6 +188,7 @@ class OrganizationService:
         return organization
 
     def update_name(self, organization_id: UUID, name: str) -> Organization:
+        """Переименовать организацию без изменения лицензии."""
         organization = self.find_by_id(organization_id)
         if organization is None:
             raise ValueError("Organization does not exist")
@@ -184,14 +200,17 @@ class OrganizationService:
         )
 
     def find_by_id(self, organization_id: UUID) -> Organization | None:
+        """Найти организацию по UUID."""
         return self._session.get(Organization, str(organization_id))
 
     def find_by_name(self, name: str) -> Organization | None:
+        """Найти организацию по точному названию."""
         return self._session.execute(
             select(Organization).where(Organization.name == name)
         ).scalars().first()
 
     def list_with_summary(self) -> list[tuple[Organization, int, Decimal]]:
+        """Вернуть организации вместе с числом пользователей и балансом."""
         statement = (
             select(
                 Organization,
@@ -207,7 +226,10 @@ class OrganizationService:
 
 
 class AdminAuditService:
+    """Сервис записи и чтения административного аудита."""
+
     def __init__(self, session: Session) -> None:
+        """Создать сервис поверх текущей SQLAlchemy-сессии."""
         self._session = session
 
     def record(
@@ -219,6 +241,7 @@ class AdminAuditService:
         target_id: UUID | str | None,
         details: dict | None = None,
     ) -> AdminAuditLog:
+        """Записать административное действие пользователя."""
         entry = AdminAuditLog(
             actor_user_id=str(actor_user_id),
             action=action,
@@ -237,6 +260,7 @@ class AdminAuditService:
         offset: int = 0,
         action: str | None = None,
     ) -> Sequence[AdminAuditLog]:
+        """Вернуть последние записи аудита, при необходимости по типу действия."""
         statement = select(AdminAuditLog).order_by(
             AdminAuditLog.created_at.desc(),
             AdminAuditLog.id.desc(),
@@ -249,17 +273,21 @@ class AdminAuditService:
 
 
 class AuthService:
+    """Сервис входа пользователя и выпуска access token."""
+
     def __init__(
         self,
         user_service: UserService,
         password_hasher: PasswordHasher,
         token_handler: AccessTokenHandler,
     ) -> None:
+        """Связать user-service, проверку пароля и выпуск токенов."""
         self._user_service = user_service
         self._password_hasher = password_hasher
         self._token_handler = token_handler
 
     def login(self, login: str, password: str) -> str:
+        """Проверить пару логин/пароль и вернуть access token."""
         user = self._user_service.find_user(login)
         if user is None:
             raise InvalidCredentialsError()

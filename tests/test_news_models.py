@@ -5,14 +5,11 @@ from db.database import Base
 
 def test_news_storage_tables_are_registered() -> None:
     expected_tables = {
-        "news_sources",
         "news_articles",
         "article_pipeline_embeddings",
         "article_pipeline_state",
         "news_article_submissions",
         "news_cluster_summaries",
-        "news_events",
-        "event_articles",
         "news_search_queries",
         "accounts",
         "transactions",
@@ -21,6 +18,9 @@ def test_news_storage_tables_are_registered() -> None:
     }
 
     assert expected_tables.issubset(Base.metadata.tables)
+    assert "news_events" not in Base.metadata.tables
+    assert "event_articles" not in Base.metadata.tables
+    assert "news_sources" not in Base.metadata.tables
 
 
 def test_user_requires_an_organization() -> None:

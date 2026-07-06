@@ -20,11 +20,14 @@ from users.service import UserService
 
 
 class _ImportedNewsStub:
+    """Минимальная заглушка импортированной новости для проверки разбиения демо-ленты."""
+
     def __init__(self, external_id: str) -> None:
         self.external_id = external_id
 
 
 def make_settings(**overrides) -> Settings:
+    """Собрать настройки теста с обязательными секретами без чтения `.env`."""
     values = {
         "POSTGRES_PASSWORD": "postgres-secret",
         "RABBITMQ_PASSWORD": "rabbit-secret",
@@ -35,6 +38,7 @@ def make_settings(**overrides) -> Settings:
 
 @pytest.mark.parametrize("app_env", ["prod", "production", "PRODUCTION"])
 def test_demo_mode_is_disabled_in_production(app_env: str) -> None:
+    """Демо-режим нельзя случайно включить в production-среде."""
     settings = make_settings(APP_ENV=app_env, DEMO_MODE=True)
 
     with pytest.raises(RuntimeError, match="disabled in production"):
@@ -42,6 +46,7 @@ def test_demo_mode_is_disabled_in_production(app_env: str) -> None:
 
 
 def test_demo_defaults_are_usable_locally() -> None:
+    """Локальные значения demo-mode подходят для быстрого запуска стенда."""
     settings = make_settings(DEMO_MODE=True)
 
     validate_demo_settings(settings)
@@ -51,6 +56,7 @@ def test_demo_defaults_are_usable_locally() -> None:
 
 
 def test_user_service_can_create_multiple_users_in_one_organization() -> None:
+    """Демо-пользователи аналитика и издателя могут жить в одной организации."""
     engine = create_engine("sqlite:///:memory:")
     Organization.__table__.create(engine)
     User.__table__.create(engine)
@@ -80,6 +86,8 @@ def test_user_service_can_create_multiple_users_in_one_organization() -> None:
 
 
 class _JobRepositorySpy:
+    """Запоминает pipeline jobs без обращения к реальной базе."""
+
     def __init__(self) -> None:
         self.queued = []
 
@@ -96,6 +104,8 @@ class _JobRepositorySpy:
 
 
 class _PublisherSpy:
+    """Запоминает сообщения RabbitMQ без подключения к брокеру."""
+
     def __init__(self) -> None:
         self.messages = []
 
@@ -104,6 +114,7 @@ class _PublisherSpy:
 
 
 def test_demo_pipeline_jobs_are_queued_per_organization() -> None:
+    """Демо-импорт создаёт отдельные pipeline jobs для каждой организации."""
     repository = _JobRepositorySpy()
     publisher = _PublisherSpy()
     demo = DemoSeedResult(
@@ -148,6 +159,7 @@ def test_demo_pipeline_jobs_are_queued_per_organization() -> None:
 
 
 def test_demo_articles_are_split_between_organizations() -> None:
+    """Демо-публикации делятся между организациями без пересечения статей."""
     articles = [_ImportedNewsStub(str(index)) for index in range(6)]
 
     primary, partner = _split_demo_articles(articles)  # type: ignore[arg-type]

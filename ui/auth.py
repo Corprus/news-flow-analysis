@@ -9,6 +9,7 @@ from config import API_INTERNAL, AUTH_COOKIE_NAME, AUTH_COOKIE_TTL_DAYS
 
 
 def get_client(cookie_manager: object) -> ApiClient:
+    """Вернуть API-клиент Streamlit-сессии с токеном из cookie, если он есть."""
     logout_pending = st.session_state.get("logout_pending", False)
     cookie_token = None if logout_pending else cookie_manager.get(AUTH_COOKIE_NAME)
     if "client" not in st.session_state:
@@ -19,13 +20,14 @@ def get_client(cookie_manager: object) -> ApiClient:
     elif logout_pending:
         st.session_state.client.logout()
     elif not st.session_state.client.token and cookie_token:
-        # The cookie component is asynchronous: immediately after F5 its first
-        # render can return no cookies and trigger another run once they load.
+        # Cookie-компонент асинхронный: сразу после F5 первый render может
+        # вернуть пустой набор cookies и вызвать повторный запуск после загрузки.
         st.session_state.client.set_token(cookie_token)
     return st.session_state.client
 
 
 def clear_pending_auth_cookie(cookie_manager: object) -> None:
+    """Удалить auth-cookie после logout, когда cookie-компонент уже доступен."""
     if not st.session_state.get("logout_pending"):
         return
     if cookie_manager.get(AUTH_COOKIE_NAME) is None:
@@ -33,12 +35,13 @@ def clear_pending_auth_cookie(cookie_manager: object) -> None:
     try:
         cookie_manager.delete(AUTH_COOKIE_NAME, key="delete_auth_cookie")
     except KeyError:
-        # CookieManager may receive its asynchronous cookie snapshot between
-        # get() and delete(). The next rerun will retry while logout is pending.
+        # CookieManager может получить асинхронный снимок cookies между
+        # get() и delete(). Следующий rerun повторит удаление, пока logout pending.
         pass
 
 
 def persist_token(client: ApiClient, cookie_manager: object, token: str) -> None:
+    """Сохранить новый access token в клиенте и долгоживущей cookie."""
     st.session_state.pop("logout_pending", None)
     client.set_token(token)
     cookie_manager.set(
@@ -50,6 +53,7 @@ def persist_token(client: ApiClient, cookie_manager: object, token: str) -> None
 
 
 def clear_authentication(client: ApiClient) -> None:
+    """Сбросить локальное состояние авторизации и пометить cookie к удалению."""
     client.logout()
     st.session_state["logout_pending"] = True
     for key in ("me", "balance", "active_page"):
@@ -57,6 +61,7 @@ def clear_authentication(client: ApiClient) -> None:
 
 
 def refresh_account(client: ApiClient) -> None:
+    """Обновить данные текущего пользователя и баланса в Streamlit-сессии."""
     st.session_state["me"] = client.get_me()
     st.session_state["balance"] = client.get_balance()
 
@@ -66,6 +71,7 @@ def complete_authentication(
     cookie_manager: object,
     token: str,
 ) -> None:
+    """Завершить login/signup: проверить токен, загрузить профиль и сохранить cookie."""
     client.set_token(token)
     try:
         refresh_account(client)
@@ -76,6 +82,7 @@ def complete_authentication(
 
 
 def render_login(client: ApiClient, cookie_manager: object) -> None:
+    """Отрисовать форму входа и регистрации на стартовом экране UI."""
     st.title("Semantic News Novelty")
     st.caption(
         "Семантический поиск новостей, публикация материалов и группировка событий."

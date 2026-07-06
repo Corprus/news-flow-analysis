@@ -15,12 +15,16 @@ MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class RabbitPublisher:
+    """Публикатор JSON-сообщений в durable RabbitMQ-очереди."""
+
     def __init__(self, url: str, queue_name: str) -> None:
+        """Сохранить URL RabbitMQ и основную очередь публикации."""
         self._url = url
         self._queue_name = queue_name
         self._connection: AbstractRobustConnection | None = None
 
     async def connect(self, *, attempts: int = 30, delay_seconds: float = 1.0) -> None:
+        """Подключиться к RabbitMQ с ретраями и объявить основную очередь."""
         self._connection = await _connect_with_retry(
             self._url,
             attempts=attempts,
@@ -29,6 +33,7 @@ class RabbitPublisher:
         await self.declare_queue(self._queue_name)
 
     async def declare_queue(self, queue_name: str) -> None:
+        """Объявить durable-очередь, создавая подключение при необходимости."""
         if self._connection is None:
             await self.connect()
             return
@@ -44,6 +49,7 @@ class RabbitPublisher:
         *,
         queue_name: str | None = None,
     ) -> None:
+        """Опубликовать JSON payload в основную или указанную очередь."""
         if self._connection is None:
             await self.connect()
 
@@ -65,6 +71,7 @@ class RabbitPublisher:
             await channel.close()
 
     async def purge_queue(self, *, queue_name: str | None = None) -> int:
+        """Очистить очередь и вернуть число удалённых сообщений, если брокер его сообщил."""
         if self._connection is None:
             await self.connect()
 
@@ -79,13 +86,17 @@ class RabbitPublisher:
             await channel.close()
 
     async def close(self) -> None:
+        """Закрыть активное подключение publisher-а."""
         if self._connection is not None:
             await self._connection.close()
             self._connection = None
 
 
 class RabbitConsumer:
+    """Потребитель JSON-сообщений из RabbitMQ с последовательной обработкой."""
+
     def __init__(self, url: str, queue_name: str, handler: MessageHandler) -> None:
+        """Сохранить параметры очереди и callback обработки сообщений."""
         self._url = url
         self._queue_name = queue_name
         self._handler = handler
@@ -95,6 +106,7 @@ class RabbitConsumer:
         self._consumer_tag: str | None = None
 
     async def start(self) -> None:
+        """Запустить consumer с prefetch=1 для контролируемой обработки задач."""
         self._connection = await _connect_with_retry(self._url)
         self._channel = await self._connection.channel()
         await self._channel.set_qos(prefetch_count=1)
@@ -103,6 +115,7 @@ class RabbitConsumer:
 
     @property
     def is_connected(self) -> bool:
+        """Проверить, что connection, channel и consumer-tag ещё активны."""
         return (
             self._connection is not None
             and not self._connection.is_closed
@@ -117,6 +130,7 @@ class RabbitConsumer:
             await self._handler(payload)
 
     async def close(self) -> None:
+        """Остановить consumer и закрыть channel/connection."""
         if self._queue is not None and self._consumer_tag is not None:
             await self._queue.cancel(self._consumer_tag)
             self._consumer_tag = None

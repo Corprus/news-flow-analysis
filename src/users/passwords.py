@@ -9,10 +9,13 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class PasswordHasher:
+    """PBKDF2-хешер паролей с проектным secret pepper."""
+
     secret: str
     iterations: int = 210_000
 
     def hash(self, password: str) -> str:
+        """Сгенерировать salted PBKDF2-SHA256 хеш пароля."""
         salt = os.urandom(16)
         digest = self._derive(password, salt)
         return (
@@ -22,6 +25,7 @@ class PasswordHasher:
         )
 
     def verify(self, password: str, password_hash: str) -> bool:
+        """Проверить пароль против сохранённой строки хеша."""
         try:
             algorithm, iterations, salt_b64, digest_b64 = password_hash.split("$", 3)
             if algorithm != "pbkdf2_sha256":

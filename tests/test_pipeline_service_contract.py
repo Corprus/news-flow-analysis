@@ -263,6 +263,7 @@ def _history_row(news_id: str, cluster_id: str, published_at: datetime):
 
 
 def test_pipeline_job_contract_contains_ids_and_mode() -> None:
+    """Контракт pipeline job передаёт ids статей, организацию и режим обработки."""
     request = NewsVectorizationRequest(
         news_ids=[
             "00000000-0000-0000-0000-000000000001",
@@ -283,6 +284,7 @@ def test_pipeline_job_contract_contains_ids_and_mode() -> None:
 
 
 def test_pipeline_job_accepts_50k_article_ids() -> None:
+    """Pipeline job принимает максимально допустимые 50 000 article ids."""
     article_ids = [
         f"00000000-0000-0000-0000-{index:012d}"
         for index in range(1, 50_001)
@@ -298,12 +300,14 @@ def test_pipeline_job_accepts_50k_article_ids() -> None:
 
 
 def test_large_incremental_pipeline_job_is_split_into_chunks() -> None:
+    """Большой incremental job режется на чанки заданного размера."""
     chunks = chunk_news_ids(["news-1", "news-2", "news-3", "news-4", "news-5"], 2)
 
     assert chunks == [["news-1", "news-2"], ["news-3", "news-4"], ["news-5"]]
 
 
 def test_large_incremental_pipeline_job_plans_ordered_aggregate_batches() -> None:
+    """Incremental job сохраняет порядок статей и планирует aggregate-батчи."""
     repository = _PipelineJobRepositorySpy(
         ["news-2", "news-4", "news-1", "news-3", "news-5"]
     )
@@ -353,6 +357,7 @@ def test_large_incremental_pipeline_job_plans_ordered_aggregate_batches() -> Non
 
 
 def test_vectorization_stage_skips_existing_embeddings() -> None:
+    """Стадия векторизации не пересчитывает уже сохранённые embeddings."""
     repository = _VectorizationRepositorySpy(existing_embedding_ids={"news-2"})
     pipeline = _VectorizationPipelineSpy()
 
@@ -376,6 +381,7 @@ def test_vectorization_stage_skips_existing_embeddings() -> None:
 
 
 def test_vectorization_stage_does_not_encode_when_all_embeddings_exist() -> None:
+    """Если все embeddings уже есть, модель векторизации не вызывается."""
     repository = _VectorizationRepositorySpy(existing_embedding_ids={"news-1", "news-2"})
 
     result = asyncio.run(
@@ -396,6 +402,7 @@ def test_vectorization_stage_does_not_encode_when_all_embeddings_exist() -> None
 
 
 def test_history_load_expands_window_to_full_clusters(monkeypatch) -> None:
+    """Загрузка истории расширяет временное окно до полных известных кластеров."""
     window_rows = [
         _history_row(
             "00000000-0000-0000-0000-000000000001",
@@ -441,6 +448,7 @@ def test_history_load_expands_window_to_full_clusters(monkeypatch) -> None:
 
 
 def test_history_load_keeps_window_when_cluster_expansion_exceeds_limit(monkeypatch) -> None:
+    """История не расширяется, если полный кластер превышает заданный лимит строк."""
     window_rows = [
         _history_row(
             "00000000-0000-0000-0000-000000000001",
@@ -484,6 +492,7 @@ def test_history_load_keeps_window_when_cluster_expansion_exceeds_limit(monkeypa
 
 
 def test_pipeline_job_rejects_more_than_50k_article_ids() -> None:
+    """Pipeline job отклоняет payload больше 50 000 статей."""
     article_ids = [
         f"00000000-0000-0000-0000-{index:012d}"
         for index in range(1, 50_002)
@@ -497,6 +506,7 @@ def test_pipeline_job_rejects_more_than_50k_article_ids() -> None:
 
 
 def test_news_batch_contract_accepts_50k_article_ids() -> None:
+    """Batch API для публикаций принимает предельные 50 000 article ids."""
     article_ids = [
         f"00000000-0000-0000-0000-{index:012d}"
         for index in range(1, 50_001)
@@ -518,6 +528,7 @@ def test_news_batch_contract_accepts_50k_article_ids() -> None:
 
 
 def test_new_article_uses_incremental_pipeline_by_default() -> None:
+    """Новая статья по умолчанию отправляется в incremental pipeline."""
     assert _article_vectorization_payload(_Article()) == {
         "news_ids": [_Article.id],
         "organization_id": _Article.organization_id,
@@ -526,6 +537,7 @@ def test_new_article_uses_incremental_pipeline_by_default() -> None:
 
 
 def test_multiple_articles_use_one_incremental_pipeline_payload() -> None:
+    """Несколько статей одной организации упаковываются в один incremental payload."""
     organization_id = "10000000-0000-0000-0000-000000000001"
     first = type("Article", (), {"id": "news-1", "organization_id": organization_id})()
     second = type("Article", (), {"id": "news-2", "organization_id": organization_id})()
@@ -538,6 +550,7 @@ def test_multiple_articles_use_one_incremental_pipeline_payload() -> None:
 
 
 def test_multiple_articles_reject_mixed_organizations_in_pipeline_payload() -> None:
+    """Pipeline payload запрещает смешивать статьи разных организаций."""
     first = type(
         "Article",
         (),
@@ -560,6 +573,7 @@ def test_multiple_articles_reject_mixed_organizations_in_pipeline_payload() -> N
 
 
 def test_add_and_batch_publish_contracts_expose_immediate_publication() -> None:
+    """Контракты добавления и batch-публикации явно поддерживают немедленную публикацию."""
     add_request = AddNewsRequest(
         title="Title",
         content="Content",
@@ -578,6 +592,7 @@ def test_add_and_batch_publish_contracts_expose_immediate_publication() -> None:
 
 
 def test_pipeline_storage_uses_bge_m3_vector_dimensions() -> None:
+    """Хранилище pipeline использует размерность BGE-M3 и обязательные поля состояния."""
     embedding_column = ArticlePipelineEmbedding.__table__.c.embedding
 
     assert embedding_column.type.dimensions == 1024
@@ -592,6 +607,7 @@ def test_pipeline_storage_uses_bge_m3_vector_dimensions() -> None:
 
 
 def test_cluster_summary_representative_is_article_nearest_to_centroid() -> None:
+    """Представителем кластера становится статья, ближайшая к центроиду embeddings."""
     connection = _ClusterSummaryConnection(
         [
             (
@@ -639,6 +655,7 @@ def test_cluster_summary_representative_is_article_nearest_to_centroid() -> None
 
 
 def test_article_status_contract_and_required_storage_fields() -> None:
+    """Контракт статусов статьи и обязательных storage-полей не меняется случайно."""
     assert {status.value for status in ArticleStatus} == {
         "not_started",
         "pending",
@@ -660,6 +677,7 @@ def test_article_status_contract_and_required_storage_fields() -> None:
 
 
 def test_add_news_requires_content_and_timezone_aware_published_at() -> None:
+    """Добавление новости требует текст и timezone-aware дату публикации."""
     with pytest.raises(ValidationError):
         AddNewsRequest(title="Title", content="Content")
     with pytest.raises(ValidationError):
@@ -671,6 +689,7 @@ def test_add_news_requires_content_and_timezone_aware_published_at() -> None:
 
 
 def test_pipeline_job_status_contract_contains_timestamps() -> None:
+    """Публичный статус pipeline job содержит временные метки жизненного цикла."""
     status = NewsVectorizationJobStatus(
         job_id="00000000-0000-0000-0000-000000000001",
         status="done",
@@ -684,6 +703,7 @@ def test_pipeline_job_status_contract_contains_timestamps() -> None:
 
 
 def test_public_job_response_uses_generic_job_id() -> None:
+    """Публичные ответы используют generic `job_id`, а не внутреннее имя очереди."""
     article_response = NewsArticleResponse(
         article_id="00000000-0000-0000-0000-000000000001",
         visibility="draft",
@@ -707,6 +727,7 @@ def test_public_job_response_uses_generic_job_id() -> None:
 
 
 def test_search_date_filters_require_timezone_and_valid_range() -> None:
+    """Фильтры поиска требуют timezone-aware даты и корректный диапазон."""
     with pytest.raises(ValidationError):
         NewsSearchRequest(
             query_text="economy",
@@ -726,11 +747,14 @@ def test_search_date_filters_require_timezone_and_valid_range() -> None:
 
 
 class _ModelMustNotRunForSeed:
+    """Падает, если seed-кейс ошибочно дошёл до ML-классификатора."""
+
     def predict_proba(self, _features):
         raise AssertionError("cluster seed must not be passed to the classifier")
 
 
 def test_first_article_in_cluster_is_significant_seed() -> None:
+    """Первая статья нового кластера считается significant без вызова модели."""
     model = CatBoostSignificanceModel(model=_ModelMustNotRunForSeed())
     news = pd.DataFrame(
         [
@@ -757,6 +781,7 @@ def test_first_article_in_cluster_is_significant_seed() -> None:
 
 
 def test_processed_result_requires_embedding_assignment_and_novelty() -> None:
+    """PipelineResult требует согласованные embeddings, assignments и novelty labels."""
     versions = PipelineVersions(
         pipeline_version="test",
         embedding_model="BAAI/bge-m3",

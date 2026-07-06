@@ -45,25 +45,50 @@ class ApiGZipMiddleware(GZipMiddleware):
 
 
 class NewsVectorizationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "news_ids": ["00000000-0000-0000-0000-000000000001"],
+                    "organization_id": "10000000-0000-0000-0000-000000000001",
+                    "mode": "incremental",
+                }
+            ]
+        },
+    )
 
-    news_ids: list[UUID] = Field(min_length=1, max_length=MAX_PIPELINE_NEWS_IDS)
-    organization_id: UUID
-    mode: Literal["full", "incremental"] = "incremental"
+    news_ids: list[UUID] = Field(
+        min_length=1,
+        max_length=MAX_PIPELINE_NEWS_IDS,
+        description="ID опубликованных статей, которые нужно обработать пайплайном.",
+    )
+    organization_id: UUID = Field(
+        description="ID организации, в рамках которой доступны переданные статьи.",
+    )
+    mode: Literal["full", "incremental"] = Field(
+        default="incremental",
+        description=(
+            "`incremental` добавляет новые статьи к истории, "
+            "`full` пересчитывает выбранный корпус совместно."
+        ),
+    )
 
 
 class NewsVectorizationJobResponse(BaseModel):
-    job_id: UUID
-    status: Literal["queued"]
+    job_id: UUID = Field(description="ID созданной parent job пайплайна.")
+    status: Literal["queued"] = Field(description="Начальный статус созданной задачи.")
 
 
 class NewsVectorizationJobStatus(BaseModel):
-    job_id: UUID
-    status: JobStatus
-    request: dict[str, object]
-    result: dict[str, object] | None
-    created_at: datetime
-    updated_at: datetime
+    job_id: UUID = Field(description="ID задачи пайплайна.")
+    status: JobStatus = Field(description="Текущее состояние задачи.")
+    request: dict[str, object] = Field(description="Исходный payload задачи.")
+    result: dict[str, object] | None = Field(
+        description="Итог обработки или промежуточный прогресс для долгих задач.",
+    )
+    created_at: datetime = Field(description="Время постановки задачи.")
+    updated_at: datetime = Field(description="Время последнего обновления задачи.")
 
 
 def get_publisher(request: Request) -> RabbitPublisher:
@@ -149,7 +174,11 @@ app.include_router(news_search_router)
 app.mount("/metrics", make_asgi_app())
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    summary="Проверить состояние API",
+    description="Возвращает базовый статус FastAPI-сервиса и активное окружение.",
+)
 async def health(settings: Annotated[Settings, Depends(get_settings)]) -> dict[str, str]:
     return {"status": "ok", "service": "api", "env": settings.app_env}
 
@@ -158,6 +187,11 @@ async def health(settings: Annotated[Settings, Depends(get_settings)]) -> dict[s
     "/news-pipeline",
     response_model=NewsVectorizationJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    summary="Поставить статьи в ML-пайплайн",
+    description=(
+        "Создаёт задачу обработки опубликованных статей. Большой incremental job "
+        "автоматически разбивается на vectorize- и aggregate-подзадачи."
+    ),
 )
 async def create_news_vectorization_job(
     request: NewsVectorizationRequest,
@@ -199,7 +233,15 @@ async def enqueue_demo_pipeline_jobs(
         )
 
 
-@app.get("/news-pipeline/{job_id}", response_model=NewsVectorizationJobStatus)
+@app.get(
+    "/news-pipeline/{job_id}",
+    response_model=NewsVectorizationJobStatus,
+    summary="Получить статус задачи ML-пайплайна",
+    description=(
+        "Возвращает состояние parent или child job, исходный запрос, прогресс "
+        "и итоговые идентификаторы обработанных статей."
+    ),
+)
 async def get_news_vectorization_job(
     job_id: UUID,
     repository: Annotated[NewsPipelineJobRepository, Depends(get_repository)],

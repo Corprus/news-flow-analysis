@@ -1,13 +1,16 @@
 # Мониторинг
 
-Docker Compose включает минимальный стек мониторинга:
+Docker Compose включает минимальный стек мониторинга для демонстрации и локальной
+диагностики:
 
-- `grafana` — готовый дашборд `Semantic News Novelty — мониторинг`;
+- `grafana` — четыре готовых дашборда: полный и компактный обзор на английском
+  и русском языке;
 - `prometheus` — сбор и хранение временных рядов;
 - `metrics-exporter` — CPU и RAM контейнеров через Docker API;
-- встроенный `rabbitmq_prometheus` — состояние очередей;
-- endpoint `/metrics` у `api` — импорт новостей и фоновые import jobs;
-- endpoint `/metrics` у `model-service-vectorizer-*` и `model-service-processor` — скорость и результаты обработки;
+- встроенный `rabbitmq_prometheus` — состояние очередей RabbitMQ;
+- `/metrics` у `api` — импорт новостей, импортные задания и DB-backed счётчики;
+- `/metrics` у `model-service-vectorizer-*` и `model-service-processor` — pipeline,
+  vectorize/aggregate stages, throughput и ошибки;
 - NVML в GPU-воркере — загрузка GPU, VRAM и температура.
 
 ## Запуск
@@ -31,40 +34,58 @@ docker compose up --build -d
 
 Порты можно изменить через `GRAFANA_PORT` и `PROMETHEUS_PORT`.
 
-## Дашборд MVP
+## Дашборды
 
-Дашборд создаётся автоматически и показывает:
+Grafana автоматически подхватывает JSON-файлы из `docker/grafana/dashboards`.
+В поставке есть четыре дашборда.
 
-- текущее количество новостей со статусом `processed`;
-- количество готовых и обрабатываемых сообщений RabbitMQ;
-- среднюю скорость последнего успешного задания в новостях в секунду;
-- количество неуспешных pipeline jobs после старта воркера;
-- длительность последнего завершённого pipeline job;
-- количество import jobs, импортированных строк и длительность импорта;
-- количество vectorization chunks и статей, прошедших embeddings-стадию;
-- текущий этап активного pipeline job через `news_flow_pipeline_stage_articles`;
-- длительность child jobs последнего большого pipeline, throughput, рост истории
-  по aggregate-пачкам и длительность отдельных стадий через DB-backed метрики
-  `news_flow_pipeline_latest_*`;
-- количество статей, находящихся в queued/processing pipeline jobs;
-- CPU и RAM по сервисам Docker Compose;
-- загрузку GPU, использование видеопамяти и температуру.
+| Дашборд | Файл | Назначение |
+|---|---|---|
+| `Semantic News Novelty - Monitoring` | `news-flow-overview.json` | полный обзор на английском |
+| `Semantic News Novelty - Мониторинг` | `news-flow-overview-ru.json` | полный обзор на русском |
+| `Semantic News Novelty - Compact Overview` | `news-flow-compact.json` | короткий экран для демонстрации на английском |
+| `Semantic News Novelty - Краткий обзор` | `news-flow-compact-ru.json` | короткий экран для демонстрации на русском |
 
-Панели import jobs и import rows используют DB-backed метрики из
-`news_pipeline_jobs`. Они восстанавливаются после перезапуска API и показывают
-уже завершённые импорты, а не только in-memory counters текущего процесса.
+Полный обзор сделан для пользователя, а не как полный набор внутренних
+debug-графиков. Панели сгруппированы в четыре секции.
 
-CPU и GPU utilization отображаются на одном временном графике, RAM и VRAM —
-на втором. Это позволяет сопоставлять переход между GPU- и CPU-фазами
-пайплайна без переключения между панелями.
+| Секция | Что показывает | Как читать |
+|---|---|---|
+| `1. System status` | обработанные статьи, backlog pipeline, очередь RabbitMQ и ошибки | быстрый ответ: система свободна, занята или сломалась |
+| `2. Current import and pipeline work` | прогресс активного этапа, строки импорта, статьи по стадиям и глубина очереди | что прямо сейчас делает система |
+| `3. Throughput and duration` | скорость последней job, p95 длительности, batch duration, vectorization chunks и aggregate stages | насколько быстро работает обработка |
+| `4. Runtime resources` | CPU, RAM, GPU utilization, GPU memory и температура | хватает ли ресурсов Docker/GPU |
 
-У utilization-графика CPU использует левую шкалу, а GPU — правую фиксированную
-шкалу 0–100%. Суммарная загрузка CPU может превышать 100%, поскольку измеряется
-в долях используемых процессорных ядер.
+Основной нормальный сценарий после завершения обработки:
 
-Скорость рассчитывается по счётчику успешно обработанных входных статей.
-Повторная обработка увеличивает этот счётчик, но не увеличивает текущее
-количество строк со статусом `processed`.
+- `Pipeline backlog` возвращается к нулю;
+- `RabbitMQ queue` возвращается к нулю;
+- `Failed pipeline jobs` остаётся `0`;
+- `Processed articles` соответствует числу успешно обработанных публикаций;
+- GPU-панели пустые в CPU-режиме и появляются только при работающем GPU-воркере.
+
+## Почему меньше графиков
+
+Старый dashboard смешивал пользовательские индикаторы, debug-панели batch-level
+и ресурсные метрики в одном полотне. Из-за этого было сложно понять порядок
+чтения: графики повторяли похожие данные, использовали разные масштабы и
+показывали слишком много series с `job_index`.
+
+Текущая версия оставляет на основном экране только то, что помогает объяснить
+демо:
+
+- текущее состояние системы;
+- ход импорта и pipeline;
+- скорость и длительность обработки;
+- нагрузку на runtime-ресурсы.
+
+Подробности вроде `Aggregate cluster assignment details`, per-job-index history
+rows и полные persisted duration stats лучше держать в отдельном debug dashboard,
+если они понадобятся для разработки.
+
+Компактные дашборды занимают один короткий экран и показывают только основные
+характеристики: обработанные статьи, backlog, RabbitMQ, прогресс активного
+этапа, ошибки, импорт, скорость, длительность и текущие ресурсы.
 
 ## Проверка источников
 
@@ -73,7 +94,8 @@ CPU и GPU utilization отображаются на одном временно
 - `metrics-exporter`;
 - `rabbitmq`;
 - `api`;
-- `model-service-vectorizer-gpu`, `model-service-vectorizer-cpu` и/или `model-service-processor`, в зависимости от режима;
+- `model-service-vectorizer-gpu`, `model-service-vectorizer-cpu` и/или
+  `model-service-processor`, в зависимости от режима;
 - `prometheus`.
 
 Prometheus использует DNS service discovery и автоматически обнаруживает
@@ -81,9 +103,9 @@ Prometheus использует DNS service discovery и автоматичес�
 
 ## Ограничения MVP
 
-- метрики приложения сбрасываются при перезапуске `api` или model-service containers,
-  исторические значения сохраняются в Prometheus;
-- общее количество обработанных новостей восстанавливается из PostgreSQL;
+- метрики приложения сбрасываются при перезапуске `api` или model-service
+  containers, но исторические значения остаются в Prometheus;
+- часть import/pipeline счётчиков восстанавливается из PostgreSQL;
 - `metrics-exporter` получает read-only доступ к Docker socket;
 - GPU-панели появляются только при запущенном NVIDIA GPU-воркере с доступным
   NVML; в CPU-режиме отсутствие этих series ожидаемо;

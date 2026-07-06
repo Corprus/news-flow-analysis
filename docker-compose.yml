@@ -9,6 +9,12 @@ x-model-service-clustering-env: &model-service-clustering-env
   PIPELINE_ATTACH_MIN_SHARED_NUMBERS: ${PIPELINE_ATTACH_MIN_SHARED_NUMBERS:-1}
   PIPELINE_ATTACH_REQUIRE_EVIDENCE: ${PIPELINE_ATTACH_REQUIRE_EVIDENCE:-true}
 
+x-python-encoding-env: &python-encoding-env
+  PYTHONUTF8: ${PYTHONUTF8:-1}
+  PYTHONIOENCODING: ${PYTHONIOENCODING:-utf-8}
+  LANG: ${LANG:-C.UTF-8}
+  LC_ALL: ${LC_ALL:-C.UTF-8}
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -102,6 +108,7 @@ services:
       - "8000"
       - --reload
     environment:
+      <<: *python-encoding-env
       APP_ENV: ${APP_ENV:-local}
       DEMO_MODE: ${DEMO_MODE:-false}
       DEMO_USER_LOGIN: ${DEMO_USER_LOGIN:-demo}
@@ -110,6 +117,12 @@ services:
       DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-admin12345}
       DEMO_INITIAL_CREDIT: ${DEMO_INITIAL_CREDIT:-100.00}
       DEMO_NEWS_PATH: ${DEMO_NEWS_PATH:-data/demo/lenta_demo.csv}
+      SQLALCHEMY_ECHO: ${SQLALCHEMY_ECHO:-false}
+      PASSWORD_HASH_SECRET: ${PASSWORD_HASH_SECRET:-change-me-local-password-secret}
+      ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET:-change-me-local-access-token-secret}
+      ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-1440}
+      NEWS_ADD_COST: ${NEWS_ADD_COST:-1.00}
+      NEWS_SEARCH_COST: ${NEWS_SEARCH_COST:-0.00}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-semantic_news_novelty}
@@ -152,7 +165,9 @@ services:
       args:
         PYTORCH_IMAGE: ${PYTORCH_IMAGE:-mirror.gcr.io/pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime}
     environment:
-      <<: *model-service-clustering-env
+      <<:
+        - *python-encoding-env
+        - *model-service-clustering-env
       APP_ENV: ${APP_ENV:-local}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -208,7 +223,9 @@ services:
       context: .
       dockerfile: docker/model-service.vectorizer-cpu.Dockerfile
     environment:
-      <<: *model-service-clustering-env
+      <<:
+        - *python-encoding-env
+        - *model-service-clustering-env
       APP_ENV: ${APP_ENV:-local}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -261,7 +278,9 @@ services:
       context: .
       dockerfile: docker/model-service.processor.Dockerfile
     environment:
-      <<: *model-service-clustering-env
+      <<:
+        - *python-encoding-env
+        - *model-service-clustering-env
       APP_ENV: ${APP_ENV:-local}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -320,6 +339,7 @@ services:
       - --server.runOnSave=true
       - --server.fileWatcherType=poll
     environment:
+      <<: *python-encoding-env
       API_BASE_URL: http://nginx/api
       NEWS_IMPORT_MAX_FILE_MIB: ${NEWS_IMPORT_MAX_FILE_MIB:-512}
       NEWS_IMPORT_UPLOAD_TIMEOUT_SECONDS: ${NEWS_IMPORT_UPLOAD_TIMEOUT_SECONDS:-900}

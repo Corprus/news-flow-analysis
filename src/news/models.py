@@ -49,46 +49,6 @@ class SearchQueryStatus(StrEnum):
     FAILED = "failed"
 
 
-class EventStatus(StrEnum):
-    ACTIVE = "active"
-    STALE = "stale"
-    ARCHIVED = "archived"
-
-
-class EventArticleRole(StrEnum):
-    SEED = "seed"
-    RELATED = "related"
-    DUPLICATE = "duplicate"
-    UPDATE = "update"
-
-
-class NewsSource(Base):
-    __tablename__ = "news_sources"
-
-    id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
-        primary_key=True,
-        default=lambda: str(uuid4()),
-    )
-    name: Mapped[str] = mapped_column(String(256), nullable=False, unique=True, index=True)
-    site_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
-    rss_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
-    language: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
-    topic: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
-    country: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
-    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(UTC),
-    )
-
-    articles: Mapped[list[NewsArticle]] = relationship(
-        back_populates="source",
-        cascade="all, delete-orphan",
-    )
-
-
 class NewsArticle(Base):
     __tablename__ = "news_articles"
 
@@ -96,12 +56,6 @@ class NewsArticle(Base):
         UUID(as_uuid=False),
         primary_key=True,
         default=lambda: str(uuid4()),
-    )
-    source_id: Mapped[str | None] = mapped_column(
-        UUID(as_uuid=False),
-        ForeignKey("news_sources.id", ondelete="SET NULL"),
-        index=True,
-        nullable=True,
     )
     organization_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
@@ -162,7 +116,6 @@ class NewsArticle(Base):
         default=dict,
     )
 
-    source: Mapped[NewsSource | None] = relationship(back_populates="articles")
     submissions: Mapped[list[NewsArticleSubmission]] = relationship(
         back_populates="article",
         cascade="all, delete-orphan",
@@ -176,13 +129,7 @@ class NewsArticle(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
-    event_links: Mapped[list[EventArticle]] = relationship(
-        back_populates="article",
-        cascade="all, delete-orphan",
-    )
-
     __table_args__ = (
-        UniqueConstraint("source_id", "external_id", name="uq_news_article_source_external_id"),
         Index("ix_news_articles_canonical_url", "canonical_url"),
         Index("ix_news_articles_content_hash", "content_hash"),
         Index("ix_news_articles_published_at", "published_at"),
@@ -351,54 +298,6 @@ class NewsArticleSubmission(Base):
     )
 
 
-class NewsEvent(Base):
-    __tablename__ = "news_events"
-
-    id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
-        primary_key=True,
-        default=lambda: str(uuid4()),
-    )
-    title: Mapped[str] = mapped_column(String(1024), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    status: Mapped[str] = mapped_column(
-        String(32),
-        nullable=False,
-        default=EventStatus.ACTIVE.value,
-        index=True,
-    )
-    language: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
-    extra_metadata: Mapped[dict[str, Any]] = mapped_column(
-        "metadata",
-        JSONB,
-        nullable=False,
-        default=dict,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(UTC),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
-    )
-
-    article_links: Mapped[list[EventArticle]] = relationship(
-        back_populates="event",
-        cascade="all, delete-orphan",
-    )
-
-    __table_args__ = (
-        Index("ix_news_events_last_seen_at", "last_seen_at"),
-        Index("ix_news_events_started_at", "started_at"),
-    )
-
-
 class NewsSearchQuery(Base):
     __tablename__ = "news_search_queries"
 
@@ -437,37 +336,3 @@ class NewsSearchQuery(Base):
     )
 
     __table_args__ = (Index("ix_news_search_queries_created_at", "created_at"),)
-
-
-class EventArticle(Base):
-    __tablename__ = "event_articles"
-
-    event_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
-        ForeignKey("news_events.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    article_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
-        ForeignKey("news_articles.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    similarity: Mapped[float | None] = mapped_column(nullable=True)
-    role: Mapped[str] = mapped_column(
-        String(32),
-        nullable=False,
-        default=EventArticleRole.RELATED.value,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(UTC),
-    )
-
-    event: Mapped[NewsEvent] = relationship(back_populates="article_links")
-    article: Mapped[NewsArticle] = relationship(back_populates="event_links")
-
-    __table_args__ = (
-        Index("ix_event_articles_article_id", "article_id"),
-        Index("ix_event_articles_role", "role"),
-    )

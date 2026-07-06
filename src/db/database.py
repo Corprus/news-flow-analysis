@@ -12,6 +12,8 @@ from settings import Settings
 
 
 class Base(DeclarativeBase):
+    """Общая declarative base для всех SQLAlchemy-моделей проекта."""
+
     pass
 
 
@@ -20,6 +22,7 @@ _SessionLocal: sessionmaker[Session] | None = None
 
 
 def init_db(settings: Settings) -> None:
+    """Инициализировать глобальные SQLAlchemy engine и session factory."""
     global _engine, _SessionLocal
 
     _engine = create_engine(
@@ -36,12 +39,14 @@ def init_db(settings: Settings) -> None:
 
 
 def get_engine() -> Engine:
+    """Вернуть активный SQLAlchemy engine или ошибку до init_db."""
     if _engine is None:
         raise RuntimeError("Database is not initialized. Call init_db(settings) first.")
     return _engine
 
 
 def create_tables() -> None:
+    """Создать таблицы и применить совместимые DDL-добавления для локального запуска."""
     _import_models()
 
     with get_engine().begin() as connection:
@@ -406,6 +411,7 @@ def create_tables() -> None:
 
 
 def drop_tables() -> None:
+    """Полностью пересоздать public schema в локальной/тестовой БД."""
     with get_engine().begin() as connection:
         connection.execute(text("DROP SCHEMA public CASCADE"))
         connection.execute(text("CREATE SCHEMA public"))
@@ -419,6 +425,7 @@ def _import_models() -> None:
 
 @contextmanager
 def get_session() -> Iterator[Session]:
+    """Открыть SQLAlchemy-сессию с commit/rollback вокруг блока использования."""
     if _SessionLocal is None:
         raise RuntimeError("Database is not initialized. Call init_db(settings) first.")
 

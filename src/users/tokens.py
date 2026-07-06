@@ -23,6 +23,8 @@ def _b64decode(data: str) -> bytes:
 
 @dataclass(frozen=True)
 class AccessTokenHandler:
+    """HMAC-подписчик и проверяющий access token без внешнего JWT-пакета."""
+
     secret: str
     ttl_minutes: int
 
@@ -32,6 +34,7 @@ class AccessTokenHandler:
         organization_id: UUID,
         role: str,
     ) -> str:
+        """Создать signed access token с пользователем, организацией и ролью."""
         now = datetime.now(UTC)
         payload = {
             "sub": str(user_id),
@@ -47,6 +50,7 @@ class AccessTokenHandler:
         return f"{body}.{signature}"
 
     def verify_access_token(self, token: str) -> dict[str, Any]:
+        """Проверить подпись, срок действия и обязательные поля access token."""
         try:
             body, signature = token.split(".", 1)
             expected_signature = self._sign(body)

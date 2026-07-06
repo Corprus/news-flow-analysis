@@ -35,6 +35,7 @@ class FinalNewsNoveltyPipeline:
         novelty_model: CatBoostSignificanceModel,
         config: FinalPipelineConfig | None = None,
     ) -> None:
+        """Собрать pipeline из encoder, модели новизны и финальной конфигурации."""
         self.encoder = encoder
         self.novelty_model = novelty_model
         self.config = config or FinalPipelineConfig()
@@ -47,6 +48,7 @@ class FinalNewsNoveltyPipeline:
         embeddings_cache_path: str | Path | None = None,
         force_recompute_embeddings: bool = False,
     ) -> FinalPipelineResult:
+        """Выполнить полный пересчёт: embeddings, clustering, attach и novelty."""
         cfg = self.config
 
         news, embeddings = self._prepare_news_and_embeddings(

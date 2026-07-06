@@ -25,6 +25,8 @@ from users.models import UserRole
 
 
 class _Article:
+    """Минимальная статья для проверки route-логики без ORM-сессии."""
+
     def __init__(self, article_id: str, organization_id: str | None = None) -> None:
         self.id = article_id
         self.organization_id = organization_id or str(uuid4())
@@ -33,6 +35,8 @@ class _Article:
 
 
 class _NewsServiceSpy:
+    """Запоминает вызовы NewsService и имитирует успешные операции с публикациями."""
+
     def __init__(self, articles: list[_Article]) -> None:
         self.articles = articles
         self.commit_calls = 0
@@ -76,6 +80,8 @@ class _NewsServiceSpy:
 
 
 class _AddNewsServiceSpy(_NewsServiceSpy):
+    """Имитирует сценарий ручного добавления новости с немедленной публикацией."""
+
     def __init__(self, article: _Article) -> None:
         super().__init__([article])
         self.article = article
@@ -92,6 +98,8 @@ class _AddNewsServiceSpy(_NewsServiceSpy):
 
 
 class _AccountingSpy:
+    """Запоминает списания кредитов без обращения к реальной бухгалтерии."""
+
     def __init__(self) -> None:
         self.withdraw_calls = []
 
@@ -100,6 +108,8 @@ class _AccountingSpy:
 
 
 class _FailingAccountingSpy(_AccountingSpy):
+    """Имитирует ошибку списания на заданном вызове."""
+
     def __init__(self, fail_on_call: int) -> None:
         super().__init__()
         self.fail_on_call = fail_on_call
@@ -111,6 +121,8 @@ class _FailingAccountingSpy(_AccountingSpy):
 
 
 class _JobRepositorySpy:
+    """Запоминает поставленные pipeline jobs без базы данных."""
+
     def __init__(self) -> None:
         self.queued = []
 
@@ -119,6 +131,8 @@ class _JobRepositorySpy:
 
 
 class _PublisherSpy:
+    """Запоминает сообщения очереди без реального RabbitMQ."""
+
     def __init__(self) -> None:
         self.messages = []
 
@@ -127,6 +141,7 @@ class _PublisherSpy:
 
 
 def test_batch_publication_uses_one_pipeline_job_with_multiple_ids() -> None:
+    """Пакетная публикация создаёт одну pipeline-задачу на несколько статей."""
     article_ids = [uuid4(), uuid4()]
     organization_id = str(uuid4())
     articles = [_Article(str(article_id), organization_id) for article_id in article_ids]
@@ -169,6 +184,7 @@ def test_batch_publication_uses_one_pipeline_job_with_multiple_ids() -> None:
 
 
 def test_delete_drafts_commits_selected_articles() -> None:
+    """Удаление черновиков фиксирует только выбранные статьи пользователя."""
     article_ids = [uuid4(), uuid4()]
     news = _NewsServiceSpy([])
     current_user = CurrentUser(
@@ -189,6 +205,7 @@ def test_delete_drafts_commits_selected_articles() -> None:
 
 
 def test_archive_and_restore_commit_selected_articles() -> None:
+    """Архивация и восстановление коммитят выбранный набор статей."""
     article_ids = [uuid4(), uuid4()]
     news = _NewsServiceSpy([])
     current_user = CurrentUser(
@@ -209,6 +226,7 @@ def test_archive_and_restore_commit_selected_articles() -> None:
 
 
 def test_manual_labels_are_saved_for_current_publishers_articles() -> None:
+    """Ручные метки новизны сохраняются только для статей текущего издателя."""
     article_ids = [uuid4(), uuid4()]
     news = _NewsServiceSpy([])
     current_user = CurrentUser(
@@ -242,6 +260,7 @@ def test_manual_labels_are_saved_for_current_publishers_articles() -> None:
 
 
 def test_reprocess_uses_one_pipeline_job_and_charges_each_article() -> None:
+    """Переобработка списывает кредит за каждую статью и ставит одну задачу."""
     article_ids = [uuid4(), uuid4()]
     organization_id = str(uuid4())
     articles = [_Article(str(article_id), organization_id) for article_id in article_ids]
@@ -285,6 +304,7 @@ def test_reprocess_uses_one_pipeline_job_and_charges_each_article() -> None:
 
 
 def test_reprocess_rolls_back_and_does_not_enqueue_when_charge_fails() -> None:
+    """При ошибке списания переобработка откатывается и не попадает в очередь."""
     article_ids = [uuid4(), uuid4()]
     news = _NewsServiceSpy([_Article(str(article_id)) for article_id in article_ids])
     repository = _JobRepositorySpy()
@@ -316,6 +336,7 @@ def test_reprocess_rolls_back_and_does_not_enqueue_when_charge_fails() -> None:
 
 
 def test_manual_add_can_publish_immediately() -> None:
+    """Ручное добавление может сразу опубликовать статью и поставить pipeline job."""
     article_id = uuid4()
     article = _Article(str(article_id))
     news = _AddNewsServiceSpy(article)
@@ -354,6 +375,7 @@ def test_manual_add_can_publish_immediately() -> None:
 
 
 def test_batch_publication_rolls_back_when_any_withdrawal_fails() -> None:
+    """Пакетная публикация полностью откатывается при любой ошибке списания."""
     article_ids = [uuid4(), uuid4()]
     news = _NewsServiceSpy([_Article(str(article_id)) for article_id in article_ids])
     accounting = _FailingAccountingSpy(fail_on_call=2)
@@ -385,11 +407,14 @@ def test_batch_publication_rolls_back_when_any_withdrawal_fails() -> None:
 
 
 class _RejectingNewsServiceSpy(_NewsServiceSpy):
+    """Имитирует смешанный набор статей, который нельзя публиковать одним батчем."""
+
     def publish_user_articles(self, article_ids, user_id, **kwargs):
         raise ValueError("All articles must be publishable drafts")
 
 
 def test_batch_publication_rejects_entire_mixed_set() -> None:
+    """Смешанный набор статей отклоняется целиком без постановки pipeline job."""
     news = _RejectingNewsServiceSpy([])
     repository = _JobRepositorySpy()
     publisher = _PublisherSpy()

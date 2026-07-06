@@ -540,7 +540,6 @@ class NewsPipelineRepository:
         ]
         filter_columns = {
             "language": "a.language = %s",
-            "source_id": "a.source_id = %s",
             "published_from": "a.published_at >= %s",
             "published_to": "a.published_at <= %s",
         }

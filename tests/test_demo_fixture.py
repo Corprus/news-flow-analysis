@@ -5,6 +5,7 @@ from scripts.build_demo_fixture import build_fixture
 
 
 def test_build_demo_fixture_selects_latest_valid_rows(tmp_path: Path) -> None:
+    """Сборщик демо-CSV берёт последние валидные строки и нормализует текст."""
     source = tmp_path / "source.csv"
     output = tmp_path / "demo.csv"
     pd.DataFrame(
