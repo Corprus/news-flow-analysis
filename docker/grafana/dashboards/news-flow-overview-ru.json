@@ -31,7 +31,7 @@
       },
       "id": 1,
       "panels": [],
-      "title": "1. System status",
+      "title": "1. Состояние системы",
       "type": "row"
     },
     {
@@ -89,9 +89,9 @@
           "refId": "A"
         }
       ],
-      "title": "Processed articles",
+      "title": "Обработанные статьи",
       "type": "stat",
-      "description": "Articles that are already processed and searchable."
+      "description": "Статьи, которые уже обработаны и доступны для поиска."
     },
     {
       "datasource": {
@@ -153,9 +153,9 @@
           "refId": "B"
         }
       ],
-      "title": "Pipeline backlog",
+      "title": "Очередь pipeline",
       "type": "stat",
-      "description": "Articles waiting for processing or currently running."
+      "description": "Статьи, ожидающие обработки или обрабатываемые сейчас."
     },
     {
       "datasource": {
@@ -217,9 +217,9 @@
           "refId": "B"
         }
       ],
-      "title": "RabbitMQ queue",
+      "title": "Очередь RabbitMQ",
       "type": "stat",
-      "description": "Queue pressure. Ready should return to zero after jobs finish."
+      "description": "Нагрузка на очередь. Ready должен возвращаться к нулю после завершения задач."
     },
     {
       "datasource": {
@@ -280,9 +280,9 @@
           "refId": "A"
         }
       ],
-      "title": "Failed pipeline jobs",
+      "title": "Ошибки pipeline",
       "type": "stat",
-      "description": "Failed pipeline jobs since service start."
+      "description": "Неуспешные pipeline jobs с момента запуска сервиса."
     },
     {
       "collapsed": false,
@@ -294,7 +294,7 @@
       },
       "id": 6,
       "panels": [],
-      "title": "2. Current import and pipeline work",
+      "title": "2. Текущий импорт и pipeline",
       "type": "row"
     },
     {
@@ -352,9 +352,9 @@
           "refId": "A"
         }
       ],
-      "title": "Active pipeline progress",
+      "title": "Прогресс текущего этапа",
       "type": "stat",
-      "description": "Progress of the currently active pipeline stage."
+      "description": "Прогресс активного этапа pipeline."
     },
     {
       "datasource": {
@@ -448,9 +448,9 @@
           "refId": "B"
         }
       ],
-      "title": "Pipeline articles by stage",
+      "title": "Статьи по этапам pipeline",
       "type": "timeseries",
-      "description": "Article counts in queued, processing and active stage states."
+      "description": "Количество статей в очереди, обработке и активных этапах."
     },
     {
       "datasource": {
@@ -507,9 +507,9 @@
           "refId": "A"
         }
       ],
-      "title": "Active import progress",
+      "title": "Прогресс текущего импорта",
       "type": "stat",
-      "description": "Latest import progress percent."
+      "description": "Процент выполнения последнего импорта."
     },
     {
       "datasource": {
@@ -598,9 +598,9 @@
           "refId": "A"
         }
       ],
-      "title": "Import rows",
+      "title": "Строки импорта",
       "type": "timeseries",
-      "description": "Imported, duplicate and published rows persisted by API."
+      "description": "Импортированные, дублирующиеся и опубликованные строки на уровне API."
     },
     {
       "datasource": {
@@ -694,9 +694,9 @@
           "refId": "B"
         }
       ],
-      "title": "RabbitMQ message flow",
+      "title": "Сообщения RabbitMQ",
       "type": "timeseries",
-      "description": "Queue depth over time."
+      "description": "Глубина очереди во времени."
     },
     {
       "datasource": {
@@ -785,9 +785,9 @@
           "refId": "A"
         }
       ],
-      "title": "Latest job duration",
+      "title": "Длительность последнего job",
       "type": "timeseries",
-      "description": "Duration of the latest completed or failed pipeline jobs."
+      "description": "Длительность последних завершённых или упавших pipeline jobs."
     },
     {
       "collapsed": false,
@@ -799,7 +799,7 @@
       },
       "id": 13,
       "panels": [],
-      "title": "3. Throughput and duration",
+      "title": "3. Скорость и длительность",
       "type": "row"
     },
     {
@@ -889,9 +889,9 @@
           "refId": "A"
         }
       ],
-      "title": "Latest pipeline throughput",
+      "title": "Скорость последнего pipeline job",
       "type": "timeseries",
-      "description": "Articles per second for latest jobs."
+      "description": "Статьи в секунду для последних jobs."
     },
     {
       "datasource": {
@@ -985,9 +985,9 @@
           "refId": "B"
         }
       ],
-      "title": "Duration p95",
+      "title": "Длительность p95",
       "type": "timeseries",
-      "description": "p95 duration for imports and pipeline jobs."
+      "description": "p95 длительности для импортов и pipeline jobs."
     },
     {
       "datasource": {
@@ -1076,9 +1076,9 @@
           "refId": "A"
         }
       ],
-      "title": "Latest batch duration",
+      "title": "Длительность последнего batch",
       "type": "timeseries",
-      "description": "Latest child batch duration without per-batch visual noise."
+      "description": "Длительность последнего child batch без шума по каждому batch."
     },
     {
       "datasource": {
@@ -1172,9 +1172,9 @@
           "refId": "B"
         }
       ],
-      "title": "Vectorization chunks",
+      "title": "Чанки векторизации",
       "type": "timeseries",
-      "description": "Chunk counts and article counts processed by vectorizers."
+      "description": "Количество чанков и статей, обработанных векторизаторами."
     },
     {
       "datasource": {
@@ -1268,9 +1268,9 @@
           "refId": "B"
         }
       ],
-      "title": "Aggregate stage duration",
+      "title": "Длительность aggregate-этапов",
       "type": "timeseries",
-      "description": "Main aggregate-stage timings without job_index series explosion."
+      "description": "Основные длительности aggregate-этапов без взрыва series по job_index."
     },
     {
       "collapsed": false,
@@ -1282,7 +1282,7 @@
       },
       "id": 19,
       "panels": [],
-      "title": "4. Runtime resources",
+      "title": "4. Ресурсы runtime",
       "type": "row"
     },
     {
@@ -1372,9 +1372,9 @@
           "refId": "A"
         }
       ],
-      "title": "CPU by service",
+      "title": "CPU по сервисам",
       "type": "timeseries",
-      "description": "CPU cores used by each Docker service."
+      "description": "CPU cores, используемые каждым Docker-сервисом."
     },
     {
       "datasource": {
@@ -1463,9 +1463,9 @@
           "refId": "A"
         }
       ],
-      "title": "RAM by service",
+      "title": "RAM по сервисам",
       "type": "timeseries",
-      "description": "Container memory usage by service."
+      "description": "Использование памяти контейнерами по сервисам."
     },
     {
       "datasource": {
@@ -1554,9 +1554,9 @@
           "refId": "A"
         }
       ],
-      "title": "GPU utilization",
+      "title": "Загрузка GPU",
       "type": "timeseries",
-      "description": "GPU utilization percent."
+      "description": "Процент загрузки GPU."
     },
     {
       "datasource": {
@@ -1645,9 +1645,9 @@
           "refId": "A"
         }
       ],
-      "title": "GPU memory",
+      "title": "Память GPU",
       "type": "timeseries",
-      "description": "GPU memory used by model-service."
+      "description": "Память GPU, используемая model-service."
     },
     {
       "datasource": {
@@ -1736,9 +1736,9 @@
           "refId": "A"
         }
       ],
-      "title": "GPU temperature",
+      "title": "Температура GPU",
       "type": "timeseries",
-      "description": "GPU temperature."
+      "description": "Температура GPU."
     }
   ],
   "preload": false,
@@ -1747,7 +1747,7 @@
   "tags": [
     "semantic-news-novelty",
     "mvp",
-    "overview"
+    "ru"
   ],
   "templating": {
     "list": []
@@ -1758,7 +1758,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Semantic News Novelty - Monitoring",
-  "uid": "semantic-news-novelty-monitoring",
-  "version": 3
+  "title": "Semantic News Novelty - Мониторинг",
+  "uid": "semantic-news-novelty-monitoring-ru",
+  "version": 1
 }
