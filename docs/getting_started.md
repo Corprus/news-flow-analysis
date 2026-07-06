@@ -66,6 +66,9 @@ aggregate-пачки после готовности embeddings.
 
 ```text
 publisher: demo / demo12345
+analyst:   analyst / analyst12345
+partner publisher: partner_publisher / partner12345
+partner analyst:   partner_user / partner12345
 admin:     admin / admin12345
 ```
 
@@ -75,11 +78,38 @@ admin:     admin / admin12345
 ## Проверка
 
 ```console
+curl http://localhost/api/health
 python scripts/demo_smoke_test.py
 ```
 
 Скрипт проверяет пользователей, организации, обработку публикаций и
 семантический поиск.
+
+Ожидаемый результат smoke test:
+
+```text
+Demo smoke test passed: ...
+```
+
+## Подготовка импортного примера
+
+Для ручной проверки импорта можно подготовить ZIP с публикациями Lenta.ru. Скрипт
+использует локальный кеш `data/raw/lenta-ru-news.csv.bz2`, а если файла нет,
+скачивает открытый датасет Lenta.ru в этот кеш:
+
+```console
+python scripts/build_lenta_import_sample.py --limit 1000 --target data/import/lenta_import_sample_1000.zip
+```
+
+Пример выборки по датам:
+
+```console
+python scripts/build_lenta_import_sample.py --date-from 2018-01-01 --date-to 2018-12-31 --limit 5000 --target data/import/lenta_2018_5000.zip
+```
+
+Файл можно загрузить через UI или API как обычный Lenta import. Большие файлы
+для бенчмарков, например 50 000 или 200 000 публикаций, генерируются тем же
+скриптом и не обязаны храниться в Git.
 
 ## Остановка
 

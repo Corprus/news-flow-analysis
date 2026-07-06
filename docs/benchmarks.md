@@ -154,6 +154,13 @@ CPU-часть aggregate:
 импорта. Входной файл:
 `data/import/lenta_import_sample_200000.zip`.
 
+Файл не является обязательным runtime-артефактом и может быть подготовлен из
+открытого архива Lenta.ru:
+
+```console
+python scripts/build_lenta_import_sample.py --limit 200000 --target data/import/lenta_import_sample_200000.zip
+```
+
 | Этап | Результат |
 |---|---:|
 | HTTP import job, 200 000 публикаций | 9:56 |

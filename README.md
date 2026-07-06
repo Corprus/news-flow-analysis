@@ -134,6 +134,7 @@ PIPELINE_HISTORY_CLUSTER_EXPANSION_MAX_ROWS=20000
 ```console
 docker compose up --build -d
 docker compose ps
+python scripts/demo_smoke_test.py
 ```
 
 После готовности:
@@ -142,6 +143,8 @@ docker compose ps
 - OpenAPI: <http://localhost/api/docs>
 - API health: <http://localhost/api/health>
 - RabbitMQ: <http://localhost:15672/>
+
+`demo_smoke_test.py` должен завершиться сообщением `Demo smoke test passed: ...`.
 
 Первый запуск может занять несколько минут из-за загрузки BGE-M3. CPU-вариант, подключение кеша модели и эксплуатационные настройки описаны в [документе развёртывания](docs/deployment.md).
 
