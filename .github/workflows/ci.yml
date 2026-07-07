@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       build_images:
-        description: "Build Docker images without running services"
+        description: "Build CPU Docker images without pushing them"
         required: false
         default: false
         type: boolean
@@ -117,7 +117,7 @@ jobs:
     
 
   docker-build:
-    name: Docker Build
+    name: Docker Images Smoke Build
     runs-on: ubuntu-latest
     needs:
       - lint
@@ -140,10 +140,34 @@ jobs:
           push: false
           tags: news-flow-api:ci
 
-      - name: Build model service image
+      - name: Build UI image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/model-service.Dockerfile
+          file: ui/Dockerfile
           push: false
-          tags: news-flow-model-service:ci
+          tags: news-flow-ui:ci
+
+      - name: Build metrics exporter image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/metrics-exporter.Dockerfile
+          push: false
+          tags: news-flow-metrics-exporter:ci
+
+      - name: Build model processor image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/model-service.processor.Dockerfile
+          push: false
+          tags: news-flow-model-service-processor:ci
+
+      - name: Build CPU vectorizer image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/model-service.vectorizer-cpu.Dockerfile
+          push: false
+          tags: news-flow-model-service-vectorizer-cpu:ci

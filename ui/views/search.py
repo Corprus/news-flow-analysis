@@ -150,6 +150,8 @@ def render_search_history(client: ApiClient) -> None:
         if not history:
             st.info("Поисковых запросов пока нет.")
             return
+        if _should_show_search_history_legend(history):
+            st.caption(_search_result_legend_text())
         for search in history:
             status = search.get("status", "unknown")
             status_label = {
@@ -174,6 +176,7 @@ def render_search_history(client: ApiClient) -> None:
                     render_search_result(
                         result,
                         key_prefix=str(search.get("query_id") or created_at),
+                        show_legend=False,
                     )
                 elif status == "failed":
                     st.error(search.get("error") or "Не удалось выполнить поиск.")
@@ -183,7 +186,13 @@ def render_search_history(client: ApiClient) -> None:
         st.error(str(exc))
 
 
-def render_search_result(result: dict, *, key_prefix: str) -> None:
+def render_search_result(
+    result: dict,
+    *,
+    key_prefix: str,
+    show_legend: bool = True,
+) -> None:
+    """Показать найденные кластеры новостей с краткими фильтрами внутри групп."""
     clusters = result.get("clusters")
     if clusters is None:
         clusters = [
@@ -192,6 +201,7 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
                 "representative_title": display_news_title(item.get("title"), ""),
                 "article_count": 1,
                 "significant_count": int(item.get("novelty_label") == "significant"),
+                "duplicate_count": int(item.get("novelty_label") == "duplicate"),
                 "items": [item],
             }
             for item in result.get("items", [])
@@ -200,13 +210,18 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
         st.info("Подходящих новостей не найдено.")
         return
 
+    if show_legend:
+        st.caption(_search_result_legend_text())
     for cluster_index, cluster in enumerate(clusters):
         title = cluster.get("representative_title") or "Без названия"
         article_count = cluster.get("article_count", len(cluster.get("items", [])))
         significant_count = cluster.get("significant_count", 0)
+        duplicate_count = cluster.get("duplicate_count", 0)
         label = escape_markdown(title)
         if significant_count:
             label += f' · [⭐](# "Количество важных публикаций") {significant_count}'
+        if duplicate_count:
+            label += f' · [🔁](# "Количество повторов") {duplicate_count}'
         label += f' · [📰](# "Общее количество публикаций") {article_count}'
         cluster_date = _format_cluster_period(cluster)
         if cluster_date:
@@ -217,21 +232,38 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
             key=f"cluster-expander-{key_prefix}-{cluster_index}",
         ):
             items = cluster.get("items", [])
-            show_all = st.checkbox(
-                "Показать дубликаты и все совпадения",
-                key=(
-                    f"cluster-all-{key_prefix}-"
-                    f"{cluster.get('cluster_id')}-{cluster_index}"
-                ),
-            )
-            visible_items = (
-                items
-                if show_all
-                else [
-                    item
-                    for item in items
-                    if item.get("novelty_label") != "duplicate"
-                ][:3]
+            has_duplicates = _has_duplicate_items(items)
+            has_overflow = _has_overflow_items(items, hide_duplicates=True)
+            hide_duplicates = True
+            show_all_matches = False
+            control_count = int(has_overflow) + int(has_duplicates)
+            if control_count:
+                control_columns = st.columns(control_count)
+                control_index = 0
+                if has_overflow:
+                    with control_columns[control_index]:
+                        show_all_matches = st.checkbox(
+                            "Показать остальные совпадения",
+                            key=(
+                                f"cluster-all-matches-{key_prefix}-"
+                                f"{cluster.get('cluster_id')}-{cluster_index}"
+                            ),
+                        )
+                    control_index += 1
+                if has_duplicates:
+                    with control_columns[control_index]:
+                        hide_duplicates = st.checkbox(
+                            "Скрыть повторы",
+                            value=True,
+                            key=(
+                                f"cluster-hide-duplicates-{key_prefix}-"
+                                f"{cluster.get('cluster_id')}-{cluster_index}"
+                            ),
+                        )
+            visible_items = _visible_cluster_items(
+                items,
+                hide_duplicates=hide_duplicates,
+                show_all_matches=show_all_matches,
             )
             for item_index, item in enumerate(visible_items):
                 render_search_article(
@@ -241,9 +273,9 @@ def render_search_result(result: dict, *, key_prefix: str) -> None:
                         f"{cluster_index}-{item_index}"
                     ),
                 )
-            hidden_count = len(items) - len(visible_items)
-            if hidden_count > 0 and not show_all:
-                st.caption(f"Скрыто публикаций: {hidden_count}")
+            hidden_summary = _hidden_cluster_summary(items, visible_items)
+            if hidden_summary:
+                st.caption(hidden_summary)
 
 
 def _format_cluster_period(cluster: dict) -> str:
@@ -263,7 +295,6 @@ def _format_cluster_period(cluster: dict) -> str:
 def render_search_article(item: dict, *, key_prefix: str) -> None:
     title = html.escape(display_news_title(item.get("title")))
     novelty_label = item.get("novelty_label")
-    is_significant = novelty_label == "significant"
     details = [
         format_search_date(
             item.get("published_at"),
@@ -274,18 +305,10 @@ def render_search_article(item: dict, *, key_prefix: str) -> None:
         details.append(f"релевантность {float(item['score']):.3f}")
     if item.get("p_significant") is not None:
         details.append(f"оценка модели {float(item['p_significant']):.0%}")
+    details.append(_novelty_label_text(novelty_label))
     metadata = html.escape(" · ".join(detail for detail in details if detail))
-    title_style = (
-        "font-weight:700;color:#f0f2f6"
-        if is_significant
-        else "font-weight:500;color:#a6adb7"
-    )
-    marker = (
-        " <span title='Значимая новость' "
-        "style='color:#f5c542;font-size:1.15em'>★</span>"
-        if is_significant
-        else ""
-    )
+    title_style = _novelty_title_style(novelty_label)
+    marker = _novelty_marker_html(novelty_label)
     st.markdown(
         (
             f"<span style='{title_style}'>{title}</span>{marker} "
@@ -298,7 +321,7 @@ def render_search_article(item: dict, *, key_prefix: str) -> None:
     if article_text:
         preview_limit = 350
         is_long = len(article_text) > preview_limit
-        text_color = "#d7dbe0" if is_significant else "#9299a3"
+        text_color = _novelty_text_color(novelty_label)
         if is_long:
             preview = article_text[:preview_limit].rsplit(" ", 1)[0]
             article_id = str(item.get("article_id"))
@@ -325,3 +348,113 @@ def render_search_article(item: dict, *, key_prefix: str) -> None:
     url = display_news_url(item.get("url"))
     if isinstance(url, str) and url.startswith(("http://", "https://")):
         st.markdown(f"[Открыть источник]({url})")
+
+
+def _visible_cluster_items(
+    items: list[dict],
+    *,
+    hide_duplicates: bool,
+    show_all_matches: bool,
+) -> list[dict]:
+    """Вернуть публикации кластера с учётом фильтра повторов и лимита показа."""
+    filtered_items = [
+        item
+        for item in items
+        if not hide_duplicates or item.get("novelty_label") != "duplicate"
+    ]
+    return filtered_items if show_all_matches else filtered_items[:3]
+
+
+def _has_duplicate_items(items: list[dict]) -> bool:
+    """Проверить, есть ли в кластере повторы."""
+    return any(item.get("novelty_label") == "duplicate" for item in items)
+
+
+def _has_overflow_items(items: list[dict], *, hide_duplicates: bool) -> bool:
+    """Проверить, есть ли публикации сверх краткого предпросмотра."""
+    return len(
+        _visible_cluster_items(
+            items,
+            hide_duplicates=hide_duplicates,
+            show_all_matches=True,
+        )
+    ) > 3
+
+
+def _hidden_cluster_summary(
+    items: list[dict],
+    visible_items: list[dict],
+) -> str:
+    """Собрать понятную подпись о скрытых публикациях кластера."""
+    visible_ids = {item.get("article_id") for item in visible_items}
+    hidden_items = [
+        item
+        for item in items
+        if item.get("article_id") not in visible_ids
+    ]
+    duplicate_count = sum(
+        item.get("novelty_label") == "duplicate"
+        for item in hidden_items
+    )
+    other_count = len(hidden_items) - duplicate_count
+    parts = []
+    if duplicate_count:
+        parts.append(f"повторов: {duplicate_count}")
+    if other_count:
+        parts.append(f"остальных совпадений: {other_count}")
+    return f"Скрыто публикаций: {', '.join(parts)}." if parts else ""
+
+
+def _novelty_label_text(novelty_label: str | None) -> str:
+    """Перевести модельную метку новизны в подпись для UI."""
+    return {
+        "significant": "важная",
+        "minor": "фоновое совпадение",
+        "duplicate": "повтор",
+    }.get(str(novelty_label or ""), "тип не определён")
+
+
+def _search_result_legend_text() -> str:
+    """Вернуть единую легенду для списка результатов поиска."""
+    return (
+        "⭐ важная публикация; 🔁 повтор; серым показаны фоновые совпадения. "
+        "По умолчанию повторы скрыты, а список ограничен первыми тремя совпадениями."
+    )
+
+
+def _should_show_search_history_legend(history: list[dict]) -> bool:
+    """Проверить, нужна ли легенда над историей поисковых запросов."""
+    return any(search.get("status") == "done" and search.get("result") for search in history)
+
+
+def _novelty_title_style(novelty_label: str | None) -> str:
+    """Вернуть стиль заголовка публикации по метке новизны."""
+    if novelty_label == "significant":
+        return "font-weight:700;color:#f0f2f6"
+    if novelty_label == "duplicate":
+        return "font-weight:500;color:#7f8791;font-style:italic"
+    return "font-weight:500;color:#a6adb7"
+
+
+def _novelty_text_color(novelty_label: str | None) -> str:
+    """Вернуть цвет текста публикации по метке новизны."""
+    if novelty_label == "significant":
+        return "#d7dbe0"
+    if novelty_label == "duplicate":
+        return "#7f8791"
+    return "#9299a3"
+
+
+def _novelty_marker_html(novelty_label: str | None) -> str:
+    """Вернуть HTML-маркер типа публикации для карточки поиска."""
+    if novelty_label == "significant":
+        return (
+            " <span title='Значимая новость' "
+            "style='color:#f5c542;font-size:1.15em'>★</span>"
+        )
+    if novelty_label == "duplicate":
+        return (
+            " <span title='Повтор уже известной публикации' "
+            "style='color:#8b949e;font-size:1.05em'>🔁</span>"
+        )
+    return ""

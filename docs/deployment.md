@@ -1,7 +1,8 @@
 # Развёртывание
 
 Основная поставка использует Docker Compose. GPU- и CPU-воркеры реализуют один
-контракт и читают общую очередь RabbitMQ.
+контракт, но читают отдельные RabbitMQ-очереди для поиска, векторизации и
+aggregate.
 
 ## Конфигурация
 
@@ -16,7 +17,7 @@
 
 - приложение: `APP_ENV`, `DEMO_MODE`;
 - хранилище: `POSTGRES_*`;
-- очередь: `RABBITMQ_*`, `NEWS_VECTORIZATION_QUEUE`, `NEWS_AGGREGATION_QUEUE`;
+- очередь: `RABBITMQ_*`, `NEWS_SEARCH_QUEUE`, `NEWS_VECTORIZATION_QUEUE`, `NEWS_AGGREGATION_QUEUE`;
 - воркеры: `MODEL_SERVICE_VECTORIZER_GPU_REPLICAS`, `MODEL_SERVICE_VECTORIZER_CPU_REPLICAS`, `MODEL_SERVICE_PROCESSOR_REPLICAS`;
 - обработка: `PIPELINE_CHUNK_SIZE` для embeddings-пачек, `PIPELINE_AGGREGATE_BATCH_SIZE` для aggregate-пачек, `PIPELINE_HISTORY_WINDOW_DAYS` для ограничения истории по датам текущей пачки, `PIPELINE_HISTORY_EXPAND_CLUSTERS` и `PIPELINE_HISTORY_CLUSTER_EXPANSION_MAX_ROWS` для расширения окна до целых кластеров;
 - кластеризация: `PIPELINE_BASE_STORY_THRESHOLD`, `PIPELINE_BASE_STORY_WINDOW_DAYS`, `PIPELINE_ATTACH_MIN_SIMILARITY`, `PIPELINE_ATTACH_MAX_DAYS`, `PIPELINE_ATTACH_MIN_MARGIN`, `PIPELINE_ATTACH_SOURCE_MAX_CLUSTER_SIZE`, `PIPELINE_ATTACH_TITLE_JACCARD_THRESHOLD`, `PIPELINE_ATTACH_MIN_SHARED_NUMBERS`, `PIPELINE_ATTACH_REQUIRE_EVIDENCE`;
@@ -112,7 +113,9 @@ MODEL_SERVICE_VECTORIZER_CPU_REPLICAS=0
 MODEL_SERVICE_PROCESSOR_REPLICAS=2
 ```
 
-GPU-воркеры читают `NEWS_VECTORIZATION_QUEUE`, CPU-воркеры читают
+GPU-воркеры читают `NEWS_SEARCH_QUEUE` перед `NEWS_VECTORIZATION_QUEUE`, поэтому
+поиск обгоняет накопившиеся bulk-задачи после завершения текущего chunk. Уже
+запущенная векторизация не прерывается. CPU-воркеры читают
 `NEWS_AGGREGATION_QUEUE`. У каждой очереди остаётся `prefetch_count=1`, поэтому
 vectorize и aggregate масштабируются независимо.
 

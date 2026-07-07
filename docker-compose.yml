@@ -135,6 +135,7 @@ services:
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
       NEWS_AGGREGATION_QUEUE: ${NEWS_AGGREGATION_QUEUE:-news_aggregation.jobs}
+      NEWS_SEARCH_QUEUE: ${NEWS_SEARCH_QUEUE:-news_search.jobs}
       PIPELINE_CHUNK_SIZE: ${PIPELINE_CHUNK_SIZE:-5000}
       PIPELINE_AGGREGATE_BATCH_SIZE: ${PIPELINE_AGGREGATE_BATCH_SIZE:-5000}
       PIPELINE_HISTORY_WINDOW_DAYS: ${PIPELINE_HISTORY_WINDOW_DAYS:-30}
@@ -181,6 +182,7 @@ services:
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
       NEWS_AGGREGATION_QUEUE: ${NEWS_AGGREGATION_QUEUE:-news_aggregation.jobs}
+      NEWS_SEARCH_QUEUE: ${NEWS_SEARCH_QUEUE:-news_search.jobs}
       PIPELINE_MODEL_PATH: /app/data/artifacts/models/final_exp10/final_novelty_model.joblib
       PIPELINE_CONFIG_PATH: /app/data/artifacts/models/final_exp10/final_pipeline_config.json
       PIPELINE_DEVICE: ${MODEL_SERVICE_VECTORIZER_GPU_DEVICE:-cuda}
@@ -239,6 +241,7 @@ services:
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
       NEWS_AGGREGATION_QUEUE: ${NEWS_AGGREGATION_QUEUE:-news_aggregation.jobs}
+      NEWS_SEARCH_QUEUE: ${NEWS_SEARCH_QUEUE:-news_search.jobs}
       PIPELINE_MODEL_PATH: /app/data/artifacts/models/final_exp10/final_novelty_model.joblib
       PIPELINE_CONFIG_PATH: /app/data/artifacts/models/final_exp10/final_pipeline_config.json
       PIPELINE_DEVICE: ${MODEL_SERVICE_VECTORIZER_CPU_DEVICE:-cpu}
@@ -294,6 +297,7 @@ services:
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
       NEWS_VECTORIZATION_QUEUE: ${NEWS_VECTORIZATION_QUEUE:-news_vectorization.jobs}
       NEWS_AGGREGATION_QUEUE: ${NEWS_AGGREGATION_QUEUE:-news_aggregation.jobs}
+      NEWS_SEARCH_QUEUE: ${NEWS_SEARCH_QUEUE:-news_search.jobs}
       PIPELINE_MODEL_PATH: /app/data/artifacts/models/final_exp10/final_novelty_model.joblib
       PIPELINE_CONFIG_PATH: /app/data/artifacts/models/final_exp10/final_pipeline_config.json
       PIPELINE_DEVICE: cpu

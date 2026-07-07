@@ -115,7 +115,32 @@
           },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ожидание поиска"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "поиск выполняется"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 4,
@@ -144,18 +169,38 @@
       "targets": [
         {
           "expr": "sum(news_flow_pipeline_queue_articles{status=\"queued\"}) or vector(0)",
-          "legendFormat": "queued articles",
+          "legendFormat": "статей ждёт",
           "refId": "A"
         },
         {
           "expr": "sum(news_flow_pipeline_queue_articles{status=\"processing\"}) or vector(0)",
-          "legendFormat": "processing articles",
+          "legendFormat": "статей в работе",
           "refId": "B"
+        },
+        {
+          "expr": "sum(news_flow_pipeline_queue_jobs{status=\"queued\",mode=\"news_search\"}) or vector(0)",
+          "legendFormat": "поисков ждёт",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(news_flow_pipeline_queue_jobs{status=\"processing\",mode=\"news_search\"}) or vector(0)",
+          "legendFormat": "поисков в работе",
+          "refId": "D"
+        },
+        {
+          "expr": "max(news_flow_search_job_age_seconds{status=\"queued\"}) or vector(0)",
+          "legendFormat": "ожидание поиска",
+          "refId": "E"
+        },
+        {
+          "expr": "max(news_flow_search_job_age_seconds{status=\"processing\"}) or vector(0)",
+          "legendFormat": "поиск выполняется",
+          "refId": "F"
         }
       ],
       "title": "Очередь pipeline",
       "type": "stat",
-      "description": "Статьи, ожидающие обработки или обрабатываемые сейчас."
+      "description": "Статьи в ожидании pipeline, поисковые jobs и возраст самой старой search job."
     },
     {
       "datasource": {
@@ -207,19 +252,39 @@
       },
       "targets": [
         {
-          "expr": "sum(rabbitmq_queue_messages_ready) or vector(0)",
-          "legendFormat": "ready",
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_search.jobs\"}) or vector(0)",
+          "legendFormat": "поиск ждёт",
           "refId": "A"
         },
         {
-          "expr": "sum(rabbitmq_queue_messages_unacked) or vector(0)",
-          "legendFormat": "in progress",
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_search.jobs\"}) or vector(0)",
+          "legendFormat": "поиск в работе",
           "refId": "B"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_vectorization.jobs\"}) or vector(0)",
+          "legendFormat": "векторизация ждёт",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_vectorization.jobs\"}) or vector(0)",
+          "legendFormat": "векторизация в работе",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_aggregation.jobs\"}) or vector(0)",
+          "legendFormat": "aggregate ждёт",
+          "refId": "E"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_aggregation.jobs\"}) or vector(0)",
+          "legendFormat": "aggregate в работе",
+          "refId": "F"
         }
       ],
-      "title": "Очередь RabbitMQ",
+      "title": "Очереди RabbitMQ",
       "type": "stat",
-      "description": "Нагрузка на очередь. Ready должен возвращаться к нулю после завершения задач."
+      "description": "Сообщения RabbitMQ по логическим очередям. Поиск должен быстро возвращаться к нулю даже во время bulk-векторизации."
     },
     {
       "datasource": {
@@ -381,7 +446,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "статьи",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "barWidthFactor": 0.6,
@@ -411,7 +476,24 @@
             }
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "строки этапа"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 5,
@@ -450,7 +532,7 @@
       ],
       "title": "Статьи по этапам pipeline",
       "type": "timeseries",
-      "description": "Количество статей в очереди, обработке и активных этапах."
+      "description": "Левая ось показывает статьи в очереди и обработке, правая ось — строки активных этапов pipeline."
     },
     {
       "datasource": {
@@ -593,14 +675,29 @@
       },
       "targets": [
         {
-          "expr": "sum by (kind) (news_flow_import_rows_db)",
-          "legendFormat": "{{kind}}",
+          "expr": "sum(news_flow_import_rows_db{kind=\"total\"})",
+          "legendFormat": "найдено в импортах",
           "refId": "A"
+        },
+        {
+          "expr": "sum(news_flow_import_rows_db{kind=\"created\"})",
+          "legendFormat": "создано черновиков",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(news_flow_import_rows_db{kind=\"duplicate\"})",
+          "legendFormat": "дубликатов",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(news_flow_import_rows_db{kind=\"published\"})",
+          "legendFormat": "опубликовано",
+          "refId": "D"
         }
       ],
       "title": "Строки импорта",
       "type": "timeseries",
-      "description": "Импортированные, дублирующиеся и опубликованные строки на уровне API."
+      "description": "Объём строк, найденных import jobs, и их текущее состояние после импорта."
     },
     {
       "datasource": {
@@ -684,19 +781,39 @@
       },
       "targets": [
         {
-          "expr": "sum(rabbitmq_queue_messages_ready) or vector(0)",
-          "legendFormat": "ready",
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_search.jobs\"}) or vector(0)",
+          "legendFormat": "поиск ждёт",
           "refId": "A"
         },
         {
-          "expr": "sum(rabbitmq_queue_messages_unacked) or vector(0)",
-          "legendFormat": "in progress",
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_search.jobs\"}) or vector(0)",
+          "legendFormat": "поиск в работе",
           "refId": "B"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_vectorization.jobs\"}) or vector(0)",
+          "legendFormat": "векторизация ждёт",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_vectorization.jobs\"}) or vector(0)",
+          "legendFormat": "векторизация в работе",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_aggregation.jobs\"}) or vector(0)",
+          "legendFormat": "aggregate ждёт",
+          "refId": "E"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_aggregation.jobs\"}) or vector(0)",
+          "legendFormat": "aggregate в работе",
+          "refId": "F"
         }
       ],
-      "title": "Сообщения RabbitMQ",
+      "title": "Очереди RabbitMQ во времени",
       "type": "timeseries",
-      "description": "Глубина очереди во времени."
+      "description": "Глубина очередей поиска, векторизации и aggregate во времени."
     },
     {
       "datasource": {

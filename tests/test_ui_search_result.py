@@ -1,0 +1,183 @@
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+UI_DIR = Path(__file__).resolve().parents[1] / "ui"
+sys.path.insert(0, str(UI_DIR))
+
+sys.modules.setdefault(
+    "streamlit",
+    SimpleNamespace(
+        fragment=lambda **_kwargs: (lambda function: function),
+        session_state={},
+    ),
+)
+
+from views.search import (  # noqa: E402
+    _has_duplicate_items,
+    _has_overflow_items,
+    _hidden_cluster_summary,
+    _novelty_label_text,
+    _novelty_marker_html,
+    _novelty_text_color,
+    _novelty_title_style,
+    _search_result_legend_text,
+    _should_show_search_history_legend,
+    _visible_cluster_items,
+)
+
+
+def test_cluster_preview_hides_duplicates_and_overflow_items() -> None:
+    """Поиск по умолчанию показывает первые три не-дубликатные публикации."""
+    items = [
+        {"article_id": "important", "novelty_label": "significant"},
+        {"article_id": "duplicate", "novelty_label": "duplicate"},
+        {"article_id": "minor-1", "novelty_label": "minor"},
+        {"article_id": "minor-2", "novelty_label": "minor"},
+        {"article_id": "minor-3", "novelty_label": "minor"},
+    ]
+
+    visible = _visible_cluster_items(
+        items,
+        hide_duplicates=True,
+        show_all_matches=False,
+    )
+
+    assert [item["article_id"] for item in visible] == [
+        "important",
+        "minor-1",
+        "minor-2",
+    ]
+    assert _hidden_cluster_summary(items, visible) == (
+        "Скрыто публикаций: повторов: 1, остальных совпадений: 1."
+    )
+
+
+def test_cluster_preview_can_show_duplicates_without_overflow_items() -> None:
+    """Отключение фильтра повторов не раскрывает хвост списка."""
+    items = [
+        {"article_id": "important", "novelty_label": "significant"},
+        {"article_id": "duplicate", "novelty_label": "duplicate"},
+        {"article_id": "minor-1", "novelty_label": "minor"},
+        {"article_id": "minor-2", "novelty_label": "minor"},
+    ]
+
+    visible = _visible_cluster_items(
+        items,
+        hide_duplicates=False,
+        show_all_matches=False,
+    )
+
+    assert [item["article_id"] for item in visible] == [
+        "important",
+        "duplicate",
+        "minor-1",
+    ]
+    assert _hidden_cluster_summary(items, visible) == (
+        "Скрыто публикаций: остальных совпадений: 1."
+    )
+
+
+def test_cluster_preview_can_show_overflow_without_duplicates() -> None:
+    """Показ остальных совпадений можно включить, оставив повторы скрытыми."""
+    items = [
+        {"article_id": "important", "novelty_label": "significant"},
+        {"article_id": "duplicate", "novelty_label": "duplicate"},
+        {"article_id": "minor-1", "novelty_label": "minor"},
+        {"article_id": "minor-2", "novelty_label": "minor"},
+    ]
+
+    visible = _visible_cluster_items(
+        items,
+        hide_duplicates=True,
+        show_all_matches=True,
+    )
+
+    assert [item["article_id"] for item in visible] == [
+        "important",
+        "minor-1",
+        "minor-2",
+    ]
+    assert _hidden_cluster_summary(items, visible) == (
+        "Скрыто публикаций: повторов: 1."
+    )
+
+
+def test_cluster_preview_shows_everything_when_requested() -> None:
+    """Отключение обоих ограничений раскрывает все публикации кластера."""
+    items = [
+        {"article_id": "important", "novelty_label": "significant"},
+        {"article_id": "duplicate", "novelty_label": "duplicate"},
+    ]
+
+    visible = _visible_cluster_items(
+        items,
+        hide_duplicates=False,
+        show_all_matches=True,
+    )
+
+    assert visible == items
+    assert _hidden_cluster_summary(items, visible) == ""
+
+
+def test_filter_controls_are_hidden_when_they_do_not_affect_results() -> None:
+    """Чекбоксы поиска показываются только при наличии скрываемых элементов."""
+    short_items = [
+        {"article_id": "important", "novelty_label": "significant"},
+        {"article_id": "minor", "novelty_label": "minor"},
+    ]
+    duplicate_only_items = [
+        {"article_id": "important", "novelty_label": "significant"},
+        {"article_id": "duplicate", "novelty_label": "duplicate"},
+    ]
+    overflow_items = [
+        {"article_id": f"minor-{index}", "novelty_label": "minor"}
+        for index in range(4)
+    ]
+
+    assert not _has_duplicate_items(short_items)
+    assert not _has_overflow_items(short_items, hide_duplicates=True)
+    assert _has_duplicate_items(duplicate_only_items)
+    assert not _has_overflow_items(duplicate_only_items, hide_duplicates=True)
+    assert not _has_duplicate_items(overflow_items)
+    assert _has_overflow_items(overflow_items, hide_duplicates=True)
+
+
+def test_novelty_label_text_explains_gray_search_items() -> None:
+    """Метки модели переводятся в понятные подписи карточек поиска."""
+    assert _novelty_label_text("significant") == "важная"
+    assert _novelty_label_text("minor") == "фоновое совпадение"
+    assert _novelty_label_text("duplicate") == "повтор"
+
+
+def test_duplicate_search_item_has_separate_visual_marker() -> None:
+    """Повторы в результатах поиска визуально отличаются от фоновых совпадений."""
+    duplicate_marker = _novelty_marker_html("duplicate")
+
+    assert "🔁" in duplicate_marker
+    assert "Повтор уже известной публикации" in duplicate_marker
+    assert _novelty_marker_html("minor") == ""
+    assert _novelty_title_style("duplicate") != _novelty_title_style("minor")
+    assert _novelty_text_color("duplicate") != _novelty_text_color("minor")
+
+
+def test_search_result_legend_explains_markers_once() -> None:
+    """Общая легенда результатов поиска объясняет маркеры и режим показа."""
+    legend = _search_result_legend_text()
+
+    assert "⭐ важная публикация" in legend
+    assert "🔁 повтор" in legend
+    assert "повторы скрыты" in legend
+
+
+def test_search_history_legend_is_shown_only_for_done_results() -> None:
+    """Легенда истории поиска нужна только при наличии готовых результатов."""
+    assert _should_show_search_history_legend(
+        [{"status": "done", "result": {"clusters": [{}]}}],
+    )
+    assert not _should_show_search_history_legend(
+        [{"status": "queued", "result": {"clusters": [{}]}}],
+    )
+    assert not _should_show_search_history_legend(
+        [{"status": "done", "result": {}}],
+    )

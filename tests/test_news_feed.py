@@ -289,7 +289,7 @@ def test_group_search_items_uses_cluster_summary_for_title_and_period() -> None:
             "published_at": "2026-06-22T12:00:00+00:00",
             "rank": 2,
             "cluster_id": "cluster-1",
-            "novelty_label": "significant",
+            "novelty_label": "duplicate",
         },
     ]
 
@@ -310,5 +310,6 @@ def test_group_search_items_uses_cluster_summary_for_title_and_period() -> None:
     assert cluster["representative_article_id"] == "article-2"
     assert cluster["representative_title"] == "Medoid title"
     assert cluster["article_count"] == 5
+    assert cluster["duplicate_count"] == 1
     assert cluster["published_from"] == "2026-06-20T00:00:00+00:00"
     assert cluster["published_to"] == "2026-06-25T00:00:00+00:00"

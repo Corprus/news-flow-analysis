@@ -36,6 +36,28 @@ from news.routes import (
 )
 
 
+class _QueuePublisherSpy:
+    """Запоминает payload и имя очереди для проверки маршрутизации."""
+
+    def __init__(self) -> None:
+        self.messages: list[tuple[dict, str | None]] = []
+
+    async def publish(self, message: dict, *, queue_name: str | None = None) -> None:
+        """Сохранить опубликованное сообщение без подключения к RabbitMQ."""
+        self.messages.append((message, queue_name))
+
+
+class _QueuedJobRepositorySpy:
+    """Минимальный repository-spy для постановки одного job в очередь."""
+
+    def __init__(self) -> None:
+        self.queued: list[tuple[str, dict]] = []
+
+    async def mark_queued(self, job_id: str, payload: dict) -> None:
+        """Запомнить queued job без обращения к PostgreSQL."""
+        self.queued.append((job_id, payload))
+
+
 class _ClusterSummaryCursor:
     def __init__(self, rows) -> None:
         self.rows = rows
@@ -281,6 +303,31 @@ def test_pipeline_job_contract_contains_ids_and_mode() -> None:
         "organization_id": "10000000-0000-0000-0000-000000000001",
         "mode": "full",
     }
+
+
+def test_search_pipeline_job_uses_search_queue() -> None:
+    """Поисковая задача публикуется в отдельную RabbitMQ-очередь."""
+    repository = _QueuedJobRepositorySpy()
+    publisher = _QueuePublisherSpy()
+    payload = {
+        "target_type": "news_search_query",
+        "query_id": "query-id",
+        "text": "поиск по новостям",
+    }
+
+    asyncio.run(
+        enqueue_pipeline_job(
+            repository=repository,  # type: ignore[arg-type]
+            publisher=publisher,
+            payload=payload,
+            queue_name="news_search.jobs",
+        )
+    )
+
+    assert repository.queued[0][1] == payload
+    assert publisher.messages[0][0]["type"] == "news_search"
+    assert publisher.messages[0][0]["payload"] == payload
+    assert publisher.messages[0][1] == "news_search.jobs"
 
 
 def test_pipeline_job_accepts_50k_article_ids() -> None:

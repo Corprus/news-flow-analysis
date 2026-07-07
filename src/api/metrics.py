@@ -52,10 +52,14 @@ STAGE_DETAIL_EXCLUDED_KEYS = {
 
 
 class ApiDatabaseCollector:
+    """Собирает метрики из PostgreSQL для восстановления состояния после рестарта."""
+
     def __init__(self, database_url: str) -> None:
+        """Сохранить DSN базы данных для коротких collector-подключений."""
         self._database_url = database_url
 
     def collect(self) -> Iterator[GaugeMetricFamily]:
+        """Прочитать PostgreSQL и вернуть семейства Prometheus-метрик."""
         import_jobs = GaugeMetricFamily(
             "news_flow_import_jobs_db",
             "Number of news import jobs persisted in PostgreSQL.",
@@ -63,7 +67,10 @@ class ApiDatabaseCollector:
         )
         import_rows = GaugeMetricFamily(
             "news_flow_import_rows_db",
-            "Number of news import rows persisted in PostgreSQL job results.",
+            (
+                "Number of import rows from PostgreSQL job results and current "
+                "publication state."
+            ),
             labels=["kind"],
         )
         import_in_progress = GaugeMetricFamily(
@@ -84,6 +91,11 @@ class ApiDatabaseCollector:
             "news_flow_pipeline_queue_jobs",
             "Number of pipeline jobs by status and mode.",
             labels=["status", "mode"],
+        )
+        search_job_age = GaugeMetricFamily(
+            "news_flow_search_job_age_seconds",
+            "Age in seconds of the oldest active semantic search job by status.",
+            labels=["status"],
         )
         pipeline_stage_rows = GaugeMetricFamily(
             "news_flow_pipeline_stage_rows",
@@ -171,7 +183,17 @@ class ApiDatabaseCollector:
                     row_totals["total"] += int(result.get("total_rows") or 0)
                     row_totals["created"] += int(result.get("created_count") or 0)
                     row_totals["duplicate"] += int(result.get("duplicate_count") or 0)
-                    row_totals["published"] += int(result.get("published_count") or 0)
+                cursor.execute(
+                    """
+                    SELECT count(*)
+                    FROM news_articles
+                    WHERE metadata ? 'import'
+                      AND visibility = 'public'
+                    """
+                )
+                published_imported = cursor.fetchone()
+                if published_imported is not None:
+                    row_totals["published"] = int(published_imported[0] or 0)
                 for kind, value in row_totals.items():
                     import_rows.add_metric([kind], value)
 
@@ -197,11 +219,27 @@ class ApiDatabaseCollector:
                     """
                     SELECT
                         status,
-                        COALESCE(request->>'mode', request->>'type', 'unknown') AS mode,
+                        CASE
+                            WHEN request->>'target_type' = 'news_search_query'
+                            THEN 'news_search'
+                            ELSE COALESCE(request->>'mode', request->>'type', 'unknown')
+                        END AS mode,
                         count(*) AS jobs,
-                        COALESCE(sum(jsonb_array_length(request->'news_ids')), 0) AS articles
+                        COALESCE(
+                            sum(
+                                CASE
+                                    WHEN request ? 'news_ids'
+                                    THEN jsonb_array_length(request->'news_ids')
+                                    ELSE 0
+                                END
+                            ),
+                            0
+                        ) AS articles
                     FROM news_pipeline_jobs
-                    WHERE request ? 'news_ids'
+                    WHERE (
+                            request ? 'news_ids'
+                            OR request->>'target_type' = 'news_search_query'
+                        )
                       AND COALESCE(request->>'mode', '') <> 'incremental_chunked'
                     GROUP BY status, mode
                     """
@@ -223,6 +261,27 @@ class ApiDatabaseCollector:
                     labels = [str(status), str(mode)]
                     pipeline_queue_jobs.add_metric(labels, jobs)
                     pipeline_queue_articles.add_metric(labels, articles)
+
+                cursor.execute(
+                    """
+                    SELECT
+                        status,
+                        COALESCE(
+                            MAX(EXTRACT(EPOCH FROM now() - created_at)),
+                            0
+                        ) AS oldest_age_seconds
+                    FROM news_pipeline_jobs
+                    WHERE request->>'target_type' = 'news_search_query'
+                      AND status IN ('queued', 'processing')
+                    GROUP BY status
+                    """
+                )
+                search_job_ages = {
+                    str(status): float(oldest_age_seconds or 0)
+                    for status, oldest_age_seconds in cursor.fetchall()
+                }
+                for status in ("queued", "processing"):
+                    search_job_age.add_metric([status], search_job_ages.get(status, 0))
 
                 cursor.execute(
                     """
@@ -399,6 +458,7 @@ class ApiDatabaseCollector:
         yield import_progress
         yield pipeline_queue_jobs
         yield pipeline_queue_articles
+        yield search_job_age
         yield pipeline_stage_rows
         yield pipeline_stage_progress
         yield pipeline_stage_elapsed

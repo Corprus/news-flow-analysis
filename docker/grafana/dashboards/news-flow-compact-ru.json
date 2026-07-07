@@ -46,8 +46,8 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 4,
+        "h": 5,
+        "w": 3,
         "x": 0,
         "y": 0
       },
@@ -101,12 +101,37 @@
           },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ожидание поиска"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "поиск выполняется"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 4,
+        "h": 5,
+        "w": 9,
+        "x": 3,
         "y": 0
       },
       "id": 2,
@@ -130,17 +155,38 @@
       "targets": [
         {
           "expr": "sum(news_flow_pipeline_queue_articles{status=\"queued\"}) or vector(0)",
-          "legendFormat": "queued articles",
+          "legendFormat": "статей ждёт",
           "refId": "A"
         },
         {
           "expr": "sum(news_flow_pipeline_queue_articles{status=\"processing\"}) or vector(0)",
-          "legendFormat": "processing articles",
+          "legendFormat": "статей в работе",
           "refId": "B"
+        },
+        {
+          "expr": "sum(news_flow_pipeline_queue_jobs{status=\"queued\",mode=\"news_search\"}) or vector(0)",
+          "legendFormat": "поисков ждёт",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(news_flow_pipeline_queue_jobs{status=\"processing\",mode=\"news_search\"}) or vector(0)",
+          "legendFormat": "поисков в работе",
+          "refId": "D"
+        },
+        {
+          "expr": "max(news_flow_search_job_age_seconds{status=\"queued\"}) or vector(0)",
+          "legendFormat": "ожидание поиска",
+          "refId": "E"
+        },
+        {
+          "expr": "max(news_flow_search_job_age_seconds{status=\"processing\"}) or vector(0)",
+          "legendFormat": "поиск выполняется",
+          "refId": "F"
         }
       ],
-      "title": "Backlog",
-      "type": "stat"
+      "title": "Очередь pipeline",
+      "type": "stat",
+      "description": "Статьи в ожидании pipeline, поисковые jobs и возраст самой старой search job."
     },
     {
       "datasource": {
@@ -167,9 +213,9 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 9,
+        "h": 5,
+        "w": 8,
+        "x": 12,
         "y": 0
       },
       "id": 3,
@@ -192,18 +238,39 @@
       },
       "targets": [
         {
-          "expr": "sum(rabbitmq_queue_messages_ready) or vector(0)",
-          "legendFormat": "ready",
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_search.jobs\"}) or vector(0)",
+          "legendFormat": "поиск ждёт",
           "refId": "A"
         },
         {
-          "expr": "sum(rabbitmq_queue_messages_unacked) or vector(0)",
-          "legendFormat": "in progress",
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_search.jobs\"}) or vector(0)",
+          "legendFormat": "поиск в работе",
           "refId": "B"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_vectorization.jobs\"}) or vector(0)",
+          "legendFormat": "векторизация ждёт",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_vectorization.jobs\"}) or vector(0)",
+          "legendFormat": "векторизация в работе",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_aggregation.jobs\"}) or vector(0)",
+          "legendFormat": "aggregate ждёт",
+          "refId": "E"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_aggregation.jobs\"}) or vector(0)",
+          "legendFormat": "aggregate в работе",
+          "refId": "F"
         }
       ],
-      "title": "RabbitMQ",
-      "type": "stat"
+      "title": "Очереди RabbitMQ",
+      "type": "stat",
+      "description": "Сообщения RabbitMQ по логическим очередям. Поиск должен быстро возвращаться к нулю даже во время bulk-векторизации."
     },
     {
       "datasource": {
@@ -230,10 +297,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 14,
-        "y": 0
+        "h": 6,
+        "w": 4,
+        "x": 0,
+        "y": 5
       },
       "id": 4,
       "options": {
@@ -292,9 +359,9 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 19,
+        "h": 5,
+        "w": 4,
+        "x": 20,
         "y": 0
       },
       "id": 5,
@@ -350,7 +417,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "статьи",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "barWidthFactor": 0.6,
@@ -380,13 +447,30 @@
             }
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "jobs"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
-        "h": 5,
-        "w": 8,
-        "x": 0,
-        "y": 4
+        "h": 6,
+        "w": 10,
+        "x": 4,
+        "y": 5
       },
       "id": 6,
       "options": {
@@ -407,17 +491,18 @@
       },
       "targets": [
         {
-          "expr": "sum by (status, mode) (news_flow_pipeline_queue_articles{status=~\"queued|processing\"})",
-          "legendFormat": "{{mode}} {{status}}",
+          "expr": "sum by (mode) (increase(news_flow_pipeline_articles_processed_total[$__range]))",
+          "legendFormat": "{{mode}} статей обработано",
           "refId": "A"
         },
         {
-          "expr": "max by (mode, stage, kind) (news_flow_pipeline_stage_rows)",
-          "legendFormat": "{{mode}} {{stage}} {{kind}}",
+          "expr": "sum by (mode, status) (increase(news_flow_pipeline_jobs_total{status=~\"done|failed\"}[$__range]))",
+          "legendFormat": "{{mode}} jobs {{status}}",
           "refId": "B"
         }
       ],
-      "title": "Pipeline сейчас",
+      "description": "Левая ось показывает обработанные статьи, правая ось — завершённые и упавшие jobs за выбранный интервал Grafana. Текущий backlog показан отдельно выше.",
+      "title": "Pipeline за период",
       "type": "timeseries"
     },
     {
@@ -478,10 +563,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
-        "w": 8,
-        "x": 8,
-        "y": 4
+        "h": 6,
+        "w": 10,
+        "x": 14,
+        "y": 5
       },
       "id": 7,
       "options": {
@@ -502,13 +587,29 @@
       },
       "targets": [
         {
-          "expr": "sum by (kind) (news_flow_import_rows_db)",
-          "legendFormat": "{{kind}}",
+          "expr": "sum(news_flow_import_rows_db{kind=\"total\"})",
+          "legendFormat": "найдено в импортах",
           "refId": "A"
+        },
+        {
+          "expr": "sum(news_flow_import_rows_db{kind=\"created\"})",
+          "legendFormat": "создано черновиков",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(news_flow_import_rows_db{kind=\"duplicate\"})",
+          "legendFormat": "дубликатов",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(news_flow_import_rows_db{kind=\"published\"})",
+          "legendFormat": "опубликовано",
+          "refId": "D"
         }
       ],
       "title": "Строки импорта",
-      "type": "timeseries"
+      "type": "timeseries",
+      "description": "Объём строк, найденных import jobs, и их текущее состояние после импорта."
     },
     {
       "datasource": {
@@ -568,10 +669,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 16,
-        "y": 4
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 11
       },
       "id": 8,
       "options": {
@@ -658,10 +759,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 20,
-        "y": 4
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 11
       },
       "id": 9,
       "options": {
@@ -698,7 +799,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
           "mappings": [],
           "thresholds": {
@@ -710,43 +811,76 @@
               }
             ]
           },
-          "unit": "cores"
+          "unit": "cores",
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
+        "h": 5,
+        "w": 12,
         "x": 0,
-        "y": 9
+        "y": 17
       },
       "id": 10,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
+        "legend": {
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "max"
           ],
-          "fields": "",
-          "values": false
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
           "expr": "sum(news_flow_container_cpu_cores)",
-          "legendFormat": "cores",
+          "legendFormat": "CPU",
           "refId": "A"
         }
       ],
       "title": "CPU",
-      "type": "stat"
+      "type": "timeseries",
+      "description": "Использование CPU за выбранный интервал."
     },
     {
       "datasource": {
@@ -756,7 +890,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
           "mappings": [],
           "thresholds": {
@@ -768,33 +902,65 @@
               }
             ]
           },
-          "unit": "bytes"
+          "unit": "bytes",
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 6,
-        "y": 9
+        "h": 5,
+        "w": 12,
+        "x": 12,
+        "y": 17
       },
       "id": 11,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
+        "legend": {
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "max"
           ],
-          "fields": "",
-          "values": false
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -804,7 +970,8 @@
         }
       ],
       "title": "RAM",
-      "type": "stat"
+      "type": "timeseries",
+      "description": "Использование RAM за выбранный интервал."
     },
     {
       "datasource": {
@@ -814,7 +981,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
           "mappings": [],
           "thresholds": {
@@ -826,43 +993,76 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "percent",
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 9
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 22
       },
       "id": 12,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
+        "legend": {
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "max"
           ],
-          "fields": "",
-          "values": false
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
           "expr": "max(news_flow_gpu_utilization_ratio)",
-          "legendFormat": "GPU",
+          "legendFormat": "Загрузка GPU",
           "refId": "A"
         }
       ],
       "title": "Загрузка GPU",
-      "type": "stat"
+      "type": "timeseries",
+      "description": "Загрузка GPU за выбранный интервал."
     },
     {
       "datasource": {
@@ -872,7 +1072,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
           "mappings": [],
           "thresholds": {
@@ -884,43 +1084,167 @@
               }
             ]
           },
-          "unit": "celsius"
+          "unit": "bytes",
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 9
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 22
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max by (index, name) (news_flow_gpu_memory_used_bytes)",
+          "legendFormat": "Память GPU",
+          "refId": "A"
+        }
+      ],
+      "title": "Память GPU",
+      "type": "timeseries",
+      "description": "Память GPU, используемая model-service."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "celsius",
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 22
       },
       "id": 13,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
+        "legend": {
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "max"
           ],
-          "fields": "",
-          "values": false
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
           "expr": "max(news_flow_gpu_temperature_celsius)",
-          "legendFormat": "GPU",
+          "legendFormat": "Температура GPU",
           "refId": "A"
         }
       ],
       "title": "Температура GPU",
-      "type": "stat"
+      "type": "timeseries",
+      "description": "Температура GPU за выбранный интервал."
     }
   ],
   "preload": false,

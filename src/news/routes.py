@@ -404,13 +404,16 @@ async def enqueue_vectorization_job(
     payload: dict,
     chunk_size: int = MAX_BATCH_ARTICLES,
     aggregate_batch_size: int = DEFAULT_PIPELINE_AGGREGATE_BATCH_SIZE,
+    queue_name: str | None = None,
 ) -> UUID:
+    """Поставить задачу векторизации или поиска в подходящую очередь RabbitMQ."""
     return await enqueue_pipeline_job(
         repository=repository,
         publisher=publisher,
         payload=payload,
         chunk_size=chunk_size,
         aggregate_batch_size=aggregate_batch_size,
+        queue_name=queue_name,
     )
 
 
@@ -1251,6 +1254,7 @@ async def create_news_search(
         repository=repository,
         publisher=publisher,
         payload=_search_vectorization_payload(search_query),
+        queue_name=settings.news_search_queue,
     )
     return NewsSearchResponse(
         query_id=UUID(search_query.id),
@@ -1620,11 +1624,13 @@ def _import_one_news_batch_in_new_session(
                     allow_already_public=True,
                 )
                 if charge_publication:
+                    batch_id = uuid4() if len(published_ids) > 1 else None
                     _withdraw_for_article_ids_or_raise(
                         accounting=accounting,
                         user_id=current_user.id,
                         amount_per_article=settings.news_add_cost,
                         article_ids=published_ids,
+                        batch_id=batch_id,
                     )
             news.commit()
         except Exception:

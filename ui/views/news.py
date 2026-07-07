@@ -26,6 +26,7 @@ from config import (
     SOURCE_COLUMN_WIDTH,
 )
 from formatting import display_news_title, display_news_url, format_search_date
+from selection import merge_page_selection
 
 
 def render_news(client: ApiClient) -> None:
@@ -137,7 +138,7 @@ def render_news_file_import(client: ApiClient) -> None:
             render_news_import_job_status(client, latest_job_id)
             return
     except ApiError as exc:
-        if exc.status_code != 404:
+        if not _is_import_job_not_found(exc):
             st.error(str(exc))
             return
 
@@ -200,6 +201,11 @@ def render_news_import_job_status(client: ApiClient, import_job_id: str) -> None
     try:
         job = client.get_news_import_job(import_job_id)
     except ApiError as exc:
+        if _is_import_job_not_found(exc):
+            st.session_state.pop("news_import_job_id", None)
+            st.session_state["news_import_ignored_job_id"] = import_job_id
+            st.rerun()
+            return
         st.error(str(exc))
         if st.button("Запустить новый импорт"):
             st.session_state.pop("news_import_job_id", None)
@@ -255,6 +261,11 @@ def render_news_import_job_status(client: ApiClient, import_job_id: str) -> None
         )
     st.session_state["my_news_notice"] = message + "."
     st.rerun()
+
+
+def _is_import_job_not_found(exc: ApiError) -> bool:
+    """Проверить, что API сообщает об отсутствующем import job."""
+    return exc.status_code == 404
 
 
 def render_my_news(client: ApiClient, *, show_header: bool = True) -> None:
@@ -401,6 +412,7 @@ def render_my_news_content(client: ApiClient) -> None:
 
 
 HISTORY_PAGE_SIZE = 100
+DRAFT_SELECTION_KEY = "my-news-drafts-selected-ids"
 
 
 def _load_history_page(
@@ -487,14 +499,38 @@ def render_drafts(
     render_history_section_header("Черновики", drafts, total)
     if drafts:
         if st.session_state.pop("reset-my-news-drafts-select-all", False):
-            st.session_state["my-news-drafts-select-all"] = False
-        select_all_drafts = st.checkbox(
-            "Выбрать все черновики",
-            key="my-news-drafts-select-all",
+            st.session_state[DRAFT_SELECTION_KEY] = []
+        selected_draft_ids = _get_selected_draft_ids()
+        current_page_ids = [str(item["article_id"]) for item in drafts]
+        selected_on_page = len(set(current_page_ids) & selected_draft_ids)
+        st.caption(
+            f"Выбрано черновиков: {len(selected_draft_ids)}. "
+            f"На этой странице: {selected_on_page} из {len(current_page_ids)}."
         )
+        select_page_col, clear_page_col, clear_all_col = st.columns([1, 1, 1])
+        with select_page_col:
+            if st.button("Выбрать страницу", width="stretch"):
+                _store_selected_draft_ids(selected_draft_ids | set(current_page_ids))
+                st.rerun()
+        with clear_page_col:
+            if st.button(
+                "Снять страницу",
+                disabled=selected_on_page == 0,
+                width="stretch",
+            ):
+                _store_selected_draft_ids(selected_draft_ids - set(current_page_ids))
+                st.rerun()
+        with clear_all_col:
+            if st.button(
+                "Сбросить выбор",
+                disabled=not selected_draft_ids,
+                width="stretch",
+            ):
+                _store_selected_draft_ids(set())
+                st.rerun()
         draft_rows = [
             {
-                "Выбрать": select_all_drafts,
+                "Выбрать": str(item["article_id"]) in selected_draft_ids,
                 "Заголовок": display_news_title(item.get("title")),
                 "Дата публикации": format_search_date(item.get("published_at")),
                 "Проверка": (
@@ -544,18 +580,21 @@ def render_drafts(
                         width=SOURCE_COLUMN_WIDTH,
                     ),
                 },
-                key=f"my-news-drafts-editor-{int(select_all_drafts)}",
+                key=f"my-news-drafts-editor-{page}-{len(selected_draft_ids)}",
             ),
         )
-        selected_article_ids = [
-            drafts[index]["article_id"]
-            for index, selected in enumerate(edited_drafts["Выбрать"].tolist())
-            if selected
-        ]
+        selected_article_ids = _sync_draft_selection_from_page(
+            selected_draft_ids,
+            current_page_ids,
+            [
+                bool(selected)
+                for selected in edited_drafts["Выбрать"].tolist()
+            ],
+        )
         publish_col, delete_col = st.columns(2)
         with publish_col:
             if st.button(
-                "Опубликовать выбранные",
+                f"Опубликовать {len(selected_article_ids)} выбранных",
                 disabled=not selected_article_ids,
                 type="primary",
                 width="stretch",
@@ -572,13 +611,34 @@ def render_drafts(
                     st.error(str(exc))
         with delete_col:
             if st.button(
-                "Удалить выбранные",
+                f"Удалить {len(selected_article_ids)} выбранных",
                 disabled=not selected_article_ids,
                 width="stretch",
             ):
                 confirm_draft_deletion(client, selected_article_ids)
     else:
         st.caption("Черновиков нет.")
+
+
+def _get_selected_draft_ids() -> set[str]:
+    """Вернуть сохранённый между страницами набор выбранных черновиков."""
+    return {str(article_id) for article_id in st.session_state.get(DRAFT_SELECTION_KEY, [])}
+
+
+def _store_selected_draft_ids(article_ids: set[str]) -> None:
+    """Сохранить выбранные черновики в стабильном порядке для session_state."""
+    st.session_state[DRAFT_SELECTION_KEY] = sorted(article_ids)
+
+
+def _sync_draft_selection_from_page(
+    selected_ids: set[str],
+    page_ids: list[str],
+    page_flags: list[bool],
+) -> list[str]:
+    """Синхронизировать ручные отметки текущей страницы с общим выбором."""
+    updated = set(merge_page_selection(selected_ids, page_ids, page_flags))
+    _store_selected_draft_ids(updated)
+    return sorted(updated)
 
 
 def render_processing_articles(

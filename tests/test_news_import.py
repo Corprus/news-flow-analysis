@@ -16,7 +16,7 @@ from news.importers import (
     news_importers,
 )
 from news.models import NewsArticle
-from news.routes import import_news
+from news.routes import _import_one_news_batch_in_new_session, import_news
 from news.service import NewsImportResult, NewsService
 from users.deps import CurrentUser
 from users.models import UserRole
@@ -298,6 +298,42 @@ class _FailingImportNewsServiceSpy(_ImportNewsServiceSpy):
         raise ValueError("one imported article cannot be published")
 
 
+class _BatchImportNewsServiceSpy(_ImportNewsServiceSpy):
+    """Имитирует импорт нескольких публикаций с немедленной публикацией."""
+
+    def __init__(self, article_ids: list[str]) -> None:
+        super().__init__()
+        self.article_ids = article_ids
+
+    def import_user_articles(self, **kwargs) -> NewsImportResult:
+        return NewsImportResult(
+            total_rows=len(self.article_ids),
+            created_count=len(self.article_ids),
+            duplicate_count=0,
+            article_ids=self.article_ids,
+        )
+
+
+class _SessionContext:
+    """Минимальный context manager вместо реальной сессии БД."""
+
+    def __enter__(self):
+        return object()
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+
+class _AccountingSpy:
+    """Запоминает списания кредитов при импортной автопубликации."""
+
+    def __init__(self) -> None:
+        self.withdraw_calls = []
+
+    def withdraw_credit(self, *args) -> None:
+        self.withdraw_calls.append(args)
+
+
 def test_import_endpoint_creates_drafts_and_commits() -> None:
     """Endpoint импорта создаёт черновики и фиксирует транзакцию."""
     service = _ImportNewsServiceSpy()
@@ -387,3 +423,43 @@ def test_import_and_publish_rolls_back_import_when_batch_is_invalid() -> None:
     assert error.value.status_code == 409
     assert not service.committed
     assert service.rolled_back
+
+
+def test_import_batch_publication_withdrawals_share_batch_id(monkeypatch) -> None:
+    """Автопубликация импортированной пачки группирует списания одной операцией."""
+    article_ids = [str(uuid4()), str(uuid4())]
+    service = _BatchImportNewsServiceSpy(article_ids)
+    accounting = _AccountingSpy()
+    current_user = CurrentUser(
+        id=uuid4(),
+        organization_id=uuid4(),
+        role=UserRole.PUBLISHER,
+    )
+    imported_articles = [
+        ImportedNews(
+            title="Title",
+            content="Content",
+            published_at=datetime(2020, 1, 1, tzinfo=UTC),
+        )
+        for _ in article_ids
+    ]
+
+    monkeypatch.setattr("news.routes.get_session", lambda: _SessionContext())
+    monkeypatch.setattr("news.routes.NewsService", lambda _session: service)
+    monkeypatch.setattr("news.routes.AccountingService", lambda _session: accounting)
+
+    result, published_ids = _import_one_news_batch_in_new_session(
+        imported_articles,
+        current_user,
+        SimpleNamespace(news_add_cost=1),
+        "lenta",
+        publish_immediately=True,
+        charge_publication=True,
+        progress_callback=None,
+    )
+
+    assert result.article_ids == article_ids
+    assert published_ids == article_ids
+    assert len(accounting.withdraw_calls) == 2
+    assert accounting.withdraw_calls[0][4] is not None
+    assert accounting.withdraw_calls[0][4] == accounting.withdraw_calls[1][4]
