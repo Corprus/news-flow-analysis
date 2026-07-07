@@ -49,6 +49,10 @@ def group_search_items(
                 item.get("novelty_label") == "significant"
                 for item in cluster_items
             ),
+            "duplicate_count": sum(
+                item.get("novelty_label") == "duplicate"
+                for item in cluster_items
+            ),
             "published_from": (
                 summary.get("published_from")
                 or representative.get("cluster_published_from")

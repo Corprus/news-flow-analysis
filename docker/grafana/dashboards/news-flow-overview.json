@@ -115,7 +115,32 @@
           },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "search wait"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "search processing age"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 4,
@@ -151,11 +176,31 @@
           "expr": "sum(news_flow_pipeline_queue_articles{status=\"processing\"}) or vector(0)",
           "legendFormat": "processing articles",
           "refId": "B"
+        },
+        {
+          "expr": "sum(news_flow_pipeline_queue_jobs{status=\"queued\",mode=\"news_search\"}) or vector(0)",
+          "legendFormat": "search jobs queued",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(news_flow_pipeline_queue_jobs{status=\"processing\",mode=\"news_search\"}) or vector(0)",
+          "legendFormat": "search jobs processing",
+          "refId": "D"
+        },
+        {
+          "expr": "max(news_flow_search_job_age_seconds{status=\"queued\"}) or vector(0)",
+          "legendFormat": "search wait",
+          "refId": "E"
+        },
+        {
+          "expr": "max(news_flow_search_job_age_seconds{status=\"processing\"}) or vector(0)",
+          "legendFormat": "search processing age",
+          "refId": "F"
         }
       ],
       "title": "Pipeline backlog",
       "type": "stat",
-      "description": "Articles waiting for processing or currently running."
+      "description": "Articles waiting for pipeline processing, semantic search jobs and the oldest search job age."
     },
     {
       "datasource": {
@@ -207,19 +252,39 @@
       },
       "targets": [
         {
-          "expr": "sum(rabbitmq_queue_messages_ready) or vector(0)",
-          "legendFormat": "ready",
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_search.jobs\"}) or vector(0)",
+          "legendFormat": "search ready",
           "refId": "A"
         },
         {
-          "expr": "sum(rabbitmq_queue_messages_unacked) or vector(0)",
-          "legendFormat": "in progress",
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_search.jobs\"}) or vector(0)",
+          "legendFormat": "search in progress",
           "refId": "B"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_vectorization.jobs\"}) or vector(0)",
+          "legendFormat": "vectorize ready",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_vectorization.jobs\"}) or vector(0)",
+          "legendFormat": "vectorize in progress",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_aggregation.jobs\"}) or vector(0)",
+          "legendFormat": "aggregate ready",
+          "refId": "E"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_aggregation.jobs\"}) or vector(0)",
+          "legendFormat": "aggregate in progress",
+          "refId": "F"
         }
       ],
-      "title": "RabbitMQ queue",
+      "title": "RabbitMQ queues",
       "type": "stat",
-      "description": "Queue pressure. Ready should return to zero after jobs finish."
+      "description": "RabbitMQ messages by logical queue. Search should stay close to zero during bulk vectorization."
     },
     {
       "datasource": {
@@ -381,7 +446,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "articles",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "barWidthFactor": 0.6,
@@ -411,7 +476,24 @@
             }
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "stage rows"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 5,
@@ -450,7 +532,7 @@
       ],
       "title": "Pipeline articles by stage",
       "type": "timeseries",
-      "description": "Article counts in queued, processing and active stage states."
+      "description": "The left axis shows queued and processing articles, the right axis shows rows reported by active pipeline stages."
     },
     {
       "datasource": {
@@ -593,14 +675,29 @@
       },
       "targets": [
         {
-          "expr": "sum by (kind) (news_flow_import_rows_db)",
-          "legendFormat": "{{kind}}",
+          "expr": "sum(news_flow_import_rows_db{kind=\"total\"})",
+          "legendFormat": "seen in imports",
           "refId": "A"
+        },
+        {
+          "expr": "sum(news_flow_import_rows_db{kind=\"created\"})",
+          "legendFormat": "created drafts",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(news_flow_import_rows_db{kind=\"duplicate\"})",
+          "legendFormat": "duplicates",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(news_flow_import_rows_db{kind=\"published\"})",
+          "legendFormat": "published",
+          "refId": "D"
         }
       ],
       "title": "Import rows",
       "type": "timeseries",
-      "description": "Imported, duplicate and published rows persisted by API."
+      "description": "Rows seen by import jobs and their current state after import."
     },
     {
       "datasource": {
@@ -684,19 +781,39 @@
       },
       "targets": [
         {
-          "expr": "sum(rabbitmq_queue_messages_ready) or vector(0)",
-          "legendFormat": "ready",
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_search.jobs\"}) or vector(0)",
+          "legendFormat": "search ready",
           "refId": "A"
         },
         {
-          "expr": "sum(rabbitmq_queue_messages_unacked) or vector(0)",
-          "legendFormat": "in progress",
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_search.jobs\"}) or vector(0)",
+          "legendFormat": "search in progress",
           "refId": "B"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_vectorization.jobs\"}) or vector(0)",
+          "legendFormat": "vectorize ready",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_vectorization.jobs\"}) or vector(0)",
+          "legendFormat": "vectorize in progress",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_ready{queue=\"news_aggregation.jobs\"}) or vector(0)",
+          "legendFormat": "aggregate ready",
+          "refId": "E"
+        },
+        {
+          "expr": "sum(rabbitmq_queue_messages_unacked{queue=\"news_aggregation.jobs\"}) or vector(0)",
+          "legendFormat": "aggregate in progress",
+          "refId": "F"
         }
       ],
-      "title": "RabbitMQ message flow",
+      "title": "RabbitMQ queues over time",
       "type": "timeseries",
-      "description": "Queue depth over time."
+      "description": "Queue depth over time by search, vectorization and aggregate queues."
     },
     {
       "datasource": {

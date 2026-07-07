@@ -30,7 +30,9 @@ async def enqueue_pipeline_job(
     payload: dict,
     chunk_size: int = DEFAULT_PIPELINE_CHUNK_SIZE,
     aggregate_batch_size: int = DEFAULT_PIPELINE_AGGREGATE_BATCH_SIZE,
+    queue_name: str | None = None,
 ) -> UUID:
+    """Поставить pipeline/search job в хранилище и нужную RabbitMQ-очередь."""
     message_type = (
         "news_search" if payload.get("target_type") == "news_search_query" else "news_pipeline"
     )
@@ -45,6 +47,7 @@ async def enqueue_pipeline_job(
             job_id=str(job_id),
             message_type=message_type,
             payload=payload,
+            queue_name=queue_name,
         )
         return job_id
 
@@ -297,11 +300,17 @@ async def _publish_job(
     job_id: str,
     message_type: str,
     payload: dict,
+    queue_name: str | None = None,
 ) -> None:
+    message = {
+        "job_id": job_id,
+        "type": message_type,
+        "payload": payload,
+    }
+    if queue_name is None:
+        await publisher.publish(message)
+        return
     await publisher.publish(
-        {
-            "job_id": job_id,
-            "type": message_type,
-            "payload": payload,
-        }
+        message,
+        queue_name=queue_name,
     )

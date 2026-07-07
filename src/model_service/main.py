@@ -19,7 +19,7 @@ from final_pipeline import (
     IncrementalPipelineConfig,
     load_pipeline,
 )
-from messaging.rabbitmq import RabbitConsumer, RabbitPublisher
+from messaging.rabbitmq import RabbitConsumer, RabbitPriorityConsumer, RabbitPublisher
 from model.significance_model import CatBoostSignificanceModel
 from model_service.gpu_metrics import NvidiaGpuCollector
 from model_service.metrics import (
@@ -806,6 +806,7 @@ async def lifespan(app: FastAPI):
     await jobs.initialize()
     await publisher.connect()
     await publisher.declare_queue(settings.news_aggregation_queue)
+    await publisher.declare_queue(settings.news_search_queue)
     app.state.jobs = jobs
     app.state.settings = settings
     app.state.pipeline_repository = repository
@@ -837,7 +838,16 @@ async def lifespan(app: FastAPI):
     async def handler(message: dict[str, Any]) -> None:
         await handle_message(app, message)
 
-    consumer = RabbitConsumer(settings.rabbitmq_url, consumer_queue, handler)
+    consumer = (
+        RabbitConsumer(settings.rabbitmq_url, consumer_queue, handler)
+        if worker_role == "aggregator"
+        else RabbitPriorityConsumer(
+            settings.rabbitmq_url,
+            primary_queue_name=consumer_queue,
+            priority_queue_name=settings.news_search_queue,
+            handler=handler,
+        )
+    )
     await consumer.start()
     app.state.consumer = consumer
     yield
@@ -857,7 +867,11 @@ app.mount("/metrics", make_asgi_app())
 @app.get("/health")
 async def health(request: Request) -> dict[str, str]:
     config: FinalPipelineConfig = request.app.state.config
-    consumer: RabbitConsumer | None = getattr(request.app.state, "consumer", None)
+    consumer: RabbitConsumer | RabbitPriorityConsumer | None = getattr(
+        request.app.state,
+        "consumer",
+        None,
+    )
     if consumer is None or not consumer.is_connected:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

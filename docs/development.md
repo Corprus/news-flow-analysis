@@ -52,9 +52,16 @@ docker compose config --quiet
 - pytest;
 - проверка Docker Compose config.
 
-Сборка API и model-service images (`model-service-vectorizer-*`,
-`model-service-processor`) запускается вручную через
-`workflow_dispatch` с `build_images=true`.
+Ручной job `Docker Images Smoke Build` запускается через `workflow_dispatch` с
+`build_images=true`. Он собирает CPU/служебные образы без запуска сервисов и без
+публикации наружу: API, UI, metrics-exporter, `model-service-processor` и
+`model-service-vectorizer-cpu`. GPU-образ не входит в CI smoke build, потому что
+он тяжелее и зависит от CUDA-базового образа; его проверяют локально перед
+поставкой GPU-режима.
+
+Hugging Face используется только как источник и кеш базовой embedding-модели
+BGE-M3 (`MODEL_SERVICE_HF_CACHE`, `HF_TOKEN`). В CI нет шага публикации модели в
+облако или model registry.
 
 Чтобы блокировать merge при ошибках, в GitHub branch rules нужно сделать
 обязательными проверки `Ruff`, `Tests` и `Docker Compose Config`.

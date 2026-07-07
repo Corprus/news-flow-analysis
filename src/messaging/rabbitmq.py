@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import Any
 
 import aio_pika
@@ -141,6 +142,100 @@ class RabbitConsumer:
         if self._connection is not None:
             await self._connection.close()
             self._connection = None
+
+
+class RabbitPriorityConsumer:
+    """Последовательный consumer, который предпочитает приоритетную очередь."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        primary_queue_name: str,
+        priority_queue_name: str,
+        handler: MessageHandler,
+    ) -> None:
+        """Сохранить параметры основной и приоритетной очередей."""
+        self._url = url
+        self._primary_queue_name = primary_queue_name
+        self._priority_queue_name = priority_queue_name
+        self._handler = handler
+        self._connection: AbstractRobustConnection | None = None
+        self._channel: AbstractRobustChannel | None = None
+        self._primary_queue: AbstractQueue | None = None
+        self._priority_queue: AbstractQueue | None = None
+        self._task: asyncio.Task | None = None
+
+    async def start(self) -> None:
+        """Запустить polling-loop с обработкой не более одного сообщения за раз."""
+        self._connection = await _connect_with_retry(self._url)
+        self._channel = await self._connection.channel()
+        await self._channel.set_qos(prefetch_count=1)
+        self._priority_queue = await self._channel.declare_queue(
+            self._priority_queue_name,
+            durable=True,
+        )
+        self._primary_queue = await self._channel.declare_queue(
+            self._primary_queue_name,
+            durable=True,
+        )
+        self._task = asyncio.create_task(self._consume_loop())
+
+    @property
+    def is_connected(self) -> bool:
+        """Проверить, что consumer-loop и AMQP channel активны."""
+        return (
+            self._connection is not None
+            and not self._connection.is_closed
+            and self._channel is not None
+            and not self._channel.is_closed
+            and self._task is not None
+            and not self._task.done()
+        )
+
+    async def _consume_loop(self) -> None:
+        while True:
+            message = await self._get_next_message()
+            if message is None:
+                await asyncio.sleep(0.2)
+                continue
+            await self._process_message(message)
+
+    async def _get_next_message(self) -> AbstractIncomingMessage | None:
+        assert self._priority_queue is not None
+        assert self._primary_queue is not None
+        priority_message = await _queue_get_or_none(self._priority_queue)
+        if priority_message is not None:
+            return priority_message
+        return await _queue_get_or_none(self._primary_queue)
+
+    async def _process_message(self, message: AbstractIncomingMessage) -> None:
+        async with message.process(requeue=True):
+            payload = json.loads(message.body.decode("utf-8"))
+            await self._handler(payload)
+
+    async def close(self) -> None:
+        """Остановить polling-loop и закрыть channel/connection."""
+        if self._task is not None:
+            self._task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None
+        if self._channel is not None:
+            await self._channel.close()
+            self._channel = None
+            self._primary_queue = None
+            self._priority_queue = None
+        if self._connection is not None:
+            await self._connection.close()
+            self._connection = None
+
+
+async def _queue_get_or_none(queue: AbstractQueue) -> AbstractIncomingMessage | None:
+    try:
+        return await queue.get(timeout=1, fail=False)
+    except TimeoutError:
+        return None
 
 
 async def _connect_with_retry(

@@ -42,6 +42,10 @@ class Settings(BaseSettings):
         default="news_aggregation.jobs",
         alias="NEWS_AGGREGATION_QUEUE",
     )
+    news_search_queue: str = Field(
+        default="news_search.jobs",
+        alias="NEWS_SEARCH_QUEUE",
+    )
     sqlalchemy_echo: bool = Field(default=False, alias="SQLALCHEMY_ECHO")
     password_hash_secret: str = Field(
         default="change-me-local-password-secret",

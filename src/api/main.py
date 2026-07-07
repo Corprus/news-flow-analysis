@@ -119,6 +119,10 @@ async def lifespan(app: FastAPI):
         "declare RabbitMQ aggregation queue",
         lambda: publisher.declare_queue(settings.news_aggregation_queue),
     )
+    await _run_startup_step_with_retries(
+        "declare RabbitMQ search queue",
+        lambda: publisher.declare_queue(settings.news_search_queue),
+    )
     if settings.demo_mode:
         await _run_startup_step_with_retries(
             "purge RabbitMQ demo queue",
@@ -127,6 +131,10 @@ async def lifespan(app: FastAPI):
         await _run_startup_step_with_retries(
             "purge RabbitMQ demo aggregation queue",
             lambda: publisher.purge_queue(queue_name=settings.news_aggregation_queue),
+        )
+        await _run_startup_step_with_retries(
+            "purge RabbitMQ demo search queue",
+            lambda: publisher.purge_queue(queue_name=settings.news_search_queue),
         )
     app.state.repository = repository
     app.state.publisher = publisher

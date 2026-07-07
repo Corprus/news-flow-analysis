@@ -112,30 +112,31 @@ def render_date_news_result(client: ApiClient, selected_date: date) -> None:
         key_prefix=f"date-feed-{selected_date.isoformat()}-{page}",
     )
 
-    previous_col, page_col, next_col = st.columns([1, 2, 1])
-    with previous_col:
-        if st.button(
-            "← Назад",
-            disabled=page == 0,
-            key="date-news-previous",
-            use_container_width=True,
-        ):
-            st.session_state["date_news_page"] = page - 1
-            st.rerun()
-    with page_col:
-        st.markdown(
-            f"<div style='text-align:center'>Страница {page + 1}</div>",
-            unsafe_allow_html=True,
-        )
-    with next_col:
-        if st.button(
-            "Далее →",
-            disabled=(page + 1) * PAGE_SIZE >= total_clusters,
-            key="date-news-next",
-            use_container_width=True,
-        ):
-            st.session_state["date_news_page"] = page + 1
-            st.rerun()
+    if _should_render_date_pager(total_clusters):
+        previous_col, page_col, next_col = st.columns([1, 2, 1])
+        with previous_col:
+            if st.button(
+                "← Назад",
+                disabled=page == 0,
+                key="date-news-previous",
+                use_container_width=True,
+            ):
+                st.session_state["date_news_page"] = page - 1
+                st.rerun()
+        with page_col:
+            st.markdown(
+                f"<div style='text-align:center'>Страница {page + 1}</div>",
+                unsafe_allow_html=True,
+            )
+        with next_col:
+            if st.button(
+                "Далее →",
+                disabled=(page + 1) * PAGE_SIZE >= total_clusters,
+                key="date-news-next",
+                use_container_width=True,
+            ):
+                st.session_state["date_news_page"] = page + 1
+                st.rerun()
 
 
 def _parse_api_date(value: object) -> date | None:
@@ -146,6 +147,11 @@ def _parse_api_date(value: object) -> date | None:
     except ValueError:
         return None
     return parsed.astimezone(MOSCOW_TIMEZONE).date()
+
+
+def _should_render_date_pager(total_clusters: int) -> bool:
+    """Проверить, нужна ли постраничная навигация для новостей выбранной даты."""
+    return total_clusters > PAGE_SIZE
 
 
 def _select_date(selected_date: date | None) -> None:
