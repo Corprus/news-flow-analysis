@@ -213,6 +213,32 @@ def test_batch_id_groups_related_withdrawals(session: Session) -> None:
     assert {transaction.batch_id for transaction in withdrawals} == {str(batch_id)}
 
 
+def test_withdrawal_stores_aggregated_item_count(session: Session) -> None:
+    """Агрегированное списание сохраняет количество элементов операции."""
+    organization_id, user_id = _create_organization_with_user(
+        session,
+        organization_name="Batch import",
+        login="batch-import-user",
+    )
+    accounting = AccountingService(session)
+    accounting.add_credit(organization_id, user_id, Decimal("30.00"))
+    batch_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    transaction_id = accounting.withdraw_credit(
+        user_id,
+        Decimal("22.00"),
+        TransactionReason.NEWS_ADD,
+        UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        batch_id,
+        item_count=22,
+    )
+
+    transaction = session.get(Transaction, str(transaction_id))
+    assert transaction is not None
+    assert transaction.batch_id == str(batch_id)
+    assert transaction.item_count == 22
+
+
 def test_admin_adjustment_can_add_and_withdraw_credit(session: Session) -> None:
     organization_id, admin_id = _create_organization_with_user(
         session,

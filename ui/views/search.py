@@ -5,7 +5,7 @@ from datetime import datetime, time
 
 import streamlit as st
 
-from api_client import ApiClient, ApiError
+from api_client import ApiClient, ApiError, is_authentication_error
 from auth import refresh_account
 from config import MIN_NEWS_DATE, MOSCOW_TIMEZONE
 from formatting import (
@@ -137,6 +137,8 @@ def render_search(client: ApiClient) -> None:
                 icon="🔎",
             )
         except ApiError as exc:
+            if is_authentication_error(exc):
+                raise
             st.error(str(exc))
 
     render_search_history(client)
@@ -183,6 +185,8 @@ def render_search_history(client: ApiClient) -> None:
                 else:
                     st.info(f"Статус поиска: {status_label}")
     except ApiError as exc:
+        if is_authentication_error(exc):
+            raise
         st.error(str(exc))
 
 
@@ -399,10 +403,32 @@ def _hidden_cluster_summary(
     other_count = len(hidden_items) - duplicate_count
     parts = []
     if duplicate_count:
-        parts.append(f"повторов: {duplicate_count}")
+        parts.append(_format_hidden_item_count(duplicate_count, "повтор"))
     if other_count:
-        parts.append(f"остальных совпадений: {other_count}")
-    return f"Скрыто публикаций: {', '.join(parts)}." if parts else ""
+        parts.append(_format_hidden_item_count(other_count, "другое совпадение"))
+    return f"Скрыто: {', '.join(parts)}." if parts else ""
+
+
+def _format_hidden_item_count(count: int, singular: str) -> str:
+    """Вернуть короткую подпись количества скрытых результатов поиска."""
+    if singular == "повтор":
+        forms = ("повтор", "повтора", "повторов")
+    else:
+        forms = ("другое совпадение", "других совпадения", "других совпадений")
+    return f"{count} {_pluralize_ru(count, forms)}"
+
+
+def _pluralize_ru(count: int, forms: tuple[str, str, str]) -> str:
+    """Выбрать русскую форму существительного для количества."""
+    value = abs(count) % 100
+    if 11 <= value <= 14:
+        return forms[2]
+    value %= 10
+    if value == 1:
+        return forms[0]
+    if 2 <= value <= 4:
+        return forms[1]
+    return forms[2]
 
 
 def _novelty_label_text(novelty_label: str | None) -> str:

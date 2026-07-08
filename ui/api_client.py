@@ -54,6 +54,13 @@ class ApiError(RuntimeError):
         self.status_code = status_code
 
 
+def is_authentication_error(error: ApiError) -> bool:
+    """Проверить, что ошибка API означает недействительную пользовательскую сессию."""
+    return error.status_code in {401, 403} or str(error) == ERROR_TRANSLATIONS[
+        "User account is no longer available"
+    ]
+
+
 class ApiClient:
     """Синхронный клиент Streamlit-интерфейса для публичного FastAPI API."""
 

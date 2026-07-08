@@ -1798,6 +1798,7 @@ def _withdraw_or_raise(
     reason: TransactionReason,
     reference_id: UUID,
     batch_id: UUID | None = None,
+    item_count: int = 1,
 ) -> None:
     if amount == 0:
         return
@@ -1806,7 +1807,14 @@ def _withdraw_or_raise(
         skip_metered = getattr(accounting, "should_skip_metered_withdrawal", None)
         if skip_metered is not None and skip_metered(user_id):
             return
-        accounting.withdraw_credit(user_id, amount, reason, reference_id, batch_id)
+        accounting.withdraw_credit(
+            user_id,
+            amount,
+            reason,
+            reference_id,
+            batch_id,
+            item_count,
+        )
     except InsufficientBalanceError as exc:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -1878,6 +1886,7 @@ def _prepay_import_publication_or_raise(
         reason=TransactionReason.NEWS_ADD,
         reference_id=import_job_id,
         batch_id=import_job_id,
+        item_count=expected_count,
     )
     return ImportPrepayment(
         import_job_id=import_job_id,

@@ -14,6 +14,7 @@ sys.modules.setdefault(
 )
 
 from views.search import (  # noqa: E402
+    _format_hidden_item_count,
     _has_duplicate_items,
     _has_overflow_items,
     _hidden_cluster_summary,
@@ -49,7 +50,7 @@ def test_cluster_preview_hides_duplicates_and_overflow_items() -> None:
         "minor-2",
     ]
     assert _hidden_cluster_summary(items, visible) == (
-        "Скрыто публикаций: повторов: 1, остальных совпадений: 1."
+        "Скрыто: 1 повтор, 1 другое совпадение."
     )
 
 
@@ -74,7 +75,7 @@ def test_cluster_preview_can_show_duplicates_without_overflow_items() -> None:
         "minor-1",
     ]
     assert _hidden_cluster_summary(items, visible) == (
-        "Скрыто публикаций: остальных совпадений: 1."
+        "Скрыто: 1 другое совпадение."
     )
 
 
@@ -99,7 +100,7 @@ def test_cluster_preview_can_show_overflow_without_duplicates() -> None:
         "minor-2",
     ]
     assert _hidden_cluster_summary(items, visible) == (
-        "Скрыто публикаций: повторов: 1."
+        "Скрыто: 1 повтор."
     )
 
 
@@ -180,4 +181,13 @@ def test_search_history_legend_is_shown_only_for_done_results() -> None:
     )
     assert not _should_show_search_history_legend(
         [{"status": "done", "result": {}}],
+    )
+
+
+def test_hidden_item_count_uses_readable_russian_plural_forms() -> None:
+    """Подпись скрытых результатов использует естественные русские формы."""
+    assert _format_hidden_item_count(2, "повтор") == "2 повтора"
+    assert _format_hidden_item_count(5, "повтор") == "5 повторов"
+    assert _format_hidden_item_count(2, "другое совпадение") == (
+        "2 других совпадения"
     )
