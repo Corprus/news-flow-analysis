@@ -199,6 +199,10 @@ def render_search_result(
     *,
     key_prefix: str,
     chronological_order: ChronologicalOrder = "source",
+    clusters_expanded: bool = False,
+    show_cluster_expand_controls: bool = False,
+    context_items_key: str | None = None,
+    context_items_label: str = "Показать остальные публикации сюжета",
     show_legend: bool = True,
 ) -> None:
     """Показать найденные кластеры новостей с выбранным порядком публикаций внутри групп."""
@@ -220,7 +224,31 @@ def render_search_result(
         return
 
     if show_legend:
-        st.caption(_search_result_legend_text())
+        if show_cluster_expand_controls:
+            legend_col, collapse_col, expand_col = st.columns([14, 1, 1])
+            with legend_col:
+                st.caption(_search_result_legend_text())
+            with collapse_col:
+                if st.button(
+                    "▶ Свернуть",
+                    key=f"clusters-collapse-{key_prefix}",
+                    help="Свернуть все сюжеты",
+                    use_container_width=True,
+                ):
+                    st.session_state[_cluster_expanded_state_key(key_prefix)] = False
+            with expand_col:
+                if st.button(
+                    "▼ Развернуть",
+                    key=f"clusters-expand-{key_prefix}",
+                    help="Развернуть все сюжеты",
+                    use_container_width=True,
+                ):
+                    st.session_state[_cluster_expanded_state_key(key_prefix)] = True
+        else:
+            st.caption(_search_result_legend_text())
+    expanded_clusters = bool(
+        st.session_state.get(_cluster_expanded_state_key(key_prefix), clusters_expanded)
+    )
     for cluster_index, cluster in enumerate(clusters):
         title = cluster.get("representative_title") or "Без названия"
         article_count = cluster.get("article_count", len(cluster.get("items", [])))
@@ -237,11 +265,18 @@ def render_search_result(
             label = f"**{label}** {cluster_date}"
         with st.expander(
             label,
-            expanded=False,
-            key=f"cluster-expander-{key_prefix}-{cluster_index}",
+            expanded=expanded_clusters,
+            key=(
+                f"cluster-expander-{key_prefix}-{int(expanded_clusters)}-"
+                f"{cluster_index}"
+            ),
         ):
             items = _order_cluster_items(
                 cluster.get("items", []),
+                chronological_order=chronological_order,
+            )
+            context_items = _order_cluster_items(
+                _cluster_context_items(cluster, context_items_key),
                 chronological_order=chronological_order,
             )
             has_duplicates = _has_duplicate_items(items)
@@ -288,6 +323,45 @@ def render_search_result(
             hidden_summary = _hidden_cluster_summary(items, visible_items)
             if hidden_summary:
                 st.caption(hidden_summary)
+            if context_items:
+                show_context_items = st.checkbox(
+                    _context_items_toggle_label(
+                        context_items_label,
+                        len(context_items),
+                    ),
+                    key=(
+                        f"cluster-context-items-{key_prefix}-"
+                        f"{cluster.get('cluster_id')}-{cluster_index}"
+                    ),
+                )
+                if show_context_items:
+                    st.caption("Публикации этого же сюжета вне выбранной даты")
+                    for item_index, item in enumerate(context_items):
+                        render_search_article(
+                            item,
+                            key_prefix=(
+                                f"{key_prefix}-{cluster.get('cluster_id')}-"
+                                f"{cluster_index}-context-{item_index}"
+                            ),
+                        )
+
+
+def _cluster_context_items(cluster: dict, context_items_key: str | None) -> list[dict]:
+    """Вернуть скрытые публикации контекста сюжета, если они переданы в результатах."""
+    if context_items_key is None:
+        return []
+    context_items = cluster.get(context_items_key)
+    return context_items if isinstance(context_items, list) else []
+
+
+def _context_items_toggle_label(label: str, count: int) -> str:
+    """Собрать подпись чекбокса для раскрытия скрытого контекста сюжета."""
+    return f"{label}: {count}"
+
+
+def _cluster_expanded_state_key(key_prefix: str) -> str:
+    """Вернуть session-state ключ общего режима раскрытия сюжетов."""
+    return f"clusters-expanded-{key_prefix}"
 
 
 def _order_cluster_items(

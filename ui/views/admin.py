@@ -40,8 +40,11 @@ AUDIT_DETAIL_LABELS = {
     "organization_id": "ID организации",
     "name": "Название",
     "previous_name": "Предыдущее название",
+    "license_type": "Тип лицензии",
+    "access_expires_at": "Доступ до",
     "amount": "Сумма",
     "transaction_id": "ID операции",
+    "system": "Источник",
 }
 ADMIN_FLASH_KEY = "admin_success_message"
 MAX_ACCESS_EXPIRES_AT = datetime.max.replace(tzinfo=UTC)
@@ -454,9 +457,7 @@ def _render_audit(client: ApiClient, user_by_id: dict[str, dict]) -> None:
     rows = [
         {
             "Дата": format_search_date(entry["created_at"]),
-            "Администратор": user_by_id.get(entry.get("actor_user_id"), {}).get(
-                "login", entry.get("actor_user_id") or "Удалённый пользователь"
-            ),
+            "Администратор": _audit_actor_label(entry, user_by_id),
             "Действие": AUDIT_ACTION_LABELS.get(entry["action"], entry["action"]),
             "Объект": (
                 f"{AUDIT_TARGET_LABELS.get(entry['target_type'], entry['target_type'])}"
@@ -480,6 +481,14 @@ def _format_audit_details(details: dict) -> str:
             value = ROLE_LABELS.get(value, value)
         localized[label] = value
     return json.dumps(localized, ensure_ascii=False)
+
+
+def _audit_actor_label(entry: dict, user_by_id: dict[str, dict]) -> str:
+    """Вернуть имя инициатора audit-события, включая системные действия."""
+    actor_user_id = entry.get("actor_user_id")
+    if actor_user_id is None:
+        return "Система"
+    return user_by_id.get(actor_user_id, {}).get("login", actor_user_id)
 
 
 def _show_api_error_or_raise(exc: ApiError) -> None:

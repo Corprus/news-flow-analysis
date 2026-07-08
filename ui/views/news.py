@@ -122,25 +122,10 @@ def render_manual_news_form(client: ApiClient) -> None:
 
 
 def render_news_file_import(client: ApiClient) -> None:
-    active_import_job_id = st.session_state.get("news_import_job_id")
+    active_import_job_id = _active_import_job_id()
     if active_import_job_id:
         render_news_import_job_status(client, active_import_job_id)
         return
-    try:
-        latest_job = client.get_latest_news_import_job()
-        latest_job_id = latest_job.get("import_job_id")
-        ignored_job_id = st.session_state.get("news_import_ignored_job_id")
-        if (
-            latest_job.get("status") in {"queued", "processing"}
-            and latest_job_id != ignored_job_id
-        ):
-            st.session_state["news_import_job_id"] = latest_job_id
-            render_news_import_job_status(client, latest_job_id)
-            return
-    except ApiError as exc:
-        if not _is_import_job_not_found(exc):
-            _show_api_error_or_raise(exc)
-            return
 
     try:
         formats = client.list_news_import_formats()
@@ -266,6 +251,12 @@ def render_news_import_job_status(client: ApiClient, import_job_id: str) -> None
 def _is_import_job_not_found(exc: ApiError) -> bool:
     """Проверить, что API сообщает об отсутствующем import job."""
     return exc.status_code == 404
+
+
+def _active_import_job_id() -> str | None:
+    """Вернуть import job, явно запущенный в текущей UI-сессии."""
+    value = st.session_state.get("news_import_job_id")
+    return str(value) if value else None
 
 
 def _show_api_error_or_raise(exc: ApiError) -> None:

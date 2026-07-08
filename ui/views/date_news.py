@@ -76,6 +76,7 @@ def render_date_news_result(client: ApiClient, selected_date: date) -> None:
             published_to=published_to.isoformat(),
             limit=PAGE_SIZE,
             offset=page * PAGE_SIZE,
+            include_cluster_context=True,
         )
     except ApiError as exc:
         if is_authentication_error(exc):
@@ -110,10 +111,14 @@ def render_date_news_result(client: ApiClient, selected_date: date) -> None:
         st.info("За выбранную дату обработанных новостей не найдено.")
         return
 
-    st.caption(f"Сюжетов: {total_clusters} · публикаций: {total}")
+    st.caption(f"Сюжетов: {total_clusters} · публикаций за день: {total}")
     render_search_result(
         result,
         key_prefix=f"date-feed-{selected_date.isoformat()}-{page}",
+        clusters_expanded=True,
+        show_cluster_expand_controls=True,
+        context_items_key="context_items",
+        context_items_label="Показать публикации сюжета вне выбранной даты",
     )
 
     if _should_render_date_pager(total_clusters):

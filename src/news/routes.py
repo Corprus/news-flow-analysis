@@ -1080,6 +1080,15 @@ def get_news_feed(
     organization_id: UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    include_cluster_context: Annotated[
+        bool,
+        Query(
+            description=(
+                "Если true, возвращает остальные публикации выбранных сюжетов "
+                "в поле context_items."
+            ),
+        ),
+    ] = False,
 ) -> NewsFeedResponse:
     visible_organization_id = _visible_organization_id(current_user, organization_id)
     for value in (published_from, published_to):
@@ -1099,35 +1108,14 @@ def get_news_feed(
         published_to=published_to,
         organization_id=visible_organization_id,
     )
-    items = []
-    for rank, article in enumerate(articles, start=1):
-        pipeline_state = article.pipeline_state
-        novelty_label = (
-            pipeline_state.manual_novelty_label or pipeline_state.novelty_label
-            if pipeline_state
-            else None
+    items = [
+        _news_feed_item(
+            article,
+            rank=rank,
+            in_requested_period=True,
         )
-        items.append(
-            {
-                "article_id": article.id,
-                "title": article.title,
-                "status": article.status,
-                "language": article.language,
-                "novelty_score": article.novelty_score,
-                "published_at": article.published_at.isoformat(),
-                "rank": rank,
-                "cluster_id": (
-                    pipeline_state.cluster_id if pipeline_state else article.id
-                ),
-                "novelty_label": novelty_label,
-                "p_significant": (
-                    pipeline_state.p_significant if pipeline_state else None
-                ),
-                "url": article.url,
-                "summary": article.summary,
-                "content": article.content,
-            }
-        )
+        for rank, article in enumerate(articles, start=1)
+    ]
     cluster_summaries = news.list_cluster_summaries(
         (item["cluster_id"] for item in items),
         organization_id=visible_organization_id,
@@ -1138,7 +1126,35 @@ def get_news_feed(
         cluster_summaries=cluster_summaries,
     )
     clusters = all_clusters[offset : offset + limit]
-    selected_cluster_ids = {cluster["cluster_id"] for cluster in clusters}
+    selected_cluster_ids = [cluster["cluster_id"] for cluster in clusters]
+    if include_cluster_context:
+        cluster_articles = news.list_public_articles_by_cluster_ids(
+            selected_cluster_ids,
+            organization_id=visible_organization_id,
+        )
+        full_items = [
+            _news_feed_item(
+                article,
+                rank=rank,
+                in_requested_period=(
+                    published_from <= article.published_at < published_to
+                ),
+            )
+            for rank, article in enumerate(cluster_articles, start=1)
+        ]
+        full_clusters_by_id = {
+            str(cluster["cluster_id"]): cluster
+            for cluster in group_search_items(
+                full_items,
+                top_k=len(full_items),
+                cluster_summaries=cluster_summaries,
+            )
+        }
+        clusters = [
+            _split_news_feed_cluster_context(full_clusters_by_id[str(cluster_id)])
+            for cluster_id in selected_cluster_ids
+            if str(cluster_id) in full_clusters_by_id
+        ]
     selected_items = [
         item for item in items if item["cluster_id"] in selected_cluster_ids
     ]
@@ -1150,6 +1166,54 @@ def get_news_feed(
         limit=limit,
         offset=offset,
     )
+
+
+def _news_feed_item(
+    article: NewsArticle,
+    *,
+    rank: int,
+    in_requested_period: bool,
+) -> dict:
+    """Преобразовать публикацию ленты в общий item для группировки сюжетов."""
+    pipeline_state = article.pipeline_state
+    novelty_label = (
+        pipeline_state.manual_novelty_label or pipeline_state.novelty_label
+        if pipeline_state
+        else None
+    )
+    return {
+        "article_id": article.id,
+        "title": article.title,
+        "status": article.status,
+        "language": article.language,
+        "novelty_score": article.novelty_score,
+        "published_at": article.published_at.isoformat(),
+        "rank": rank,
+        "cluster_id": pipeline_state.cluster_id if pipeline_state else article.id,
+        "novelty_label": novelty_label,
+        "p_significant": pipeline_state.p_significant if pipeline_state else None,
+        "url": article.url,
+        "summary": article.summary,
+        "content": article.content,
+        "in_requested_period": in_requested_period,
+    }
+
+
+def _split_news_feed_cluster_context(cluster: dict) -> dict:
+    """Разделить публикации сюжета на выбранный период и скрытый контекст."""
+    period_items = [
+        item for item in cluster["items"] if item.get("in_requested_period")
+    ]
+    context_items = [
+        item for item in cluster["items"] if not item.get("in_requested_period")
+    ]
+    return {
+        **cluster,
+        "period_article_count": len(period_items),
+        "context_article_count": len(context_items),
+        "items": period_items,
+        "context_items": context_items,
+    }
 
 
 @router.get(
