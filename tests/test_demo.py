@@ -1,5 +1,7 @@
 import asyncio
+from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -9,12 +11,13 @@ from sqlalchemy.orm import Session
 from api.demo import (
     DemoPipelineBatch,
     DemoSeedResult,
+    _record_demo_admin_audit,
     _split_demo_articles,
     validate_demo_settings,
 )
 from api.main import enqueue_demo_pipeline_jobs
 from settings import Settings
-from users.models import Organization, User, UserRole
+from users.models import MAX_ACCESS_EXPIRES_AT, Organization, User, UserRole
 from users.passwords import PasswordHasher
 from users.service import UserService
 
@@ -24,6 +27,16 @@ class _ImportedNewsStub:
 
     def __init__(self, external_id: str) -> None:
         self.external_id = external_id
+
+
+class _AdminAuditSpy:
+    """Запоминает audit-события demo seed без обращения к базе."""
+
+    def __init__(self) -> None:
+        self.records = []
+
+    def record(self, **kwargs):
+        self.records.append(kwargs)
 
 
 def make_settings(**overrides) -> Settings:
@@ -53,6 +66,63 @@ def test_demo_defaults_are_usable_locally() -> None:
 
     assert settings.demo_user_login == "demo"
     assert settings.demo_initial_credit == Decimal("100000.00")
+
+
+def test_demo_seed_records_system_admin_audit_events() -> None:
+    """Demo seed пишет административные события как системную инициализацию."""
+    audit = _AdminAuditSpy()
+    organization = SimpleNamespace(
+        id="10000000-0000-0000-0000-000000000001",
+        name="Demo Research",
+        license_type="subscription",
+        access_expires_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
+    )
+    user = SimpleNamespace(
+        id="20000000-0000-0000-0000-000000000001",
+        login="demo",
+        role=UserRole.PUBLISHER.value,
+        organization_id=organization.id,
+    )
+
+    _record_demo_admin_audit(
+        audit=audit,  # type: ignore[arg-type]
+        organizations=[organization],  # type: ignore[list-item]
+        users=[user],  # type: ignore[list-item]
+    )
+
+    assert [record["action"] for record in audit.records] == [
+        "organization.create",
+        "user.create",
+    ]
+    assert all(record["actor_user_id"] is None for record in audit.records)
+    assert audit.records[0]["details"]["system"] == "demo_seed"
+    assert audit.records[0]["details"]["name"] == "Demo Research"
+    assert audit.records[0]["details"]["license_type"] == "subscription"
+    assert audit.records[0]["details"]["access_expires_at"] == (
+        "2026-01-01T00:00:00+00:00"
+    )
+    assert audit.records[1]["details"]["login"] == "demo"
+    assert audit.records[1]["details"]["organization_id"] == organization.id
+
+
+def test_demo_seed_audit_can_store_maximum_subscription_access_date() -> None:
+    """Demo seed отражает бессрочную подписку админской организации в audit-деталях."""
+    audit = _AdminAuditSpy()
+    organization = SimpleNamespace(
+        id="10000000-0000-0000-0000-000000000001",
+        name="Semantic News Novelty Administration",
+        license_type="subscription",
+        access_expires_at=MAX_ACCESS_EXPIRES_AT,
+    )
+
+    _record_demo_admin_audit(
+        audit=audit,  # type: ignore[arg-type]
+        organizations=[organization],  # type: ignore[list-item]
+        users=[],
+    )
+
+    assert audit.records[0]["details"]["license_type"] == "subscription"
+    assert audit.records[0]["details"]["access_expires_at"].startswith("9999-12-31")
 
 
 def test_user_service_can_create_multiple_users_in_one_organization() -> None:

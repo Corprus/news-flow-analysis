@@ -15,9 +15,9 @@ from news.importers import ImportedNews, NewsImportError, news_importers
 from news.models import ArticleStatus, ArticleVisibility, NewsArticle
 from news.service import NewsService
 from settings import Settings
-from users.models import LicenseType, Organization, User, UserRole
+from users.models import MAX_ACCESS_EXPIRES_AT, LicenseType, Organization, User, UserRole
 from users.passwords import PasswordHasher
-from users.service import UserService
+from users.service import AdminAuditService, UserService
 
 
 @dataclass(frozen=True)
@@ -58,6 +58,8 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
     admin_organization = _get_or_create_organization(
         session, "Semantic News Novelty Administration"
     )
+    admin_organization.license_type = LicenseType.SUBSCRIPTION.value
+    admin_organization.access_expires_at = MAX_ACCESS_EXPIRES_AT
 
     demo_publisher = _get_or_update_user(
         users=users,
@@ -70,7 +72,7 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
             UserRole.PUBLISHER,
         ),
     )
-    _get_or_update_user(
+    analyst = _get_or_update_user(
         users=users,
         session=session,
         password_hasher=password_hasher,
@@ -84,14 +86,14 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
         organization=partner_organization,
         spec=DemoUserSpec("partner_publisher", "partner12345", UserRole.PUBLISHER),
     )
-    _get_or_update_user(
+    partner_user = _get_or_update_user(
         users=users,
         session=session,
         password_hasher=password_hasher,
         organization=partner_organization,
         spec=DemoUserSpec("partner_user", "partner12345", UserRole.USER),
     )
-    _get_or_update_user(
+    admin_user = _get_or_update_user(
         users=users,
         session=session,
         password_hasher=password_hasher,
@@ -101,6 +103,21 @@ def seed_demo(session: Session, settings: Settings) -> DemoSeedResult:
             settings.demo_admin_password,
             UserRole.ADMIN,
         ),
+    )
+    _record_demo_admin_audit(
+        audit=AdminAuditService(session),
+        organizations=[
+            primary_organization,
+            partner_organization,
+            admin_organization,
+        ],
+        users=[
+            demo_publisher,
+            analyst,
+            partner_publisher,
+            partner_user,
+            admin_user,
+        ],
     )
 
     primary_articles, partner_articles = _split_demo_articles(
@@ -166,6 +183,41 @@ def _get_or_update_user(
     user.role = spec.role.value
     session.flush()
     return user
+
+
+def _record_demo_admin_audit(
+    *,
+    audit: AdminAuditService,
+    organizations: list[Organization],
+    users: list[User],
+) -> None:
+    """Записать административные события, выполненные системной demo-инициализацией."""
+    for organization in organizations:
+        audit.record(
+            actor_user_id=None,
+            action="organization.create",
+            target_type="organization",
+            target_id=organization.id,
+            details={
+                "name": organization.name,
+                "license_type": organization.license_type,
+                "access_expires_at": organization.access_expires_at.isoformat(),
+                "system": "demo_seed",
+            },
+        )
+    for user in users:
+        audit.record(
+            actor_user_id=None,
+            action="user.create",
+            target_type="user",
+            target_id=user.id,
+            details={
+                "login": user.login,
+                "role": user.role,
+                "organization_id": user.organization_id,
+                "system": "demo_seed",
+            },
+        )
 
 
 def _ensure_credit(

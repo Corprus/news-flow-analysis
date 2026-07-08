@@ -413,6 +413,7 @@ class ApiClient:
         published_to: str,
         limit: int = 50,
         offset: int = 0,
+        include_cluster_context: bool = False,
     ) -> dict:
         """Загрузить кластеризованную ленту публикаций за период."""
         return self._request(
@@ -423,6 +424,7 @@ class ApiClient:
                 "published_to": published_to,
                 "limit": limit,
                 "offset": offset,
+                "include_cluster_context": include_cluster_context,
             },
         )
 

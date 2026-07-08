@@ -703,6 +703,43 @@ class NewsService:
         articles = list(self._session.execute(statement).scalars().all())
         return articles, total
 
+    def list_public_articles_by_cluster_ids(
+        self,
+        cluster_ids: Iterable[str],
+        *,
+        organization_id: UUID | None = None,
+    ) -> list[NewsArticle]:
+        """Вернуть processed public-публикации из выбранных кластеров сюжета."""
+        unique_cluster_ids = list(dict.fromkeys(str(cluster_id) for cluster_id in cluster_ids))
+        if not unique_cluster_ids:
+            return []
+        article_ids = _valid_uuid_strings(unique_cluster_ids)
+        cluster_filter = ArticlePipelineState.cluster_id.in_(unique_cluster_ids)
+        id_or_cluster_filter = cluster_filter
+        if article_ids:
+            id_or_cluster_filter = or_(
+                cluster_filter,
+                NewsArticle.id.in_(article_ids),
+            )
+        filters = [
+            NewsArticle.visibility == ArticleVisibility.PUBLIC.value,
+            NewsArticle.status == ArticleStatus.PROCESSED.value,
+            id_or_cluster_filter,
+        ]
+        if organization_id is not None:
+            filters.append(NewsArticle.organization_id == str(organization_id))
+        statement = (
+            select(NewsArticle)
+            .outerjoin(
+                ArticlePipelineState,
+                ArticlePipelineState.article_id == NewsArticle.id,
+            )
+            .options(selectinload(NewsArticle.pipeline_state))
+            .where(*filters)
+            .order_by(NewsArticle.published_at.desc(), NewsArticle.id.desc())
+        )
+        return list(self._session.execute(statement).scalars().all())
+
     def get_adjacent_public_article_dates(
         self,
         *,
@@ -872,3 +909,15 @@ class NewsService:
 def _chunks(values: list[str], chunk_size: int) -> Iterable[list[str]]:
     for position in range(0, len(values), chunk_size):
         yield values[position : position + chunk_size]
+
+
+def _valid_uuid_strings(values: Iterable[str]) -> list[str]:
+    """Оставить только строки, пригодные для сравнения с uuid-полями PostgreSQL."""
+    valid_values: list[str] = []
+    for value in values:
+        try:
+            UUID(value)
+        except ValueError:
+            continue
+        valid_values.append(value)
+    return valid_values

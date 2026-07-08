@@ -235,7 +235,7 @@ class AdminAuditService:
     def record(
         self,
         *,
-        actor_user_id: UUID,
+        actor_user_id: UUID | None,
         action: str,
         target_type: str,
         target_id: UUID | str | None,
@@ -243,7 +243,7 @@ class AdminAuditService:
     ) -> AdminAuditLog:
         """Записать административное действие пользователя."""
         entry = AdminAuditLog(
-            actor_user_id=str(actor_user_id),
+            actor_user_id=str(actor_user_id) if actor_user_id is not None else None,
             action=action,
             target_type=target_type,
             target_id=str(target_id) if target_id is not None else None,

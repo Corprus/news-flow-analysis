@@ -47,6 +47,16 @@ class _RecordingSession:
         return _QueryResult(values=self.articles)
 
 
+class _SelectSession:
+    def __init__(self, values=None) -> None:
+        self.values = values or []
+        self.statements = []
+
+    def execute(self, statement):
+        self.statements.append(statement)
+        return _QueryResult(values=self.values)
+
+
 class _AdjacentDateSession:
     def __init__(self, previous_date, next_date) -> None:
         self.results = iter([previous_date, next_date])
@@ -88,6 +98,23 @@ def test_news_feed_query_filters_public_articles_by_half_open_period() -> None:
     assert ArticleStatus.PROCESSED.value in session.statements[1].compile().params.values()
 
 
+def test_cluster_context_query_does_not_compare_non_uuid_cluster_ids_to_article_id() -> None:
+    session = _SelectSession()
+    service = NewsService(session)  # type: ignore[arg-type]
+
+    service.list_public_articles_by_cluster_ids(
+        ["incremental_8c538a065894"],
+        organization_id=uuid4(),
+    )
+
+    sql = " ".join(str(session.statements[0]).split()).lower()
+    params = session.statements[0].compile().params
+
+    assert "article_pipeline_state.cluster_id in" in sql
+    assert "news_articles.id in" not in sql
+    assert "incremental_8c538a065894" in params["cluster_id_1"]
+
+
 def test_adjacent_news_dates_skip_empty_periods() -> None:
     previous_date = datetime(2026, 6, 20, 15, tzinfo=UTC)
     next_date = datetime(2026, 6, 25, 9, tzinfo=UTC)
@@ -127,14 +154,24 @@ def test_latest_news_date_uses_processed_public_articles() -> None:
 
 
 class _NewsServiceSpy:
-    def __init__(self, article) -> None:
+    def __init__(self, article, cluster_articles=None) -> None:
         self.article = article
+        self.cluster_articles = cluster_articles or []
         self.calls = []
         self.cluster_summaries = {}
 
     def list_public_articles_by_period(self, **kwargs):
         self.calls.append(kwargs)
         return [self.article], 1
+
+    def list_public_articles_by_cluster_ids(self, cluster_ids, organization_id=None):
+        self.calls.append(
+            {
+                "cluster_context_ids": list(cluster_ids),
+                "organization_id": organization_id,
+            }
+        )
+        return self.cluster_articles
 
     def list_cluster_summaries(self, cluster_ids, organization_id=None):
         self.calls.append(
@@ -202,6 +239,69 @@ def test_news_feed_response_matches_clustered_search_result_without_relevance() 
         "cluster_ids": ["cluster-1"],
         "organization_id": organization_id,
     }
+
+
+def test_news_feed_can_include_hidden_cluster_context() -> None:
+    day_article_id = uuid4()
+    old_article_id = uuid4()
+    pipeline_state = SimpleNamespace(
+        cluster_id="cluster-1",
+        novelty_label="minor",
+        manual_novelty_label=None,
+        p_significant=0.42,
+    )
+    day_article = SimpleNamespace(
+        id=str(day_article_id),
+        title="Day article",
+        status=ArticleStatus.PROCESSED.value,
+        summary="Day summary",
+        content="Day content",
+        published_at=datetime(2026, 6, 22, 12, tzinfo=UTC),
+        language="ru",
+        novelty_score=0.42,
+        url=None,
+        pipeline_state=pipeline_state,
+    )
+    old_article = SimpleNamespace(
+        id=str(old_article_id),
+        title="Old article",
+        status=ArticleStatus.PROCESSED.value,
+        summary="Old summary",
+        content="Old content",
+        published_at=datetime(2026, 6, 20, 12, tzinfo=UTC),
+        language="ru",
+        novelty_score=0.24,
+        url=None,
+        pipeline_state=pipeline_state,
+    )
+    service = _NewsServiceSpy(
+        day_article,
+        cluster_articles=[day_article, old_article],
+    )
+
+    response = get_news_feed(
+        current_user=SimpleNamespace(
+            role=UserRole.USER,
+            organization_id=uuid4(),
+        ),
+        news=service,  # type: ignore[arg-type]
+        published_from=datetime(2026, 6, 22, tzinfo=UTC),
+        published_to=datetime(2026, 6, 23, tzinfo=UTC),
+        limit=50,
+        offset=0,
+        include_cluster_context=True,
+    )
+
+    cluster = response.clusters[0]
+    assert [item["article_id"] for item in cluster["items"]] == [str(day_article_id)]
+    assert [item["article_id"] for item in cluster["context_items"]] == [
+        str(old_article_id)
+    ]
+    assert cluster["period_article_count"] == 1
+    assert cluster["context_article_count"] == 1
+    assert cluster["items"][0]["in_requested_period"] is True
+    assert cluster["context_items"][0]["in_requested_period"] is False
+    assert service.calls[2]["cluster_context_ids"] == ["cluster-1"]
 
 
 def test_admin_news_feed_can_read_all_organizations() -> None:

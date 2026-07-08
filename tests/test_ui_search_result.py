@@ -1,4 +1,5 @@
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ sys.modules.setdefault(
 
 import views.search as search_view  # noqa: E402
 from views.search import (  # noqa: E402
+    _context_items_toggle_label,
     _format_hidden_item_count,
     _has_duplicate_items,
     _has_overflow_items,
@@ -248,3 +250,123 @@ def test_search_article_read_more_uses_page_rerun(monkeypatch) -> None:
 
     assert session_state["article-expanded-date-feed-article-1"] is True
     assert rerun_calls == [((), {})]
+
+
+def test_search_result_can_expand_clusters_by_default(monkeypatch) -> None:
+    """Страница новостей по дате может сразу раскрывать найденные сюжеты."""
+    expander_calls = []
+    fake_streamlit = SimpleNamespace(
+        caption=lambda *args, **kwargs: None,
+        columns=lambda count: [
+            nullcontext() for _ in range(len(count) if isinstance(count, list) else count)
+        ],
+        expander=lambda *args, **kwargs: (
+            expander_calls.append((args, kwargs)) or nullcontext()
+        ),
+        markdown=lambda *args, **kwargs: None,
+        session_state={},
+    )
+    monkeypatch.setattr(search_view, "st", fake_streamlit)
+
+    search_view.render_search_result(
+        {
+            "clusters": [
+                {
+                    "cluster_id": "cluster-1",
+                    "representative_title": "Сюжет",
+                    "article_count": 1,
+                    "items": [{"article_id": "article-1", "title": "Новость"}],
+                }
+            ]
+        },
+        key_prefix="date-feed",
+        clusters_expanded=True,
+    )
+
+    assert expander_calls[0][1]["expanded"] is True
+
+
+def test_search_result_cluster_buttons_override_expanded_state(monkeypatch) -> None:
+    """Кнопки рядом с легендой переключают общий режим раскрытия сюжетов."""
+    expander_calls = []
+    session_state = {}
+    fake_streamlit = SimpleNamespace(
+        button=lambda label, **kwargs: label == "▶ Свернуть",
+        caption=lambda *args, **kwargs: None,
+        columns=lambda count: [
+            nullcontext() for _ in range(len(count) if isinstance(count, list) else count)
+        ],
+        expander=lambda *args, **kwargs: (
+            expander_calls.append((args, kwargs)) or nullcontext()
+        ),
+        markdown=lambda *args, **kwargs: None,
+        session_state=session_state,
+    )
+    monkeypatch.setattr(search_view, "st", fake_streamlit)
+
+    search_view.render_search_result(
+        {
+            "clusters": [
+                {
+                    "cluster_id": "cluster-1",
+                    "representative_title": "Сюжет 1",
+                    "article_count": 1,
+                    "items": [{"article_id": "article-1", "title": "Новость 1"}],
+                },
+                {
+                    "cluster_id": "cluster-2",
+                    "representative_title": "Сюжет 2",
+                    "article_count": 1,
+                    "items": [{"article_id": "article-2", "title": "Новость 2"}],
+                },
+            ]
+        },
+        key_prefix="date-feed",
+        clusters_expanded=True,
+        show_cluster_expand_controls=True,
+    )
+
+    assert expander_calls[0][1]["expanded"] is False
+    assert expander_calls[1][1]["expanded"] is False
+    assert session_state["clusters-expanded-date-feed"] is False
+
+
+def test_search_result_cluster_buttons_are_visible_for_single_cluster(monkeypatch) -> None:
+    """Кнопки раскрытия нужны и на странице с одним сюжетом."""
+    button_labels = []
+    fake_streamlit = SimpleNamespace(
+        button=lambda label, **kwargs: button_labels.append(label) and False,
+        caption=lambda *args, **kwargs: None,
+        columns=lambda count: [
+            nullcontext() for _ in range(len(count) if isinstance(count, list) else count)
+        ],
+        expander=lambda *args, **kwargs: nullcontext(),
+        markdown=lambda *args, **kwargs: None,
+        session_state={},
+    )
+    monkeypatch.setattr(search_view, "st", fake_streamlit)
+
+    search_view.render_search_result(
+        {
+            "clusters": [
+                {
+                    "cluster_id": "cluster-1",
+                    "representative_title": "Сюжет",
+                    "article_count": 1,
+                    "items": [{"article_id": "article-1", "title": "Новость"}],
+                }
+            ]
+        },
+        key_prefix="date-feed",
+        clusters_expanded=True,
+        show_cluster_expand_controls=True,
+    )
+
+    assert button_labels == ["▶ Свернуть", "▼ Развернуть"]
+
+
+def test_context_items_toggle_label_shows_hidden_story_count() -> None:
+    """Подпись раскрытия контекста сюжета показывает число скрытых публикаций."""
+    assert _context_items_toggle_label("Показать публикации вне даты", 7) == (
+        "Показать публикации вне даты: 7"
+    )
