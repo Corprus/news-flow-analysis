@@ -33,7 +33,7 @@ def render_transactions(client: ApiClient) -> None:
                         item.get("reason"),
                         item.get("reason"),
                     ),
-                    "Объект операции": _transaction_object_label(item),
+                    "Комментарий": _transaction_object_label(item),
                     "Источник": item.get("reference_url") or "",
                     "Сумма": format_amount(item.get("amount", 0)),
                     **(
@@ -57,8 +57,8 @@ def render_transactions(client: ApiClient) -> None:
                         "Операция",
                         width="medium",
                     ),
-                    "Объект операции": st.column_config.TextColumn(
-                        "Объект операции",
+                    "Комментарий": st.column_config.TextColumn(
+                        "Комментарий",
                         width="large",
                     ),
                     "Источник": st.column_config.LinkColumn(
@@ -78,7 +78,7 @@ def render_transactions(client: ApiClient) -> None:
 
 
 def _transaction_object_label(item: dict) -> str:
-    """Вернуть понятное описание объекта, к которому относится операция."""
+    """Вернуть понятный комментарий к операции."""
     item_count = int(item.get("item_count") or 1)
     if item.get("batch_id") and item_count > 1:
         if item.get("reason") == "news_reprocess":

@@ -20,7 +20,7 @@ from views.transactions import _transaction_object_label  # noqa: E402
 
 
 def test_transaction_object_label_describes_batch_publication() -> None:
-    """Пакетная публикация в операциях отображается как объект операции."""
+    """Пакетная публикация в операциях отображается как понятный комментарий."""
     label = _transaction_object_label(
         {
             "reason": "news_add",

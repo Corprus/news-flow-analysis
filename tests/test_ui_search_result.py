@@ -13,6 +13,7 @@ sys.modules.setdefault(
     ),
 )
 
+import views.search as search_view  # noqa: E402
 from views.search import (  # noqa: E402
     _format_hidden_item_count,
     _has_duplicate_items,
@@ -22,9 +23,11 @@ from views.search import (  # noqa: E402
     _novelty_marker_html,
     _novelty_text_color,
     _novelty_title_style,
+    _order_cluster_items,
     _search_result_legend_text,
     _should_show_search_history_legend,
     _visible_cluster_items,
+    render_search_article,
 )
 
 
@@ -191,3 +194,57 @@ def test_hidden_item_count_uses_readable_russian_plural_forms() -> None:
     assert _format_hidden_item_count(2, "другое совпадение") == (
         "2 других совпадения"
     )
+
+
+def test_cluster_items_can_be_ordered_from_newest_to_oldest() -> None:
+    """Результаты обычного поиска можно показывать в обратной хронологии."""
+    items = [
+        {"article_id": "old", "published_at": "2020-01-01T00:00:00+00:00"},
+        {"article_id": "without-date"},
+        {"article_id": "new", "published_at": "2020-01-03T00:00:00+00:00"},
+        {"article_id": "bad-date", "published_at": "not-a-date"},
+    ]
+
+    ordered_items = _order_cluster_items(
+        items,
+        chronological_order="newest_first",
+    )
+
+    assert [item["article_id"] for item in ordered_items] == [
+        "new",
+        "old",
+        "without-date",
+        "bad-date",
+    ]
+    assert [item["article_id"] for item in items] == [
+        "old",
+        "without-date",
+        "new",
+        "bad-date",
+    ]
+
+
+def test_search_article_read_more_uses_page_rerun(monkeypatch) -> None:
+    """Раскрытие текста работает и на обычных страницах без fragment rerun."""
+    rerun_calls = []
+    session_state = {}
+    fake_streamlit = SimpleNamespace(
+        session_state=session_state,
+        markdown=lambda *args, **kwargs: None,
+        button=lambda *args, **kwargs: True,
+        rerun=lambda *args, **kwargs: rerun_calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(search_view, "st", fake_streamlit)
+
+    render_search_article(
+        {
+            "article_id": "article-1",
+            "title": "Новость",
+            "summary": "Очень длинный текст новости " * 30,
+            "published_at": "2020-01-01T00:00:00+03:00",
+        },
+        key_prefix="date-feed",
+    )
+
+    assert session_state["article-expanded-date-feed-article-1"] is True
+    assert rerun_calls == [((), {})]
