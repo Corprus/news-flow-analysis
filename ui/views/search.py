@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import html
 from datetime import datetime, time
+from typing import Literal
 
 import streamlit as st
 
-from api_client import ApiClient, ApiError
+from api_client import ApiClient, ApiError, is_authentication_error
 from auth import refresh_account
 from config import MIN_NEWS_DATE, MOSCOW_TIMEZONE
 from formatting import (
@@ -15,6 +16,8 @@ from formatting import (
     format_search_date,
     format_search_result_summary,
 )
+
+ChronologicalOrder = Literal["source", "oldest_first", "newest_first"]
 
 
 def render_search(client: ApiClient) -> None:
@@ -137,6 +140,8 @@ def render_search(client: ApiClient) -> None:
                 icon="🔎",
             )
         except ApiError as exc:
+            if is_authentication_error(exc):
+                raise
             st.error(str(exc))
 
     render_search_history(client)
@@ -176,6 +181,7 @@ def render_search_history(client: ApiClient) -> None:
                     render_search_result(
                         result,
                         key_prefix=str(search.get("query_id") or created_at),
+                        chronological_order="newest_first",
                         show_legend=False,
                     )
                 elif status == "failed":
@@ -183,6 +189,8 @@ def render_search_history(client: ApiClient) -> None:
                 else:
                     st.info(f"Статус поиска: {status_label}")
     except ApiError as exc:
+        if is_authentication_error(exc):
+            raise
         st.error(str(exc))
 
 
@@ -190,9 +198,10 @@ def render_search_result(
     result: dict,
     *,
     key_prefix: str,
+    chronological_order: ChronologicalOrder = "source",
     show_legend: bool = True,
 ) -> None:
-    """Показать найденные кластеры новостей с краткими фильтрами внутри групп."""
+    """Показать найденные кластеры новостей с выбранным порядком публикаций внутри групп."""
     clusters = result.get("clusters")
     if clusters is None:
         clusters = [
@@ -231,7 +240,10 @@ def render_search_result(
             expanded=False,
             key=f"cluster-expander-{key_prefix}-{cluster_index}",
         ):
-            items = cluster.get("items", [])
+            items = _order_cluster_items(
+                cluster.get("items", []),
+                chronological_order=chronological_order,
+            )
             has_duplicates = _has_duplicate_items(items)
             has_overflow = _has_overflow_items(items, hide_duplicates=True)
             hide_duplicates = True
@@ -278,6 +290,32 @@ def render_search_result(
                 st.caption(hidden_summary)
 
 
+def _order_cluster_items(
+    items: list[dict],
+    *,
+    chronological_order: ChronologicalOrder,
+) -> list[dict]:
+    """Вернуть публикации кластера в выбранном хронологическом порядке."""
+    if chronological_order == "source":
+        return items
+    reverse = chronological_order == "newest_first"
+    return sorted(items, key=_cluster_item_published_at, reverse=reverse)
+
+
+def _cluster_item_published_at(item: dict) -> datetime:
+    """Получить дату публикации для сортировки результатов поиска."""
+    value = item.get("published_at")
+    if not isinstance(value, str):
+        return datetime.min.replace(tzinfo=MOSCOW_TIMEZONE)
+    try:
+        published_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=MOSCOW_TIMEZONE)
+    if published_at.tzinfo is None or published_at.utcoffset() is None:
+        return published_at.replace(tzinfo=MOSCOW_TIMEZONE)
+    return published_at.astimezone(MOSCOW_TIMEZONE)
+
+
 def _format_cluster_period(cluster: dict) -> str:
     started = format_search_date(
         cluster.get("published_from"),
@@ -302,9 +340,9 @@ def render_search_article(item: dict, *, key_prefix: str) -> None:
         )
     ]
     if item.get("score") is not None:
-        details.append(f"релевантность {float(item['score']):.3f}")
+        details.append(f"релевантность {float(item['score']):.0%}")
     if item.get("p_significant") is not None:
-        details.append(f"оценка модели {float(item['p_significant']):.0%}")
+        details.append(f"новизна {float(item['p_significant']):.0%}")
     details.append(_novelty_label_text(novelty_label))
     metadata = html.escape(" · ".join(detail for detail in details if detail))
     title_style = _novelty_title_style(novelty_label)
@@ -338,7 +376,7 @@ def render_search_article(item: dict, *, key_prefix: str) -> None:
                 type="tertiary",
             ):
                 st.session_state[state_key] = not is_expanded
-                st.rerun(scope="fragment")
+                st.rerun()
         else:
             st.markdown(
                 f"<div style='color:{text_color}'>{html.escape(article_text)}</div>",
@@ -399,10 +437,32 @@ def _hidden_cluster_summary(
     other_count = len(hidden_items) - duplicate_count
     parts = []
     if duplicate_count:
-        parts.append(f"повторов: {duplicate_count}")
+        parts.append(_format_hidden_item_count(duplicate_count, "повтор"))
     if other_count:
-        parts.append(f"остальных совпадений: {other_count}")
-    return f"Скрыто публикаций: {', '.join(parts)}." if parts else ""
+        parts.append(_format_hidden_item_count(other_count, "другое совпадение"))
+    return f"Скрыто: {', '.join(parts)}." if parts else ""
+
+
+def _format_hidden_item_count(count: int, singular: str) -> str:
+    """Вернуть короткую подпись количества скрытых результатов поиска."""
+    if singular == "повтор":
+        forms = ("повтор", "повтора", "повторов")
+    else:
+        forms = ("другое совпадение", "других совпадения", "других совпадений")
+    return f"{count} {_pluralize_ru(count, forms)}"
+
+
+def _pluralize_ru(count: int, forms: tuple[str, str, str]) -> str:
+    """Выбрать русскую форму существительного для количества."""
+    value = abs(count) % 100
+    if 11 <= value <= 14:
+        return forms[2]
+    value %= 10
+    if value == 1:
+        return forms[0]
+    if 2 <= value <= 4:
+        return forms[1]
+    return forms[2]
 
 
 def _novelty_label_text(novelty_label: str | None) -> str:

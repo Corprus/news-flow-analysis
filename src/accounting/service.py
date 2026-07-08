@@ -80,10 +80,13 @@ class AccountingService:
         reason: TransactionReason,
         reference_id: UUID | None = None,
         batch_id: UUID | None = None,
+        item_count: int = 1,
     ) -> UUID:
         """Списать кредиты с организации пользователя для платной операции."""
         if amount <= 0:
             raise ValueError("amount must be > 0")
+        if item_count < 1:
+            raise ValueError("item_count must be >= 1")
         user = self._get_user(user_id)
         organization_id = UUID(user.organization_id)
 
@@ -99,6 +102,7 @@ class AccountingService:
             reason,
             reference_id,
             batch_id,
+            item_count,
         )
         return UUID(transaction.id)
 
@@ -178,6 +182,7 @@ class AccountingService:
         reason: TransactionReason,
         reference_id: UUID | None,
         batch_id: UUID | None = None,
+        item_count: int = 1,
     ) -> Transaction:
         transaction = Transaction(
             organization_id=str(organization_id),
@@ -186,6 +191,7 @@ class AccountingService:
             reason=reason.value,
             reference_id=str(reference_id) if reference_id is not None else None,
             batch_id=str(batch_id) if batch_id is not None else None,
+            item_count=item_count,
         )
         self._session.add(transaction)
         self._session.flush()

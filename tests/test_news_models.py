@@ -60,3 +60,4 @@ def test_accounting_is_scoped_to_organization_and_tracks_actor() -> None:
     } == {"users.id"}
     assert transactions.c.actor_user_id.nullable is True
     assert transactions.c.batch_id.nullable is True
+    assert transactions.c.item_count.nullable is False

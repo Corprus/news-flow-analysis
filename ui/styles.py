@@ -111,6 +111,28 @@ div.st-key-sidebar-logout {
     min-height: 1.5rem;
     margin-top: 0.75rem;
 }
+div.st-key-show-news-by-date button {
+    min-height: auto;
+    padding: 0.15rem 0.45rem;
+    color: #d7dbe0;
+    font-size: 1rem;
+}
+div.st-key-show-news-by-date {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    height: 2.75rem;
+}
+.sidebar-date-label {
+    display: flex;
+    align-items: center;
+    height: 2.75rem;
+    color: #d7dbe0;
+    font-size: 0.9rem;
+    line-height: 1;
+    transform: translateY(-0.18rem);
+    white-space: nowrap;
+}
 @media (min-width: 769px) {
     section[data-testid="stSidebar"] {
         width: 17.25rem !important;

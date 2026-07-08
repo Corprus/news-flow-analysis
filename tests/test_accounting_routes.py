@@ -1,4 +1,6 @@
+from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -7,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from accounting.models import Account, Transaction
-from accounting.routes import get_admin_transactions
+from accounting.routes import _to_response_group, get_admin_transactions
 from accounting.service import AccountingService
 from users.deps import CurrentUser
 from users.models import Organization, User, UserRole
@@ -111,3 +113,29 @@ def test_non_admin_cannot_list_all_transactions(session: Session) -> None:
         )
 
     assert error.value.status_code == 403
+
+
+def test_batch_operation_response_preserves_aggregated_item_count() -> None:
+    """Ответ операций сохраняет размер агрегированной пакетной публикации."""
+    transaction = SimpleNamespace(
+        id="11111111-1111-1111-1111-111111111111",
+        organization_id="22222222-2222-2222-2222-222222222222",
+        actor_user_id="33333333-3333-3333-3333-333333333333",
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        amount=Decimal("-22.00"),
+        reason="news_add",
+        reference_id="44444444-4444-4444-4444-444444444444",
+        batch_id="55555555-5555-5555-5555-555555555555",
+        item_count=22,
+    )
+
+    response = _to_response_group(
+        [transaction],
+        article_by_id={},
+        actor_login_by_id={},
+        organization_name_by_id={},
+    )
+
+    assert response.batch_id == UUID(transaction.batch_id)
+    assert response.item_count == 22
+    assert response.reference_title is None

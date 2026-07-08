@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timedelta
 
 import streamlit as st
 
-from api_client import ApiClient, ApiError
+from api_client import ApiClient, ApiError, is_authentication_error
 from config import MIN_NEWS_DATE, MOSCOW_TIMEZONE
 from views.search import render_search_result
 
@@ -19,6 +19,8 @@ def render_date_news(client: ApiClient) -> None:
         try:
             latest = client.get_latest_news_date()
         except ApiError as exc:
+            if is_authentication_error(exc):
+                raise
             st.error(str(exc))
             return
         latest_date = _parse_api_date(latest.get("latest_date"))
@@ -76,6 +78,8 @@ def render_date_news_result(client: ApiClient, selected_date: date) -> None:
             offset=page * PAGE_SIZE,
         )
     except ApiError as exc:
+        if is_authentication_error(exc):
+            raise
         st.error(str(exc))
         return
 

@@ -1,7 +1,7 @@
 from unittest.mock import Mock, patch
 
 import pytest
-from ui.api_client import ApiClient, ApiError
+from ui.api_client import ApiClient, ApiError, is_authentication_error
 
 
 def test_insufficient_credits_error_is_translated() -> None:
@@ -22,6 +22,14 @@ def test_insufficient_credits_error_is_translated() -> None:
             )
 
     assert error.value.status_code == 402
+
+
+def test_authentication_error_detects_removed_user_session() -> None:
+    assert is_authentication_error(
+        ApiError("Учётная запись пользователя недоступна", status_code=401)
+    )
+    assert is_authentication_error(ApiError("Недействительный токен", status_code=401))
+    assert not is_authentication_error(ApiError("Import job not found", status_code=404))
 
 
 def test_import_job_uses_zip_content_type() -> None:

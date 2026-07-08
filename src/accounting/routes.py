@@ -314,6 +314,7 @@ def _to_response(
         reference_title=article.title if article else None,
         reference_url=article.url if article else None,
         batch_id=UUID(transaction.batch_id) if transaction.batch_id else None,
+        item_count=max(int(getattr(transaction, "item_count", 1) or 1), 1),
     )
 
 
@@ -342,5 +343,8 @@ def _to_response_group(
         amount=str(sum(transaction.amount for transaction in transactions)),
         reason=first.reason,
         batch_id=UUID(first.batch_id),
-        item_count=len(transactions),
+        item_count=sum(
+            max(int(getattr(transaction, "item_count", 1) or 1), 1)
+            for transaction in transactions
+        ),
     )

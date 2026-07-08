@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 import pandas as pd
 import streamlit as st
 
-from api_client import ApiClient, ApiError
+from api_client import ApiClient, ApiError, is_authentication_error
 from auth import refresh_account
 from formatting import format_search_date
 
@@ -56,7 +56,7 @@ def render_admin(client: ApiClient) -> None:
         users = client.list_users()
         organizations = client.list_organizations()
     except ApiError as exc:
-        st.error(str(exc))
+        _show_api_error_or_raise(exc)
         return
 
     organization_by_id = {item["id"]: item for item in organizations}
@@ -177,7 +177,7 @@ def _render_users(
                     )
                     _rerun_with_success("Пользователь создан.")
                 except ApiError as exc:
-                    st.error(str(exc))
+                    _show_api_error_or_raise(exc)
 
 
 def _save_user_changes(
@@ -242,7 +242,7 @@ def _save_user_changes(
             client.delete_user(user_id)
             changed_count += 1
     except ApiError as exc:
-        st.error(str(exc))
+        _show_api_error_or_raise(exc)
         return
 
     if changed_count == 0:
@@ -331,7 +331,7 @@ def _render_organizations(client: ApiClient, organizations: list[dict]) -> None:
                 client.create_organization(name.strip())
                 _rerun_with_success("Организация создана.")
             except ApiError as exc:
-                st.error(str(exc))
+                _show_api_error_or_raise(exc)
 
 
 def _save_organization_changes(
@@ -394,7 +394,7 @@ def _save_organization_changes(
                 client.adjust_credit(organization_id, balance_delta)
                 changed_count += 1
     except ApiError as exc:
-        st.error(str(exc))
+        _show_api_error_or_raise(exc)
         return
 
     if changed_count == 0:
@@ -449,7 +449,7 @@ def _render_audit(client: ApiClient, user_by_id: dict[str, dict]) -> None:
     try:
         entries = client.list_admin_audit(action or None)
     except ApiError as exc:
-        st.error(str(exc))
+        _show_api_error_or_raise(exc)
         return
     rows = [
         {
@@ -480,6 +480,13 @@ def _format_audit_details(details: dict) -> str:
             value = ROLE_LABELS.get(value, value)
         localized[label] = value
     return json.dumps(localized, ensure_ascii=False)
+
+
+def _show_api_error_or_raise(exc: ApiError) -> None:
+    """Показать прикладную ошибку API или пробросить ошибку сессии наверх."""
+    if is_authentication_error(exc):
+        raise exc
+    st.error(str(exc))
 
 
 def _rerun_with_success(message: str) -> None:

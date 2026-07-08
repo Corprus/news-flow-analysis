@@ -3,7 +3,7 @@ from __future__ import annotations
 import extra_streamlit_components as stx
 import streamlit as st
 
-from api_client import ApiError
+from api_client import ApiError, is_authentication_error
 from auth import (
     clear_authentication,
     clear_pending_auth_cookie,
@@ -45,9 +45,8 @@ if "me" not in st.session_state:
     except ApiError as exc:
         _render_login_after_auth_error(exc)
 
-page = render_sidebar(client)
-
 try:
+    page = render_sidebar(client)
     if page == "Search":
         render_search(client)
     elif page == "DateNews":
@@ -59,7 +58,7 @@ try:
     elif page == "Admin":
         render_admin(client)
 except ApiError as exc:
-    if exc.status_code in {401, 403, 404}:
+    if is_authentication_error(exc):
         _render_login_after_auth_error(exc)
     else:
         st.error(str(exc))

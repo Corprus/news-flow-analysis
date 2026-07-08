@@ -260,6 +260,8 @@ def create_tables() -> None:
                 """
                 ALTER TABLE transactions
                 ADD COLUMN IF NOT EXISTS batch_id uuid;
+                ALTER TABLE transactions
+                ADD COLUMN IF NOT EXISTS item_count integer NOT NULL DEFAULT 1;
 
                 CREATE INDEX IF NOT EXISTS ix_transactions_batch_id
                     ON transactions (batch_id)

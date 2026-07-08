@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from api_client import ApiClient, ApiError
+from api_client import ApiClient, ApiError, is_authentication_error
 from formatting import format_amount, format_search_date
 
 
@@ -33,16 +33,7 @@ def render_transactions(client: ApiClient) -> None:
                         item.get("reason"),
                         item.get("reason"),
                     ),
-                    "Новость": (
-                        (
-                            f"Пакетная повторная обработка: "
-                            f"{item.get('item_count')} новостей"
-                            if item.get("reason") == "news_reprocess"
-                            else f"Пакетная публикация: {item.get('item_count')} новостей"
-                        )
-                        if item.get("batch_id") and item.get("item_count", 1) > 1
-                        else item.get("reference_title") or "—"
-                    ),
+                    "Комментарий": _transaction_object_label(item),
                     "Источник": item.get("reference_url") or "",
                     "Сумма": format_amount(item.get("amount", 0)),
                     **(
@@ -66,8 +57,8 @@ def render_transactions(client: ApiClient) -> None:
                         "Операция",
                         width="medium",
                     ),
-                    "Новость": st.column_config.TextColumn(
-                        "Новость",
+                    "Комментарий": st.column_config.TextColumn(
+                        "Комментарий",
                         width="large",
                     ),
                     "Источник": st.column_config.LinkColumn(
@@ -81,4 +72,16 @@ def render_transactions(client: ApiClient) -> None:
         else:
             st.info("Операций пока нет.")
     except ApiError as exc:
+        if is_authentication_error(exc):
+            raise
         st.error(str(exc))
+
+
+def _transaction_object_label(item: dict) -> str:
+    """Вернуть понятный комментарий к операции."""
+    item_count = int(item.get("item_count") or 1)
+    if item.get("batch_id") and item_count > 1:
+        if item.get("reason") == "news_reprocess":
+            return f"Пакетная повторная обработка: {item_count} новостей"
+        return f"Пакетная публикация: {item_count} новостей"
+    return item.get("reference_title") or "—"

@@ -78,6 +78,7 @@ def test_import_publication_prepayment_withdraws_once_for_expected_rows() -> Non
             TransactionReason.NEWS_ADD,
             import_job_id,
             import_job_id,
+            3,
         )
     ]
 

@@ -5,7 +5,7 @@ from datetime import date, datetime
 import pandas as pd
 import streamlit as st
 
-from api_client import ApiClient, ApiError
+from api_client import ApiClient, ApiError, is_authentication_error
 from auth import refresh_account
 from config import (
     ARCHIVE_TITLE_COLUMN_WIDTH,
@@ -118,7 +118,7 @@ def render_manual_news_form(client: ApiClient) -> None:
                 st.session_state["my_news_notice"] = "Черновик сохранён."
             st.rerun()
         except ApiError as exc:
-            st.error(str(exc))
+            _show_api_error_or_raise(exc)
 
 
 def render_news_file_import(client: ApiClient) -> None:
@@ -139,13 +139,13 @@ def render_news_file_import(client: ApiClient) -> None:
             return
     except ApiError as exc:
         if not _is_import_job_not_found(exc):
-            st.error(str(exc))
+            _show_api_error_or_raise(exc)
             return
 
     try:
         formats = client.list_news_import_formats()
     except ApiError as exc:
-        st.error(str(exc))
+        _show_api_error_or_raise(exc)
         return
     if not formats:
         st.info("No file import formats are configured.")
@@ -193,7 +193,7 @@ def render_news_file_import(client: ApiClient) -> None:
             st.session_state["news_import_job_id"] = result["import_job_id"]
             st.rerun()
         except ApiError as exc:
-            st.error(str(exc))
+            _show_api_error_or_raise(exc)
 
 
 @st.fragment(run_every=2)
@@ -206,7 +206,7 @@ def render_news_import_job_status(client: ApiClient, import_job_id: str) -> None
             st.session_state["news_import_ignored_job_id"] = import_job_id
             st.rerun()
             return
-        st.error(str(exc))
+        _show_api_error_or_raise(exc)
         if st.button("Запустить новый импорт"):
             st.session_state.pop("news_import_job_id", None)
             st.session_state["news_import_ignored_job_id"] = import_job_id
@@ -268,6 +268,13 @@ def _is_import_job_not_found(exc: ApiError) -> bool:
     return exc.status_code == 404
 
 
+def _show_api_error_or_raise(exc: ApiError) -> None:
+    """Показать прикладную ошибку API или пробросить ошибку сессии наверх."""
+    if is_authentication_error(exc):
+        raise exc
+    st.error(str(exc))
+
+
 def render_my_news(client: ApiClient, *, show_header: bool = True) -> None:
     if show_header:
         st.header("Мои новости")
@@ -305,7 +312,7 @@ def confirm_draft_deletion(client: ApiClient, article_ids: list[str]) -> None:
                 st.session_state["reset-my-news-drafts-select-all"] = True
                 st.rerun()
             except ApiError as exc:
-                st.error(str(exc))
+                _show_api_error_or_raise(exc)
 
 
 STATUS_LABELS = {
@@ -353,7 +360,7 @@ def render_my_news_content(client: ApiClient) -> None:
         )
         archived, archived_page, archived_has_next = _load_history_page(client, "archived")
     except ApiError as exc:
-        st.error(str(exc))
+        _show_api_error_or_raise(exc)
         return
 
     visibility_counts = summary.get("visibility_counts") or {}
@@ -608,7 +615,7 @@ def render_drafts(
                     st.session_state["reset-my-news-drafts-select-all"] = True
                     st.rerun()
                 except ApiError as exc:
-                    st.error(str(exc))
+                    _show_api_error_or_raise(exc)
         with delete_col:
             if st.button(
                 f"Удалить {len(selected_article_ids)} выбранных",
@@ -864,7 +871,7 @@ def render_published(
                     )
                     st.rerun()
                 except ApiError as exc:
-                    st.error(str(exc))
+                    _show_api_error_or_raise(exc)
         with reprocess_col:
             reprocessable_ids = [
                 published[index]["article_id"]
@@ -889,7 +896,7 @@ def render_published(
                     st.session_state["reset-my-news-published-select-all"] = True
                     st.rerun()
                 except ApiError as exc:
-                    st.error(str(exc))
+                    _show_api_error_or_raise(exc)
         with archive_col:
             if st.button(
                 "Архивировать выбранные",
@@ -904,7 +911,7 @@ def render_published(
                     st.session_state["reset-my-news-published-select-all"] = True
                     st.rerun()
                 except ApiError as exc:
-                    st.error(str(exc))
+                    _show_api_error_or_raise(exc)
     else:
         st.caption("Опубликованных новостей пока нет.")
 
@@ -993,7 +1000,7 @@ def render_archived(
                 st.session_state["reset-my-news-archived-select-all"] = True
                 st.rerun()
             except ApiError as exc:
-                st.error(str(exc))
+                _show_api_error_or_raise(exc)
     else:
         st.caption("Архивных новостей нет.")
 

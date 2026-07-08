@@ -5,7 +5,7 @@ from decimal import Decimal
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -75,5 +75,6 @@ class Transaction(Base):
         index=True,
         nullable=True,
     )
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     __table_args__ = (Index("ix_transactions_timestamp", "timestamp"),)

@@ -9,6 +9,7 @@ from zipfile import ZipFile
 import pytest
 from fastapi import HTTPException, UploadFile
 
+from accounting.models import TransactionReason
 from news.importers import (
     MAX_IMPORT_ROWS,
     ImportedNews,
@@ -16,7 +17,11 @@ from news.importers import (
     news_importers,
 )
 from news.models import NewsArticle
-from news.routes import _import_one_news_batch_in_new_session, import_news
+from news.routes import (
+    _import_one_news_batch_in_new_session,
+    _prepay_import_publication_or_raise,
+    import_news,
+)
 from news.service import NewsImportResult, NewsService
 from users.deps import CurrentUser
 from users.models import UserRole
@@ -463,3 +468,31 @@ def test_import_batch_publication_withdrawals_share_batch_id(monkeypatch) -> Non
     assert len(accounting.withdraw_calls) == 2
     assert accounting.withdraw_calls[0][4] is not None
     assert accounting.withdraw_calls[0][4] == accounting.withdraw_calls[1][4]
+
+
+def test_import_publication_prepayment_stores_expected_item_count() -> None:
+    """Предоплата импортного файла сохраняет размер пакетной операции."""
+    accounting = _AccountingSpy()
+    user_id = uuid4()
+    import_job_id = uuid4()
+
+    prepayment = _prepay_import_publication_or_raise(
+        accounting=accounting,
+        user_id=user_id,
+        amount_per_article=1,
+        expected_count=22,
+        import_job_id=import_job_id,
+    )
+
+    assert prepayment is not None
+    assert prepayment.expected_count == 22
+    assert accounting.withdraw_calls == [
+        (
+            user_id,
+            22,
+            TransactionReason.NEWS_ADD,
+            prepayment.import_job_id,
+            prepayment.import_job_id,
+            22,
+        )
+    ]
